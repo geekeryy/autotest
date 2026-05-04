@@ -1,0 +1,810 @@
+{
+  "basePath": "/",
+  "consumes": [
+    "application/json"
+  ],
+  "definitions": {
+    "AdminLoginRequest": {
+      "properties": {
+        "password": {
+          "example": "admin123",
+          "type": "string"
+        },
+        "username": {
+          "example": "admin-root",
+          "type": "string"
+        }
+      },
+      "required": [
+        "username",
+        "password"
+      ],
+      "type": "object"
+    },
+    "AdminStats": {
+      "properties": {
+        "activeUsers": {
+          "example": 2,
+          "type": "integer"
+        },
+        "adminUsers": {
+          "example": 1,
+          "type": "integer"
+        },
+        "generatedAt": {
+          "example": "2026-01-01T00:00:00Z",
+          "format": "date-time",
+          "type": "string"
+        },
+        "totalUsers": {
+          "example": 2,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "totalUsers",
+        "activeUsers",
+        "adminUsers",
+        "generatedAt"
+      ],
+      "type": "object"
+    },
+    "AdminUserListResponse": {
+      "properties": {
+        "total": {
+          "example": 2,
+          "type": "integer"
+        },
+        "users": {
+          "items": {
+            "$ref": "#/definitions/User"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "total",
+        "users"
+      ],
+      "type": "object"
+    },
+    "AuditLog": {
+      "properties": {
+        "action": {
+          "example": "run.suite",
+          "type": "string"
+        },
+        "actor": {
+          "example": "admin-root",
+          "type": "string"
+        },
+        "createdAt": {
+          "example": "2026-01-01T00:00:00Z",
+          "format": "date-time",
+          "type": "string"
+        },
+        "id": {
+          "example": "audit-1",
+          "type": "string"
+        },
+        "resource": {
+          "example": "suite:regression",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "actor",
+        "action",
+        "resource",
+        "createdAt"
+      ],
+      "type": "object"
+    },
+    "AuthUser": {
+      "properties": {
+        "id": {
+          "example": "e2e-admin",
+          "type": "string"
+        },
+        "role": {
+          "example": "admin",
+          "type": "string"
+        },
+        "username": {
+          "example": "admin",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "username",
+        "role"
+      ],
+      "type": "object"
+    },
+    "CreateUserRequest": {
+      "properties": {
+        "active": {
+          "example": true,
+          "type": "boolean"
+        },
+        "email": {
+          "example": "charlie@example.test",
+          "type": "string"
+        },
+        "name": {
+          "example": "Charlie",
+          "type": "string"
+        },
+        "role": {
+          "example": "tester",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "email"
+      ],
+      "type": "object"
+    },
+    "ErrorResponse": {
+      "properties": {
+        "error": {
+          "example": "user not found",
+          "type": "string"
+        }
+      },
+      "required": [
+        "error"
+      ],
+      "type": "object"
+    },
+    "HealthResponse": {
+      "properties": {
+        "status": {
+          "example": "ok",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "LoginRequest": {
+      "properties": {
+        "password": {
+          "example": "admin123",
+          "type": "string"
+        },
+        "username": {
+          "example": "admin",
+          "type": "string"
+        }
+      },
+      "required": [
+        "username",
+        "password"
+      ],
+      "type": "object"
+    },
+    "LoginResponse": {
+      "properties": {
+        "token": {
+          "example": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+          "type": "string"
+        },
+        "user": {
+          "$ref": "#/definitions/AuthUser"
+        }
+      },
+      "required": [
+        "token",
+        "user"
+      ],
+      "type": "object"
+    },
+    "UpdateUserRequest": {
+      "properties": {
+        "active": {
+          "example": true,
+          "type": "boolean"
+        },
+        "email": {
+          "example": "charlie.updated@example.test",
+          "type": "string"
+        },
+        "name": {
+          "example": "Charlie Updated",
+          "type": "string"
+        },
+        "role": {
+          "example": "admin",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "User": {
+      "properties": {
+        "active": {
+          "example": true,
+          "type": "boolean"
+        },
+        "createdAt": {
+          "example": "2026-01-01T00:00:00Z",
+          "format": "date-time",
+          "type": "string"
+        },
+        "email": {
+          "example": "alice@example.test",
+          "type": "string"
+        },
+        "id": {
+          "example": "1",
+          "type": "string"
+        },
+        "name": {
+          "example": "Alice",
+          "type": "string"
+        },
+        "role": {
+          "example": "tester",
+          "type": "string"
+        },
+        "updatedAt": {
+          "example": "2026-01-01T00:00:00Z",
+          "format": "date-time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "email",
+        "role",
+        "active",
+        "createdAt",
+        "updatedAt"
+      ],
+      "type": "object"
+    }
+  },
+  "host": "localhost:18080",
+  "info": {
+    "description": "A local target API service for importing into the automation test platform.",
+    "title": "Autotest E2E Demo API",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/api/v1/admin/audit-logs": {
+      "get": {
+        "operationId": "adminAuditLogs",
+        "responses": {
+          "200": {
+            "description": "audit logs",
+            "schema": {
+              "items": {
+                "$ref": "#/definitions/AuditLog"
+              },
+              "type": "array"
+            }
+          },
+          "401": {
+            "description": "unauthorized",
+            "schema": {
+              "$ref": "#/definitions/ErrorResponse"
+            }
+          }
+        },
+        "security": [
+          {
+            "AdminBearerAuth": []
+          }
+        ],
+        "summary": "List audit logs (admin)",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/auth/login": {
+      "post": {
+        "operationId": "adminLogin",
+        "parameters": [
+          {
+            "description": "Admin login credentials",
+            "in": "body",
+            "name": "credentials",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/AdminLoginRequest"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "login response",
+            "schema": {
+              "$ref": "#/definitions/LoginResponse"
+            }
+          },
+          "400": {
+            "description": "invalid request",
+            "schema": {
+              "$ref": "#/definitions/ErrorResponse"
+            }
+          },
+          "401": {
+            "description": "unauthorized",
+            "schema": {
+              "$ref": "#/definitions/ErrorResponse"
+            }
+          }
+        },
+        "summary": "Login and get admin JWT",
+        "tags": [
+          "admin-auth"
+        ]
+      }
+    },
+    "/api/v1/admin/stats": {
+      "get": {
+        "operationId": "adminStats",
+        "responses": {
+          "200": {
+            "description": "stats",
+            "schema": {
+              "$ref": "#/definitions/AdminStats"
+            }
+          },
+          "401": {
+            "description": "unauthorized",
+            "schema": {
+              "$ref": "#/definitions/ErrorResponse"
+            }
+          }
+        },
+        "security": [
+          {
+            "AdminBearerAuth": []
+          }
+        ],
+        "summary": "Get platform statistics (admin)",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/users": {
+      "get": {
+        "operationId": "adminListUsers",
+        "parameters": [
+          {
+            "description": "Optional role filter",
+            "in": "query",
+            "name": "role",
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "users with total count",
+            "schema": {
+              "$ref": "#/definitions/AdminUserListResponse"
+            }
+          },
+          "401": {
+            "description": "unauthorized",
+            "schema": {
+              "$ref": "#/definitions/ErrorResponse"
+            }
+          }
+        },
+        "security": [
+          {
+            "AdminBearerAuth": []
+          }
+        ],
+        "summary": "List users (admin)",
+        "tags": [
+          "admin-users"
+        ]
+      },
+      "post": {
+        "operationId": "adminCreateUser",
+        "parameters": [
+          {
+            "description": "User payload",
+            "in": "body",
+            "name": "user",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/CreateUserRequest"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "created user",
+            "schema": {
+              "$ref": "#/definitions/User"
+            }
+          },
+          "400": {
+            "description": "validation error",
+            "schema": {
+              "$ref": "#/definitions/ErrorResponse"
+            }
+          },
+          "401": {
+            "description": "unauthorized",
+            "schema": {
+              "$ref": "#/definitions/ErrorResponse"
+            }
+          }
+        },
+        "security": [
+          {
+            "AdminBearerAuth": []
+          }
+        ],
+        "summary": "Create user (admin)",
+        "tags": [
+          "admin-users"
+        ]
+      }
+    },
+    "/api/v1/admin/users/{id}": {
+      "delete": {
+        "operationId": "adminDeleteUser",
+        "parameters": [
+          {
+            "description": "User ID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "deleted"
+          },
+          "401": {
+            "description": "unauthorized",
+            "schema": {
+              "$ref": "#/definitions/ErrorResponse"
+            }
+          },
+          "404": {
+            "description": "not found",
+            "schema": {
+              "$ref": "#/definitions/ErrorResponse"
+            }
+          }
+        },
+        "security": [
+          {
+            "AdminBearerAuth": []
+          }
+        ],
+        "summary": "Delete user (admin)",
+        "tags": [
+          "admin-users"
+        ]
+      },
+      "get": {
+        "operationId": "adminGetUser",
+        "parameters": [
+          {
+            "description": "User ID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "user",
+            "schema": {
+              "$ref": "#/definitions/User"
+            }
+          },
+          "401": {
+            "description": "unauthorized",
+            "schema": {
+              "$ref": "#/definitions/ErrorResponse"
+            }
+          },
+          "404": {
+            "description": "not found",
+            "schema": {
+              "$ref": "#/definitions/ErrorResponse"
+            }
+          }
+        },
+        "security": [
+          {
+            "AdminBearerAuth": []
+          }
+        ],
+        "summary": "Get user by ID (admin)",
+        "tags": [
+          "admin-users"
+        ]
+      },
+      "put": {
+        "operationId": "adminUpdateUser",
+        "parameters": [
+          {
+            "description": "User ID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "User fields to update",
+            "in": "body",
+            "name": "user",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/UpdateUserRequest"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "updated user",
+            "schema": {
+              "$ref": "#/definitions/User"
+            }
+          },
+          "400": {
+            "description": "validation error",
+            "schema": {
+              "$ref": "#/definitions/ErrorResponse"
+            }
+          },
+          "401": {
+            "description": "unauthorized",
+            "schema": {
+              "$ref": "#/definitions/ErrorResponse"
+            }
+          },
+          "404": {
+            "description": "not found",
+            "schema": {
+              "$ref": "#/definitions/ErrorResponse"
+            }
+          }
+        },
+        "security": [
+          {
+            "AdminBearerAuth": []
+          }
+        ],
+        "summary": "Update user (admin)",
+        "tags": [
+          "admin-users"
+        ]
+      }
+    },
+    "/api/v1/auth/login": {
+      "post": {
+        "operationId": "login",
+        "parameters": [
+          {
+            "description": "Login credentials",
+            "in": "body",
+            "name": "credentials",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/LoginRequest"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "login response",
+            "schema": {
+              "$ref": "#/definitions/LoginResponse"
+            }
+          },
+          "400": {
+            "description": "invalid request",
+            "schema": {
+              "$ref": "#/definitions/ErrorResponse"
+            }
+          },
+          "401": {
+            "description": "unauthorized",
+            "schema": {
+              "$ref": "#/definitions/ErrorResponse"
+            }
+          }
+        },
+        "summary": "Login and get JWT",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/me": {
+      "get": {
+        "operationId": "getMe",
+        "responses": {
+          "200": {
+            "description": "current user",
+            "schema": {
+              "$ref": "#/definitions/AuthUser"
+            }
+          },
+          "401": {
+            "description": "unauthorized",
+            "schema": {
+              "$ref": "#/definitions/ErrorResponse"
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Get current authenticated user",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/api/v1/users": {
+      "get": {
+        "operationId": "listUsers",
+        "parameters": [
+          {
+            "description": "Optional role filter",
+            "in": "query",
+            "name": "role",
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "users",
+            "schema": {
+              "items": {
+                "$ref": "#/definitions/User"
+              },
+              "type": "array"
+            }
+          },
+          "401": {
+            "description": "unauthorized",
+            "schema": {
+              "$ref": "#/definitions/ErrorResponse"
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "List users",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/api/v1/users/{id}": {
+      "get": {
+        "operationId": "getUser",
+        "parameters": [
+          {
+            "description": "User ID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "user",
+            "schema": {
+              "$ref": "#/definitions/User"
+            }
+          },
+          "401": {
+            "description": "unauthorized",
+            "schema": {
+              "$ref": "#/definitions/ErrorResponse"
+            }
+          },
+          "404": {
+            "description": "not found",
+            "schema": {
+              "$ref": "#/definitions/ErrorResponse"
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Get user by ID",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/healthz": {
+      "get": {
+        "operationId": "health",
+        "responses": {
+          "200": {
+            "description": "service is healthy",
+            "schema": {
+              "$ref": "#/definitions/HealthResponse"
+            }
+          }
+        },
+        "summary": "Health check",
+        "tags": [
+          "health"
+        ]
+      }
+    }
+  },
+  "produces": [
+    "application/json"
+  ],
+  "schemes": [
+    "http"
+  ],
+  "securityDefinitions": {
+    "AdminBearerAuth": {
+      "description": "Use the value returned by /api/v1/admin/auth/login as: Bearer \u003ctoken\u003e",
+      "in": "header",
+      "name": "Authorization",
+      "type": "apiKey"
+    },
+    "BearerAuth": {
+      "description": "Use the value returned by /api/v1/auth/login as: Bearer \u003ctoken\u003e",
+      "in": "header",
+      "name": "Authorization",
+      "type": "apiKey"
+    }
+  },
+  "swagger": "2.0",
+  "tags": [
+    {
+      "description": "Service health checks",
+      "name": "health"
+    },
+    {
+      "description": "User JWT authentication",
+      "name": "auth"
+    },
+    {
+      "description": "User read-only operations (list, detail, personal info)",
+      "name": "users"
+    },
+    {
+      "description": "Admin JWT authentication",
+      "name": "admin-auth"
+    },
+    {
+      "description": "Admin user management (full CRUD)",
+      "name": "admin-users"
+    },
+    {
+      "description": "Admin statistics and audit logs",
+      "name": "admin"
+    }
+  ]
+}

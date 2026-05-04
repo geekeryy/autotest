@@ -1,0 +1,10 @@
+---
+description: Capture project requirements before implementation
+alwaysApply: true
+---
+
+# Requirements Capture
+
+- Before implementing or changing project behavior, read `docs/requirements.md`.
+- When a new requirement, requirement change, or scope clarification appears, update `docs/requirements.md` in the same work before implementation continues.
+- Keep the requirements archive concise and preserve its existing structure.

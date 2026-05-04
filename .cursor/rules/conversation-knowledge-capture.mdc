@@ -1,0 +1,12 @@
+---
+description: Capture durable conversation knowledge into project guidance
+alwaysApply: true
+---
+
+# Conversation Knowledge Capture
+
+- Treat user preferences, project constraints, recurring decisions, and clarified requirements as durable knowledge when they are likely to improve future conversations.
+- When durable knowledge appears, update the most appropriate project guidance in the same work: `docs/requirements.md` for product or engineering requirements, `.cursor/rules/*.mdc` for agent behavior and project conventions.
+- Keep captured guidance concise, actionable, and non-duplicative. Prefer updating an existing rule over creating a new one when the concern already has a home.
+- Do not persist secrets, credentials, one-off debugging details, temporary implementation notes, or assumptions that the user has not confirmed.
+- If the value or scope of a piece of knowledge is ambiguous, ask before recording it.

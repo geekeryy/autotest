@@ -1,0 +1,171 @@
+* {
+  box-sizing: border-box;
+}
+
+:root {
+  --app-font-size-base: 14px;
+  --app-font-size-small: 12px;
+  --app-font-size-title: 20px;
+  --app-font-size-metric: 32px;
+  --app-component-size: 32px;
+  --app-component-size-small: 24px;
+  --app-component-size-large: 40px;
+  --app-line-height-base: 1.5;
+  --app-primary-color: #2563eb;
+  --app-primary-hover: #5181ef;
+  --app-secondary-color: #14b8a6;
+  --app-accent-color: #f97316;
+  --app-sidebar-bg: #0f172a;
+  --app-sidebar-text: #cbd5e1;
+  --app-sidebar-active: #ffffff;
+  --app-page-bg: #f8fafc;
+  --app-card-bg: #ffffff;
+  --app-text-color: #0f172a;
+  --app-secondary-text: #64748b;
+  --app-border-color: #e2e8f0;
+  --app-code-bg: #f1f5f9;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+#app {
+  min-height: 100%;
+  font-size: var(--app-font-size-base);
+}
+
+body {
+  margin: 0;
+  background: var(--app-page-bg);
+  color: var(--app-text-color);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: var(--app-font-size-base);
+  line-height: var(--app-line-height-base);
+}
+
+button,
+input,
+textarea,
+select {
+  font-family: inherit;
+}
+
+.el-button,
+.el-input,
+.el-textarea,
+.el-select,
+.el-select-dropdown,
+.el-select-dropdown__item,
+.el-popper,
+.el-popover,
+.el-dropdown-menu,
+.el-dropdown-menu__item,
+.el-form,
+.el-form-item,
+.el-form-item__label,
+.el-form-item__content,
+.el-table,
+.el-table .cell,
+.el-menu,
+.el-menu-item,
+.el-sub-menu__title,
+.el-breadcrumb,
+.el-breadcrumb__inner,
+.el-tabs,
+.el-tabs__item,
+.el-radio,
+.el-checkbox,
+.el-radio-button__inner,
+.el-card,
+.el-tag,
+.el-empty,
+.el-pagination,
+.el-dialog,
+.el-message,
+.el-message-box,
+.el-notification,
+.el-cascader-panel,
+.el-cascader-node {
+  font-size: var(--app-font-size-base);
+  line-height: var(--app-line-height-base);
+}
+
+.el-input__inner,
+.el-textarea__inner,
+.el-select__placeholder,
+.el-select__selected-item,
+.el-select-dropdown__item,
+.el-date-editor .el-range-input {
+  font-size: var(--app-font-size-base);
+}
+
+.el-input__wrapper,
+.el-select__wrapper {
+  min-height: var(--app-component-size);
+}
+
+.el-button {
+  min-height: var(--app-component-size);
+}
+
+.el-button--small,
+.el-input--small .el-input__wrapper,
+.el-select--small .el-select__wrapper {
+  min-height: var(--app-component-size-small);
+}
+
+.el-button--large,
+.el-input--large .el-input__wrapper,
+.el-select--large .el-select__wrapper {
+  min-height: var(--app-component-size-large);
+}
+
+.el-select-dropdown__item {
+  height: auto;
+  min-height: var(--app-component-size);
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+
+.el-dialog__title,
+.el-message-box__title,
+.el-card__header {
+  font-size: var(--el-font-size-large);
+  line-height: var(--app-line-height-base);
+}
+
+.page-card {
+  background: var(--app-card-bg);
+  border: 1px solid var(--app-border-color);
+  border-radius: 6px;
+  padding: 18px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+}
+
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.page-title {
+  margin: 0;
+  font-size: var(--app-font-size-title);
+  font-weight: 600;
+}
+
+.toolbar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.json-editor {
+  width: 100%;
+  font-family: Menlo, Monaco, Consolas, monospace;
+}

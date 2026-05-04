@@ -1,0 +1,86 @@
+package testcase
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+
+	"autotest/internal/sampler"
+
+	"github.com/google/uuid"
+)
+
+type Service struct {
+	repo           *Repository
+	endpointSchema EndpointSchemaGetter
+}
+
+func NewService(repo *Repository, endpointSchema EndpointSchemaGetter) *Service {
+	return &Service{repo: repo, endpointSchema: endpointSchema}
+}
+
+func (s *Service) CreateManual(ctx context.Context, input CreateManualInput) (*TestCase, error) {
+	if input.ProjectID.String() == "" {
+		return nil, errors.New("projectId is required")
+	}
+	if input.ServiceID.String() == "" {
+		return nil, errors.New("serviceId is required")
+	}
+	if input.Name == "" {
+		return nil, errors.New("case name is required")
+	}
+	if input.Method == "" || input.Path == "" {
+		return nil, errors.New("method and path are required")
+	}
+	return s.repo.CreateManual(ctx, input)
+}
+
+func (s *Service) List(ctx context.Context, filter ListFilter) ([]TestCase, error) {
+	return s.repo.List(ctx, filter)
+}
+
+func (s *Service) Get(ctx context.Context, testCaseID uuid.UUID) (*TestCase, error) {
+	if testCaseID == uuid.Nil {
+		return nil, errors.New("testCaseId is required")
+	}
+	return s.repo.Get(ctx, testCaseID)
+}
+
+func (s *Service) SaveRunSnapshot(ctx context.Context, testCaseID uuid.UUID, request json.RawMessage, response json.RawMessage) error {
+	if testCaseID == uuid.Nil {
+		return errors.New("testCaseId is required")
+	}
+	return s.repo.SaveRunSnapshot(ctx, testCaseID, request, response)
+}
+
+// GenerateParams generates default request parameter values for a test case based on its
+// associated endpoint's OpenAPI request schema.
+func (s *Service) GenerateParams(ctx context.Context, testCaseID uuid.UUID) (*GeneratedParams, error) {
+	if testCaseID == uuid.Nil {
+		return nil, errors.New("testCaseId is required")
+	}
+
+	tc, err := s.repo.Get(ctx, testCaseID)
+	if err != nil {
+		return nil, err
+	}
+	if tc.EndpointID == nil || *tc.EndpointID == uuid.Nil {
+		return nil, fmt.Errorf("该用例未关联 OpenAPI 接口定义，无法自动生成参数")
+	}
+	if s.endpointSchema == nil {
+		return nil, fmt.Errorf("endpoint schema provider not configured")
+	}
+
+	requestSchema, err := s.endpointSchema.GetEndpointRequestSchema(ctx, *tc.EndpointID)
+	if err != nil {
+		return nil, fmt.Errorf("fetch endpoint schema: %w", err)
+	}
+
+	sample := sampler.FromSchema(requestSchema)
+	return &GeneratedParams{
+		Query: sample.Query,
+		Path:  sample.Path,
+		Body:  sample.Body,
+	}, nil
+}
