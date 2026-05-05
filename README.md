@@ -1,6 +1,6 @@
 # Autotest MVP
 
-Go + PostgreSQL 后端和 Vue 2 + Element UI 管理后台组成的接口自动化测试平台 MVP。
+Go + PostgreSQL 后端和 Vue 3 + Element UI 管理后台组成的接口自动化测试平台 MVP。
 
 ## 本地运行
 
@@ -78,3 +78,7 @@ npm run build
 - `GET/POST /api/v1/permissions`
 
 除 `GET /healthz` 和 `POST /api/v1/auth/login` 外，`/api/v1` 下管理接口都需要 Bearer Token。Migration 文件位于 `migrations/`，可用 goose 或 psql 执行。
+
+## TODO
+- 支持本地 ollama 生成接口请求参数（待实现）
+

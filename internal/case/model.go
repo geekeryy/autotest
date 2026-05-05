@@ -34,6 +34,7 @@ type TestCase struct {
 	ProjectID        uuid.UUID       `json:"projectId"`
 	ServiceID        uuid.UUID       `json:"serviceId"`
 	EndpointID       *uuid.UUID      `json:"endpointId,omitempty"`
+	ParentCaseID     *uuid.UUID      `json:"parentCaseId,omitempty"`
 	Source           Source          `json:"source"`
 	Name             string          `json:"name"`
 	Method           string          `json:"method"`
@@ -42,7 +43,7 @@ type TestCase struct {
 	GenerationRuleID string          `json:"generationRuleId,omitempty"`
 	Request          json.RawMessage `json:"request"`
 	Assertions       json.RawMessage `json:"assertions"`
-	LastResponse     json.RawMessage `json:"lastResponseSnapshot,omitempty"`
+	LastResponseSnapshot json.RawMessage `json:"lastResponseSnapshot,omitempty"`
 	Status           Status          `json:"status"`
 	CreatedAt        time.Time       `json:"createdAt"`
 	UpdatedAt        time.Time       `json:"updatedAt"`
@@ -83,6 +84,25 @@ type CreateManualInput struct {
 	Path       string          `json:"path"`
 	Request    json.RawMessage `json:"request"`
 	Assertions json.RawMessage `json:"assertions"`
+}
+
+type CreateSavedInput struct {
+	Name       string          `json:"name"`
+	Method     string          `json:"method"`
+	Path       string          `json:"path"`
+	Request    json.RawMessage `json:"request"`
+	Assertions json.RawMessage `json:"assertions"`
+}
+
+type RenameInput struct {
+	Name string `json:"name"`
+}
+
+// PatchInput is the body for PATCH /cases/{id}.
+// All fields are optional; only present fields are updated.
+type PatchInput struct {
+	Name       *string         `json:"name,omitempty"`
+	Assertions json.RawMessage `json:"assertions,omitempty"`
 }
 
 type ListFilter struct {

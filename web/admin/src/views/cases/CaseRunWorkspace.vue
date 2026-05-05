@@ -21,12 +21,12 @@
         <el-option v-for="s in services" :key="s.id" :label="s.name" :value="s.id" />
       </el-select>
 
-      <el-input v-model="treeKeyword" class="tree-search" clearable placeholder="搜索接口或用例" prefix-icon="Search" />
+      <el-input v-model="treeKeyword" class="tree-search" clearable placeholder="搜索接口名称或路径" prefix-icon="Search" />
 
       <el-skeleton v-if="treeLoading" :rows="8" animated />
       <el-empty v-else-if="!projectId" description="请先在顶部选择项目" />
       <el-empty v-else-if="projectId && !services.length" description="当前项目暂无服务" />
-      <el-empty v-else-if="!treeData.length" description="当前服务暂无 API 或用例" />
+      <el-empty v-else-if="!treeData.length" description="当前服务暂无接口" />
       <el-tree
         v-else
         class="api-tree"
@@ -35,7 +35,7 @@
         node-key="id"
         default-expand-all
         highlight-current
-        empty-text="未匹配到 API 或用例"
+        empty-text="未匹配到接口"
         @node-click="handleTreeNodeClick"
       >
         <template #default="{ data }">
@@ -46,7 +46,7 @@
               </el-tag>
               <span class="tree-node-title">{{ data.label }}</span>
             </span>
-            <span v-if="data.caseCount" class="tree-node-count">{{ data.caseCount }}</span>
+            <span v-if="data.caseCount && data.type !== 'case'" class="tree-node-count">{{ data.caseCount }}</span>
           </span>
         </template>
       </el-tree>
@@ -71,12 +71,11 @@
       <div class="console-header">
         <div>
           <h2>运行控制台</h2>
-          <p>从左侧 API 树打开多个用例后，可在横向标签中切换运行。</p>
         </div>
         <div id="run-console-environment-control" class="console-controls"></div>
       </div>
 
-      <el-empty v-if="!tabs.length" class="console-empty" description="请选择左侧 API 下的用例开始运行" />
+      <el-empty v-if="!tabs.length" class="console-empty" description="请从左侧选择接口开始调试；路径右侧 Tab 为已保存的测试用例" />
       <template v-else>
         <el-tabs
           v-model="activeCaseId"
@@ -88,8 +87,19 @@
         >
           <el-tab-pane v-for="tab in tabs" :key="tab.id" :name="tab.id">
             <template #label>
-              <span class="run-tab-label">
-                <span class="tab-title">{{ tab.name }}</span>
+              <span class="run-tab-label" @dblclick.stop="startTabRename(tab)">
+                <input
+                  v-if="editingTabId === tab.id"
+                  :ref="(el) => setTabInputRef(tab.id, el)"
+                  v-model="editingTabName"
+                  class="tab-rename-input"
+                  @blur="finishTabRename"
+                  @keydown.enter.prevent="finishTabRename"
+                  @keydown.esc.prevent="cancelTabRename"
+                  @click.stop
+                  @dblclick.stop
+                />
+                <span v-else class="tab-title" :title="tab.name">{{ tab.name }}</span>
               </span>
             </template>
           </el-tab-pane>
@@ -99,11 +109,13 @@
           <CaseRun
             v-for="tab in tabs"
             :key="tab.id"
+            :ref="(el) => setCaseRunRef(tab.id, el)"
             v-show="tab.id === activeCaseId"
             :case-id="tab.id"
             :active="tab.id === activeCaseId"
             embedded
             @status-change="updateTabStatus(tab.id, $event)"
+            @tab-title-change="onTabTitleChange"
           />
         </div>
       </template>
@@ -112,7 +124,7 @@
 </template>
 
 <script>
-import { getCase, listCases, listEndpoints, listServices } from '../../api'
+import { getCase, listCases, listEndpoints, listServices, patchCase } from '../../api'
 import { loadGlobalProjects, projectState, setCurrentProjectId } from '../../utils/currentProject'
 import { persistServiceId, readStoredServiceId } from '../../utils/serviceSelection'
 import CaseRun from './CaseRun.vue'
@@ -145,7 +157,10 @@ export default {
       sidebarWidthPx: SIDEBAR_DEFAULT,
       layoutNarrow: false,
       layoutMediaQuery: null,
-      _sidebarResize: null
+      _sidebarResize: null,
+      caseRunRefs: {},
+      editingTabId: '',
+      editingTabName: ''
     }
   },
   computed: {
@@ -155,6 +170,9 @@ export default {
     currentProjectName() {
       const project = projectState.projects.find((item) => item.id === this.projectId)
       return project?.name || '未选择项目'
+    },
+    inlineSQLExample() {
+      return '{{sql.userSeed.id}}'
     },
     filteredTreeData() {
       const keyword = this.treeKeyword.trim().toLowerCase()
@@ -171,6 +189,12 @@ export default {
     }
   },
   watch: {
+    activeCaseId() {
+      this.$nextTick(() => {
+        const panels = this.$el?.querySelector('.console-panels')
+        if (panels) panels.scrollTop = 0
+      })
+    },
     projectId(newValue, oldValue) {
       if (this.initializing || newValue === oldValue) return
       this.tabs = []
@@ -196,7 +220,7 @@ export default {
         try {
           initialCase = await getCase(initialCaseId)
         } catch {
-          // 用例不存在或无权限时已在拦截器中提示，仍加载 API 树
+          // 接口不存在或无权限时已在拦截器中提示，仍加载 API 树
         }
         if (initialCase?.projectId && initialCase.projectId !== this.projectId) {
           setCurrentProjectId(initialCase.projectId)
@@ -438,9 +462,9 @@ export default {
       return {
         id: `endpoint-empty:${endpointId}`,
         type: 'empty',
-        label: '暂无可运行用例',
+        label: '暂无可运行接口',
         disabled: true,
-        searchText: '暂无可运行用例'
+        searchText: '暂无可运行接口'
       }
     },
     handleTreeNodeClick(data) {
@@ -493,6 +517,64 @@ export default {
       const tab = this.tabs.find((item) => item.id === caseId)
       if (!tab) return
       tab.summary = { ...tab.summary, ...summary }
+    },
+    onTabTitleChange({ caseId, name }) {
+      const tab = this.tabs.find((item) => item.id === caseId)
+      if (tab) tab.name = name
+    },
+    setCaseRunRef(caseId, el) {
+      if (el) {
+        this.caseRunRefs[caseId] = el
+      } else {
+        delete this.caseRunRefs[caseId]
+      }
+    },
+    startTabRename(tab) {
+      if (!tab?.id) return
+      if (this.activeCaseId !== tab.id) {
+        this.activeCaseId = tab.id
+        this.syncRoute(tab.id)
+      }
+      this.editingTabId = tab.id
+      this.editingTabName = tab.name
+      this.$nextTick(() => {
+        const input = this._tabInputRefs?.[tab.id]
+        if (input) {
+          input.focus()
+          input.select()
+        }
+      })
+    },
+    setTabInputRef(tabId, el) {
+      if (!this._tabInputRefs) this._tabInputRefs = {}
+      if (el) {
+        this._tabInputRefs[tabId] = el
+      } else {
+        delete this._tabInputRefs[tabId]
+      }
+    },
+    async finishTabRename() {
+      const tabId = this.editingTabId
+      if (!tabId) return
+      const name = (this.editingTabName || '').trim()
+      this.editingTabId = ''
+      this.editingTabName = ''
+      if (!name) return
+      const tab = this.tabs.find((t) => t.id === tabId)
+      if (!tab || name === tab.name) return
+      const prevName = tab.name
+      tab.name = name
+      try {
+        await patchCase(tabId, { name })
+        const comp = this.caseRunRefs[tabId]
+        if (comp && typeof comp.updateRunName === 'function') comp.updateRunName(name)
+      } catch {
+        tab.name = prevName
+      }
+    },
+    cancelTabRename() {
+      this.editingTabId = ''
+      this.editingTabName = ''
     },
     syncRoute(caseId) {
       const target = caseId ? `/run-console/${caseId}` : '/run-console'
@@ -770,6 +852,23 @@ export default {
 .tab-title {
   max-width: 220px;
   font-weight: 600;
+}
+
+.tab-rename-input {
+  width: 140px;
+  max-width: 200px;
+  height: 22px;
+  padding: 0 6px;
+  border: 1px solid var(--el-color-primary);
+  border-radius: 4px;
+  outline: none;
+  font-size: inherit;
+  font-weight: 600;
+  font-family: inherit;
+  line-height: 22px;
+  background: #fff;
+  color: inherit;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--el-color-primary) 20%, transparent);
 }
 
 .console-panels {

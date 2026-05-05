@@ -19,7 +19,7 @@ export POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD POSTGRES_HOST POSTGRES_PORT D
 # 按文件名顺序执行数据库迁移脚本。
 MIGRATIONS := $(sort $(wildcard migrations/*.sql))
 
-.PHONY: help init up wait-db migrate run-api web-install web-dev web-build test down
+.PHONY: help init up wait-db migrate run-api run-e2e-api web-install web-dev web-build test down
 
 help: ## 显示可用命令。
 	@awk 'BEGIN {FS = ":.*##"; printf "用法: make <目标>\n\n目标:\n"} /^[a-zA-Z0-9_-]+:.*##/ {printf "  %-14s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -52,6 +52,9 @@ migrate: wait-db ## 执行 migrations/ 目录下的 SQL 迁移。
 
 run-api: ## 使用已加载的环境变量运行 Go API。
 	ADDR="$(ADDR)" go run ./cmd/api
+
+run-e2e-api: ## 运行 e2e 测试目标 API（使用 pg 数据库）。
+	go run ./tests/e2e_api
 
 web-install: ## 安装管理后台前端依赖。
 	npm --prefix web/admin install

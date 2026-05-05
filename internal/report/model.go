@@ -30,6 +30,7 @@ type Run struct {
 	ProjectID     uuid.UUID       `json:"projectId"`
 	ServiceID     uuid.UUID       `json:"serviceId"`
 	SuiteID       *uuid.UUID      `json:"suiteId,omitempty"`
+	ScenarioID    *uuid.UUID      `json:"scenarioId,omitempty"`
 	EnvironmentID *uuid.UUID      `json:"environmentId,omitempty"`
 	Status        RunStatus       `json:"status"`
 	Variables     json.RawMessage `json:"variables"`
@@ -44,21 +45,23 @@ type CreateRunInput struct {
 	ProjectID     uuid.UUID       `json:"projectId"`
 	ServiceID     uuid.UUID       `json:"serviceId"`
 	SuiteID       *uuid.UUID      `json:"suiteId,omitempty"`
+	ScenarioID    *uuid.UUID      `json:"scenarioId,omitempty"`
 	EnvironmentID uuid.UUID       `json:"environmentId"`
 	Variables     json.RawMessage `json:"variables"`
 	Snapshot      json.RawMessage `json:"snapshot"`
 }
 
 type Result struct {
-	ID               uuid.UUID       `json:"id"`
-	RunID            uuid.UUID       `json:"runId"`
-	TestCaseID       uuid.UUID       `json:"testCaseId"`
-	StepID           *uuid.UUID      `json:"stepId,omitempty"`
-	Status           ResultStatus    `json:"status"`
-	DurationMillis   int64           `json:"durationMillis"`
-	RequestSnapshot  json.RawMessage `json:"requestSnapshot"`
-	ResponseSnapshot json.RawMessage `json:"responseSnapshot"`
-	Assertions       json.RawMessage `json:"assertions"`
-	Error            string          `json:"error,omitempty"`
-	CreatedAt        time.Time       `json:"createdAt"`
+	ID                       uuid.UUID       `json:"id"`
+	RunID                    uuid.UUID       `json:"runId"`
+	TestCaseID               uuid.UUID       `json:"testCaseId"`
+	StepID                   *uuid.UUID      `json:"stepId,omitempty"`
+	Status                   ResultStatus    `json:"status"`
+	DurationMillis           int64           `json:"durationMillis"`
+	RequestSnapshot          json.RawMessage `json:"requestSnapshot"`
+	ResponseSnapshot         json.RawMessage `json:"responseSnapshot"`
+	Assertions               json.RawMessage `json:"assertions"`
+	ParameterSourceSnapshots json.RawMessage `json:"parameterSourceSnapshots,omitempty"`
+	Error                    string          `json:"error,omitempty"`
+	CreatedAt                time.Time       `json:"createdAt"`
 }

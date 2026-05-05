@@ -3,12 +3,13 @@ import { createRouter, createWebHistory } from 'vue-router'
 import AdminLayout from '../layout/AdminLayout.vue'
 import Login from '../views/Login.vue'
 import Dashboard from '../views/Dashboard.vue'
-import ProjectList from '../views/projects/ProjectList.vue'
-import ServiceEnvironment from '../views/projects/ServiceEnvironment.vue'
+import ProjectManagement from '../views/projects/ProjectManagement.vue'
+import SQLParameterSourceList from '../views/data/SQLParameterSourceList.vue'
 import SpecImport from '../views/spec/SpecImport.vue'
 import CaseList from '../views/cases/CaseList.vue'
 import CaseRunWorkspace from '../views/cases/CaseRunWorkspace.vue'
-import SuiteList from '../views/suites/SuiteList.vue'
+import ScenarioList from '../views/scenarios/ScenarioList.vue'
+import ScriptLibraryList from '../views/scriptlib/ScriptLibraryList.vue'
 import UserList from '../views/rbac/UserList.vue'
 import RoleList from '../views/rbac/RoleList.vue'
 import PermissionList from '../views/rbac/PermissionList.vue'
@@ -16,10 +17,32 @@ import PermissionList from '../views/rbac/PermissionList.vue'
 export const menuRoutes = [
   { path: '/', redirect: '/dashboard' },
   { path: '/dashboard', component: Dashboard, meta: { title: '概览' } },
-  { path: '/projects', component: ProjectList, meta: { title: '项目管理', permission: 'projects:read' } },
-  { path: '/services', component: ServiceEnvironment, meta: { title: '服务与环境', permission: 'projects:read' } },
-  { path: '/spec-import', component: SpecImport, meta: { title: 'OpenAPI 导入', permission: 'specs:import' } },
-  { path: '/cases', component: CaseList, meta: { title: '测试用例', permission: 'cases:read' } },
+  { path: '/projects', component: ProjectManagement, meta: { title: '项目管理', permission: 'projects:read' } },
+  {
+    path: '/test-data',
+    redirect: '/sql-parameter-sources',
+    meta: { title: '测试数据', permission: 'projects:read' },
+    children: [
+      { path: '/sql-parameter-sources', component: SQLParameterSourceList, meta: { title: 'SQL 参数源', permission: 'projects:read' } }
+    ]
+  },
+  {
+    path: '/services',
+    redirect: () => ({ path: '/projects', query: { tab: 'services' } })
+  },
+  {
+    path: '/data-sources',
+    redirect: () => ({ path: '/projects', query: { tab: 'dataSources' } })
+  },
+  {
+    path: '/case-mgmt',
+    redirect: '/cases',
+    meta: { title: 'API管理' },
+    children: [
+      { path: '/cases', component: CaseList, meta: { title: '接口列表', permission: 'cases:read' } },
+      { path: '/spec-import', component: SpecImport, meta: { title: 'OpenAPI 导入', permission: 'specs:import' } }
+    ]
+  },
   { path: '/run-console', component: CaseRunWorkspace, meta: { title: '运行控制台', permission: 'cases:read' } },
   {
     path: '/run-console/:caseID',
@@ -28,7 +51,13 @@ export const menuRoutes = [
   },
   { path: '/cases/run', redirect: '/run-console' },
   { path: '/cases/:caseID/run', redirect: (to) => ({ path: `/run-console/${to.params.caseID}` }) },
-  { path: '/suites', component: SuiteList, meta: { title: '测试集', permission: 'suites:read' } },
+  { path: '/scenarios', component: ScenarioList, meta: { title: '场景编排', permission: 'cases:read' } },
+  {
+    path: '/platform',
+    redirect: '/script-library',
+    meta: { title: '平台资源' },
+    children: [{ path: '/script-library', component: ScriptLibraryList, meta: { title: '脚本库', permission: 'cases:read' } }]
+  },
   {
     path: '/system',
     redirect: '/users',

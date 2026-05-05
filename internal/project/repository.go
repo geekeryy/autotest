@@ -15,6 +15,8 @@ var ErrDatabaseUnavailable = errors.New("database unavailable")
 var ErrProjectNotFound = errors.New("project not found")
 var ErrServiceNotFound = errors.New("service not found")
 var ErrEnvironmentNotFound = errors.New("environment not found")
+var ErrMemberNotFound = errors.New("project member not found")
+var ErrMemberAlreadyExists = errors.New("user is already a member of this project")
 
 type Repository struct {
 	store.Repository
@@ -24,24 +26,40 @@ func NewRepository(repo store.Repository) *Repository {
 	return &Repository{Repository: repo}
 }
 
-func (r *Repository) CreateProject(ctx context.Context, input CreateProjectInput) (*Project, error) {
+func (r *Repository) CreateProject(ctx context.Context, input CreateProjectInput, createdBy uuid.UUID) (*Project, error) {
 	if r.DB == nil {
 		return nil, ErrDatabaseUnavailable
 	}
 
-	row := r.DB.QueryRow(ctx, `
+	tx, err := r.DB.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin create project: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	var p Project
+	if err := tx.QueryRow(ctx, `
 		insert into projects (name, description)
 		values ($1, $2)
 		returning id, name, description, created_at, updated_at
-	`, input.Name, input.Description)
-
-	var p Project
-	if err := row.Scan(&p.ID, &p.Name, &p.Description, &p.CreatedAt, &p.UpdatedAt); err != nil {
+	`, input.Name, input.Description).Scan(&p.ID, &p.Name, &p.Description, &p.CreatedAt, &p.UpdatedAt); err != nil {
 		return nil, fmt.Errorf("create project: %w", err)
+	}
+
+	if _, err := tx.Exec(ctx, `
+		insert into project_members (project_id, user_id, role)
+		values ($1, $2, 'owner')
+	`, p.ID, createdBy); err != nil {
+		return nil, fmt.Errorf("add creator as owner: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit create project: %w", err)
 	}
 	return &p, nil
 }
 
+// ListProjects returns all non-deleted projects. For admin use only.
 func (r *Repository) ListProjects(ctx context.Context) ([]Project, error) {
 	if r.DB == nil {
 		return nil, ErrDatabaseUnavailable
@@ -67,6 +85,143 @@ func (r *Repository) ListProjects(ctx context.Context) ([]Project, error) {
 		projects = append(projects, p)
 	}
 	return projects, rows.Err()
+}
+
+// ListProjectsForUser returns projects where the user has membership, including the user's role.
+func (r *Repository) ListProjectsForUser(ctx context.Context, userID uuid.UUID) ([]Project, error) {
+	if r.DB == nil {
+		return nil, ErrDatabaseUnavailable
+	}
+
+	rows, err := r.DB.Query(ctx, `
+		select p.id, p.name, p.description, pm.role, p.created_at, p.updated_at
+		from projects p
+		join project_members pm on pm.project_id = p.id and pm.user_id = $1
+		where p.deleted_at is null
+		order by p.created_at desc
+	`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("list projects for user: %w", err)
+	}
+	defer rows.Close()
+
+	var projects []Project
+	for rows.Next() {
+		var p Project
+		var role ProjectRole
+		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &role, &p.CreatedAt, &p.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan project: %w", err)
+		}
+		p.MyRole = &role
+		projects = append(projects, p)
+	}
+	return projects, rows.Err()
+}
+
+func (r *Repository) GetMembership(ctx context.Context, projectID, userID uuid.UUID) (*ProjectMember, error) {
+	if r.DB == nil {
+		return nil, ErrDatabaseUnavailable
+	}
+
+	var m ProjectMember
+	err := r.DB.QueryRow(ctx, `
+		select pm.project_id, pm.user_id, u.username, u.display_name, pm.role, pm.created_at
+		from project_members pm
+		join users u on u.id = pm.user_id
+		where pm.project_id = $1 and pm.user_id = $2
+	`, projectID, userID).Scan(&m.ProjectID, &m.UserID, &m.Username, &m.DisplayName, &m.Role, &m.CreatedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get membership: %w", err)
+	}
+	return &m, nil
+}
+
+func (r *Repository) ListMembers(ctx context.Context, projectID uuid.UUID) ([]ProjectMember, error) {
+	if r.DB == nil {
+		return nil, ErrDatabaseUnavailable
+	}
+
+	rows, err := r.DB.Query(ctx, `
+		select pm.project_id, pm.user_id, u.username, u.display_name, pm.role, pm.created_at
+		from project_members pm
+		join users u on u.id = pm.user_id
+		where pm.project_id = $1
+		order by pm.created_at asc
+	`, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("list members: %w", err)
+	}
+	defer rows.Close()
+
+	var members []ProjectMember
+	for rows.Next() {
+		var m ProjectMember
+		if err := rows.Scan(&m.ProjectID, &m.UserID, &m.Username, &m.DisplayName, &m.Role, &m.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan member: %w", err)
+		}
+		members = append(members, m)
+	}
+	return members, rows.Err()
+}
+
+func (r *Repository) AddMember(ctx context.Context, projectID uuid.UUID, input AddMemberInput) (*ProjectMember, error) {
+	if r.DB == nil {
+		return nil, ErrDatabaseUnavailable
+	}
+
+	var m ProjectMember
+	err := r.DB.QueryRow(ctx, `
+		insert into project_members (project_id, user_id, role)
+		values ($1, $2, $3)
+		returning project_id, user_id, role, created_at
+	`, projectID, input.UserID, input.Role).Scan(&m.ProjectID, &m.UserID, &m.Role, &m.CreatedAt)
+	if err != nil {
+		return nil, fmt.Errorf("add member: %w", err)
+	}
+
+	if err := r.DB.QueryRow(ctx, `select username, display_name from users where id = $1`, input.UserID).
+		Scan(&m.Username, &m.DisplayName); err != nil {
+		return nil, fmt.Errorf("load member user: %w", err)
+	}
+	return &m, nil
+}
+
+func (r *Repository) UpdateMember(ctx context.Context, projectID, userID uuid.UUID, input UpdateMemberInput) (*ProjectMember, error) {
+	if r.DB == nil {
+		return nil, ErrDatabaseUnavailable
+	}
+
+	tag, err := r.DB.Exec(ctx, `
+		update project_members set role = $3
+		where project_id = $1 and user_id = $2
+	`, projectID, userID, input.Role)
+	if err != nil {
+		return nil, fmt.Errorf("update member: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return nil, ErrMemberNotFound
+	}
+	return r.GetMembership(ctx, projectID, userID)
+}
+
+func (r *Repository) RemoveMember(ctx context.Context, projectID, userID uuid.UUID) error {
+	if r.DB == nil {
+		return ErrDatabaseUnavailable
+	}
+
+	tag, err := r.DB.Exec(ctx, `
+		delete from project_members where project_id = $1 and user_id = $2
+	`, projectID, userID)
+	if err != nil {
+		return fmt.Errorf("remove member: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrMemberNotFound
+	}
+	return nil
 }
 
 func (r *Repository) DeleteProject(ctx context.Context, projectID uuid.UUID) error {

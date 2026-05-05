@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
@@ -14,10 +15,11 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
-	"sync"
 	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type user struct {
@@ -83,148 +85,163 @@ type jwtAuthenticator struct {
 	user     authUser
 }
 
-type userStore struct {
-	mu     sync.RWMutex
-	nextID int
-	users  map[string]user
+type pgUserStore struct {
+	pool *pgxpool.Pool
 }
 
-func newUserStore() *userStore {
-	store := &userStore{
-		nextID: 3,
-		users:  make(map[string]user),
-	}
-	now := time.Now().UTC().Truncate(time.Second)
-	store.users["1"] = user{
-		ID:        "1",
-		Name:      "Alice",
-		Email:     "alice@example.test",
-		Role:      "admin",
-		Active:    true,
-		CreatedAt: now,
-		UpdatedAt: now,
-	}
-	store.users["2"] = user{
-		ID:        "2",
-		Name:      "Bob",
-		Email:     "bob@example.test",
-		Role:      "tester",
-		Active:    true,
-		CreatedAt: now,
-		UpdatedAt: now,
-	}
-	return store
+func newPGUserStore(pool *pgxpool.Pool) *pgUserStore {
+	return &pgUserStore{pool: pool}
 }
 
-func (s *userStore) list(role string) []user {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+func (s *pgUserStore) list(role string) []user {
+	ctx := context.Background()
+	q := `select id::text, name, email, role, active, created_at, updated_at from e2e_users`
+	args := []any{}
+	if role != "" {
+		q += ` where role = $1`
+		args = append(args, role)
+	}
+	q += ` order by created_at, id`
 
-	users := make([]user, 0, len(s.users))
-	for _, item := range s.users {
-		if role != "" && item.Role != role {
+	rows, err := s.pool.Query(ctx, q, args...)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	users := make([]user, 0)
+	for rows.Next() {
+		var u user
+		if err := rows.Scan(&u.ID, &u.Name, &u.Email, &u.Role, &u.Active, &u.CreatedAt, &u.UpdatedAt); err != nil {
 			continue
 		}
-		users = append(users, item)
+		u.CreatedAt = u.CreatedAt.UTC().Truncate(time.Second)
+		u.UpdatedAt = u.UpdatedAt.UTC().Truncate(time.Second)
+		users = append(users, u)
 	}
-	sort.Slice(users, func(i, j int) bool {
-		return users[i].ID < users[j].ID
-	})
 	return users
 }
 
-func (s *userStore) stats() adminStats {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	stats := adminStats{
-		TotalUsers:  len(s.users),
+func (s *pgUserStore) stats() adminStats {
+	ctx := context.Background()
+	var total, activeCount, adminCount int
+	err := s.pool.QueryRow(ctx, `
+		select
+			count(*),
+			count(*) filter (where active),
+			count(*) filter (where role = 'admin')
+		from e2e_users
+	`).Scan(&total, &activeCount, &adminCount)
+	if err != nil {
+		return adminStats{GeneratedAt: time.Now().UTC().Truncate(time.Second)}
+	}
+	return adminStats{
+		TotalUsers:  total,
+		ActiveUsers: activeCount,
+		AdminUsers:  adminCount,
 		GeneratedAt: time.Now().UTC().Truncate(time.Second),
 	}
-	for _, item := range s.users {
-		if item.Active {
-			stats.ActiveUsers++
-		}
-		if item.Role == "admin" {
-			stats.AdminUsers++
-		}
+}
+
+func (s *pgUserStore) get(id string) (user, bool) {
+	ctx := context.Background()
+	var u user
+	err := s.pool.QueryRow(ctx,
+		`select id::text, name, email, role, active, created_at, updated_at from e2e_users where id = $1::uuid`,
+		id,
+	).Scan(&u.ID, &u.Name, &u.Email, &u.Role, &u.Active, &u.CreatedAt, &u.UpdatedAt)
+	if err != nil {
+		return user{}, false
 	}
-	return stats
+	u.CreatedAt = u.CreatedAt.UTC().Truncate(time.Second)
+	u.UpdatedAt = u.UpdatedAt.UTC().Truncate(time.Second)
+	return u, true
 }
 
-func (s *userStore) get(id string) (user, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	item, ok := s.users[id]
-	return item, ok
-}
-
-func (s *userStore) create(input userInput) (user, error) {
+func (s *pgUserStore) create(input userInput) (user, error) {
 	if err := validateUserInput(input, true); err != nil {
 		return user{}, err
 	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	now := time.Now().UTC().Truncate(time.Second)
 	active := true
 	if input.Active != nil {
 		active = *input.Active
 	}
-	item := user{
-		ID:        fmt.Sprintf("%d", s.nextID),
-		Name:      input.Name,
-		Email:     input.Email,
-		Role:      defaultRole(input.Role),
-		Active:    active,
-		CreatedAt: now,
-		UpdatedAt: now,
+	ctx := context.Background()
+	var u user
+	err := s.pool.QueryRow(ctx,
+		`insert into e2e_users (name, email, role, active)
+		 values ($1, $2, $3, $4)
+		 returning id::text, name, email, role, active, created_at, updated_at`,
+		input.Name, input.Email, defaultRole(input.Role), active,
+	).Scan(&u.ID, &u.Name, &u.Email, &u.Role, &u.Active, &u.CreatedAt, &u.UpdatedAt)
+	if err != nil {
+		return user{}, err
 	}
-	s.nextID++
-	s.users[item.ID] = item
-	return item, nil
+	u.CreatedAt = u.CreatedAt.UTC().Truncate(time.Second)
+	u.UpdatedAt = u.UpdatedAt.UTC().Truncate(time.Second)
+	return u, nil
 }
 
-func (s *userStore) update(id string, input userInput) (user, bool, error) {
+func (s *pgUserStore) update(id string, input userInput) (user, bool, error) {
 	if err := validateUserInput(input, false); err != nil {
 		return user{}, false, err
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	n := 1
+	set := []string{}
+	args := []any{}
 
-	item, ok := s.users[id]
-	if !ok {
-		return user{}, false, nil
-	}
 	if input.Name != "" {
-		item.Name = input.Name
+		set = append(set, fmt.Sprintf("name=$%d", n))
+		args = append(args, input.Name)
+		n++
 	}
 	if input.Email != "" {
-		item.Email = input.Email
+		set = append(set, fmt.Sprintf("email=$%d", n))
+		args = append(args, input.Email)
+		n++
 	}
 	if input.Role != "" {
-		item.Role = input.Role
+		set = append(set, fmt.Sprintf("role=$%d", n))
+		args = append(args, input.Role)
+		n++
 	}
 	if input.Active != nil {
-		item.Active = *input.Active
+		set = append(set, fmt.Sprintf("active=$%d", n))
+		args = append(args, *input.Active)
+		n++
 	}
-	item.UpdatedAt = time.Now().UTC().Truncate(time.Second)
-	s.users[id] = item
-	return item, true, nil
+	set = append(set, "updated_at=now()")
+	args = append(args, id)
+
+	ctx := context.Background()
+	q := fmt.Sprintf(
+		`update e2e_users set %s where id=$%d::uuid
+		 returning id::text, name, email, role, active, created_at, updated_at`,
+		strings.Join(set, ","), n,
+	)
+	var u user
+	err := s.pool.QueryRow(ctx, q, args...).Scan(
+		&u.ID, &u.Name, &u.Email, &u.Role, &u.Active, &u.CreatedAt, &u.UpdatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return user{}, false, nil
+	}
+	if err != nil {
+		return user{}, false, err
+	}
+	u.CreatedAt = u.CreatedAt.UTC().Truncate(time.Second)
+	u.UpdatedAt = u.UpdatedAt.UTC().Truncate(time.Second)
+	return u, true, nil
 }
 
-func (s *userStore) delete(id string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if _, ok := s.users[id]; !ok {
+func (s *pgUserStore) delete(id string) bool {
+	ctx := context.Background()
+	tag, err := s.pool.Exec(ctx, `delete from e2e_users where id = $1::uuid`, id)
+	if err != nil {
 		return false
 	}
-	delete(s.users, id)
-	return true
+	return tag.RowsAffected() > 0
 }
 
 func validateUserInput(input userInput, requireNameAndEmail bool) error {
@@ -273,7 +290,22 @@ func main() {
 		return
 	}
 
-	store := newUserStore()
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		host := envOrDefault("POSTGRES_HOST", "localhost")
+		port := envOrDefault("POSTGRES_PORT", "5432")
+		user := envOrDefault("POSTGRES_USER", "autotest")
+		pass := envOrDefault("POSTGRES_PASSWORD", "autotest")
+		dbName := envOrDefault("POSTGRES_DB", "autotest")
+		dbURL = fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable", user, pass, host, port, dbName)
+	}
+	pool, err := openDB(context.Background(), dbURL)
+	if err != nil {
+		log.Fatalf("connect to database: %v", err)
+	}
+	defer pool.Close()
+
+	store := newPGUserStore(pool)
 	authenticator := newJWTAuthenticator()
 	adminAuthenticator := newAdminJWTAuthenticator()
 	mux := http.NewServeMux()
@@ -286,7 +318,7 @@ func main() {
 	}
 }
 
-func registerHandlers(mux *http.ServeMux, store *userStore, swagger []byte, authenticator *jwtAuthenticator, adminAuthenticator *jwtAuthenticator) {
+func registerHandlers(mux *http.ServeMux, store *pgUserStore, swagger []byte, authenticator *jwtAuthenticator, adminAuthenticator *jwtAuthenticator) {
 	// ── 公共端点 ──────────────────────────────────────────────────────────────
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
@@ -1005,4 +1037,30 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 
 func writeError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]string{"error": message})
+}
+
+func openDB(ctx context.Context, url string) (*pgxpool.Pool, error) {
+	cfg, err := pgxpool.ParseConfig(url)
+	if err != nil {
+		return nil, fmt.Errorf("parse database url: %w", err)
+	}
+	cfg.MaxConns = 5
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("open pool: %w", err)
+	}
+	if err := pool.Ping(ctx); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("ping database: %w", err)
+	}
+	return pool, nil
+}
+
+func envOrDefault(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
 }

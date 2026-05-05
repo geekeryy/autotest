@@ -2,7 +2,7 @@
   <div class="result-page">
     <div class="result-header">
       <div>
-        <el-button link type="primary" @click="$router.push('/cases')">返回用例列表</el-button>
+        <el-button link type="primary" @click="$router.push('/cases')">返回API管理</el-button>
         <h2>{{ run?.name || '运行结果' }}</h2>
         <p v-if="run">Run ID: {{ run.id }}</p>
       </div>
@@ -94,14 +94,32 @@
 
         <el-tab-pane label="断言" name="assertions">
           <el-table :data="assertions" border>
-            <el-table-column prop="type" label="类型" width="160" />
-            <el-table-column label="状态" width="120">
+            <el-table-column label="类型" width="110">
               <template #default="{ row }">
-                <el-tag :type="row.passed ? 'success' : 'danger'">{{ row.passed ? '通过' : '失败' }}</el-tag>
+                <el-tag size="small" :type="assertionTypeColor(row.type)" effect="plain">
+                  {{ assertionTypeLabel(row.type) }}
+                </el-tag>
               </template>
             </el-table-column>
-            <el-table-column prop="message" label="信息" min-width="260" />
+            <el-table-column label="名称 / 路径" min-width="180">
+              <template #default="{ row }">
+                <span v-if="row.name" class="assertion-name">{{ row.name }}</span>
+                <code v-else-if="row.type === 'jsonpath' || row.type === 'header'" class="assertion-path">
+                  {{ row.path || row.name || '' }}
+                </code>
+                <span v-else class="assertion-path">{{ assertionSummary(row) }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="状态" width="90">
+              <template #default="{ row }">
+                <el-tag :type="row.passed ? 'success' : 'danger'" size="small">
+                  {{ row.passed ? '通过' : '失败' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="message" label="详情" min-width="220" />
           </el-table>
+          <el-empty v-if="!assertions.length" description="暂无断言结果" :image-size="48" />
         </el-tab-pane>
       </el-tabs>
     </el-card>
@@ -111,6 +129,23 @@
 <script>
 import { getRunResult } from '../../api'
 import { buildCurlFromRequestSnapshot } from '../../utils/curl'
+
+const ASSERTION_TYPE_LABELS = {
+  status_code: '状态码',
+  jsonpath: 'JSONPath',
+  header: '响应头',
+  body_contains: 'Body',
+  response_time: '响应时间',
+  script: 'JS 脚本'
+}
+const ASSERTION_TYPE_COLORS = {
+  status_code: 'primary',
+  jsonpath: 'success',
+  header: 'warning',
+  body_contains: '',
+  response_time: 'info',
+  script: 'danger'
+}
 
 export default {
   name: 'RunResult',
@@ -192,6 +227,24 @@ export default {
       } catch (error) {
         return value
       }
+    },
+
+    assertionTypeLabel(type) {
+      return ASSERTION_TYPE_LABELS[type] || type || '-'
+    },
+
+    assertionTypeColor(type) {
+      return ASSERTION_TYPE_COLORS[type] || ''
+    },
+
+    assertionSummary(row) {
+      if (!row) return ''
+      if (row.type === 'jsonpath') return row.path || ''
+      if (row.type === 'header') return row.name || ''
+      if (row.type === 'body_contains') return row.op || ''
+      if (row.type === 'response_time') return `${row.op} ${row.expected}ms`
+      if (row.type === 'status_code') return `= ${row.expected}`
+      return ''
     }
   }
 }
@@ -313,5 +366,16 @@ export default {
   .section-grid {
     grid-template-columns: 1fr;
   }
+}
+
+.assertion-name {
+  font-size: var(--app-font-size-small);
+  font-weight: 500;
+}
+
+.assertion-path {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  color: var(--app-secondary-text, #909399);
 }
 </style>

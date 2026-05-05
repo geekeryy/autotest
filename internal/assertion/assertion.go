@@ -7,21 +7,33 @@ import (
 	"net/http"
 )
 
+// Input holds all data available to assertion evaluators.
 type Input struct {
-	StatusCode int
-	Headers    http.Header
-	Body       []byte
+	StatusCode     int
+	Headers        http.Header
+	Body           []byte
+	DurationMillis int64
+	Variables      map[string]string
 }
 
+// Result is the outcome of a single assertion check.
 type Result struct {
 	Type    string `json:"type"`
+	Name    string `json:"name,omitempty"`
 	Passed  bool   `json:"passed"`
 	Message string `json:"message,omitempty"`
 }
 
+// Assertion evaluates a single condition and returns one Result.
 type Assertion interface {
 	Type() string
 	Assert(ctx context.Context, input Input) Result
+}
+
+// MultiAssertion evaluates a condition that may produce multiple Results
+// (e.g. a script with several pm.test() calls).
+type MultiAssertion interface {
+	AssertMulti(ctx context.Context, input Input) []Result
 }
 
 type Engine struct{}
@@ -42,12 +54,17 @@ func (e *Engine) Evaluate(ctx context.Context, raw json.RawMessage, input Input)
 
 	results := make([]Result, 0, len(specs))
 	for _, spec := range specs {
-		assertion, err := build(spec)
+		a, err := build(spec)
 		if err != nil {
 			results = append(results, Result{Type: fmt.Sprint(spec["type"]), Passed: false, Message: err.Error()})
 			continue
 		}
-		results = append(results, assertion.Assert(ctx, input))
+		switch v := a.(type) {
+		case MultiAssertion:
+			results = append(results, v.AssertMulti(ctx, input)...)
+		case Assertion:
+			results = append(results, v.Assert(ctx, input))
+		}
 	}
 	return results
 }
@@ -61,21 +78,35 @@ func AllPassed(results []Result) bool {
 	return true
 }
 
-func build(spec map[string]any) (Assertion, error) {
+func build(spec map[string]any) (any, error) {
 	assertionType, _ := spec["type"].(string)
 	switch assertionType {
 	case "status_code":
 		expected, ok := numberAsInt(spec["expected"])
 		if !ok {
-			return nil, fmt.Errorf("status_code expected must be a number")
+			return nil, fmt.Errorf("status_code assertion: expected must be a number")
 		}
 		return StatusCode{Expected: expected}, nil
-	case "header":
-		return Unsupported{assertionType: assertionType}, nil
+
 	case "jsonpath":
-		return Unsupported{assertionType: assertionType}, nil
+		return buildJSONPathAssertion(spec)
+
+	case "header":
+		return buildHeaderAssertion(spec)
+
+	case "body_contains":
+		return buildBodyContainsAssertion(spec)
+
+	case "response_time":
+		return buildResponseTimeAssertion(spec)
+
+	case "script":
+		script, _ := spec["script"].(string)
+		return ScriptAssertion{Script: script}, nil
+
 	case "schema":
 		return Unsupported{assertionType: assertionType}, nil
+
 	default:
 		return nil, fmt.Errorf("unknown assertion type %q", assertionType)
 	}

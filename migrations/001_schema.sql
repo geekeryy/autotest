@@ -90,6 +90,7 @@ create table if not exists test_cases (
     method                 text        not null,
     path                   text        not null,
     fingerprint            text        not null unique,
+    parent_case_id         uuid        references test_cases(id) on delete set null,
     generation_rule_id     text        not null default '',
     request                jsonb       not null default '{}'::jsonb,
     assertions             jsonb       not null default '[]'::jsonb,
@@ -111,6 +112,78 @@ create table if not exists test_case_steps (
     updated_at    timestamptz not null default now(),
     deleted_at    timestamptz,
     unique (test_case_id, step_order)
+);
+
+-- ── 业务数据源与 SQL 参数源 ────────────────────────────────────────────────────
+
+create table if not exists business_data_sources (
+    id              uuid        primary key default gen_random_uuid(),
+    project_id      uuid        not null references projects(id) on delete cascade,
+    name            text        not null,
+    description     text        not null default '',
+    driver          text        not null default 'postgres' check (driver in ('postgres')),
+    host            text        not null,
+    port            integer     not null default 5432,
+    database_name   text        not null,
+    username        text        not null default '',
+    password_secret text        not null default '',
+    ssl_mode        text        not null default 'disable',
+    enabled         boolean     not null default true,
+    options         jsonb       not null default '{}'::jsonb,
+    created_at      timestamptz not null default now(),
+    updated_at      timestamptz not null default now(),
+    deleted_at      timestamptz
+);
+
+create table if not exists sql_parameter_sources (
+    id             uuid        primary key default gen_random_uuid(),
+    project_id     uuid        not null references projects(id) on delete cascade,
+    service_id     uuid        not null references services(id) on delete cascade,
+    data_source_id uuid        not null references business_data_sources(id) on delete restrict,
+    name           text        not null,
+    description    text        not null default '',
+    sql_text       text        not null,
+    input_params   jsonb       not null default '[]'::jsonb,
+    source_key     text        not null default '',
+    enabled        boolean     not null default true,
+    timeout_millis integer     not null default 3000,
+    created_at     timestamptz not null default now(),
+    updated_at     timestamptz not null default now(),
+    deleted_at     timestamptz
+);
+
+-- ── 场景编排 ──────────────────────────────────────────────────────────────────
+
+create table if not exists test_scenarios (
+    id          uuid        primary key default gen_random_uuid(),
+    project_id  uuid        not null references projects(id) on delete cascade,
+    service_id  uuid        not null references services(id) on delete cascade,
+    name        text        not null,
+    description text        not null default '',
+    created_at  timestamptz not null default now(),
+    updated_at  timestamptz not null default now(),
+    deleted_at  timestamptz
+);
+
+create table if not exists test_scenario_steps (
+    id                   uuid        primary key default gen_random_uuid(),
+    scenario_id          uuid        not null references test_scenarios(id) on delete cascade,
+    test_case_id         uuid        references test_cases(id) on delete cascade,
+    step_order           integer     not null default 1,
+    step_seq             integer     not null default 0,
+    name                 text        not null default '',
+    enabled              boolean     not null default true,
+    step_type            text        not null default 'api',
+    config               jsonb       not null default '{}'::jsonb,
+    request_override     jsonb       not null default '{}'::jsonb,
+    created_at           timestamptz not null default now(),
+    updated_at           timestamptz not null default now(),
+    deleted_at           timestamptz,
+    unique (scenario_id, step_order),
+    constraint test_scenario_steps_step_type_check
+        check (step_type in ('api', 'database', 'script', 'for', 'condition')),
+    constraint test_scenario_steps_api_case_check
+        check (step_type <> 'api' or test_case_id is not null)
 );
 
 create table if not exists test_suites (
@@ -143,6 +216,7 @@ create table if not exists test_runs (
     project_id                    uuid        not null references projects(id) on delete cascade,
     service_id                    uuid        not null references services(id) on delete cascade,
     suite_id                      uuid        references test_suites(id) on delete set null,
+    scenario_id                   uuid        references test_scenarios(id) on delete set null,
     environment_id                uuid        references environments(id) on delete set null,
     service_environment_config_id uuid        references service_environment_configs(id) on delete set null,
     name                          text        not null default '',
@@ -156,18 +230,19 @@ create table if not exists test_runs (
 );
 
 create table if not exists test_run_results (
-    id                uuid        primary key default gen_random_uuid(),
-    run_id            uuid        not null references test_runs(id) on delete cascade,
-    test_case_id      uuid        not null references test_cases(id) on delete cascade,
-    step_id           uuid        references test_case_steps(id) on delete set null,
-    status            text        not null check (status in ('passed', 'failed', 'error')),
-    duration_millis   bigint      not null default 0,
-    request_snapshot  jsonb       not null default '{}'::jsonb,
-    response_snapshot jsonb       not null default '{}'::jsonb,
-    assertions        jsonb       not null default '[]'::jsonb,
-    error             text        not null default '',
-    created_at        timestamptz not null default now(),
-    deleted_at        timestamptz
+    id                         uuid        primary key default gen_random_uuid(),
+    run_id                     uuid        not null references test_runs(id) on delete cascade,
+    test_case_id               uuid        references test_cases(id) on delete cascade,
+    step_id                    uuid,
+    status                     text        not null check (status in ('passed', 'failed', 'error')),
+    duration_millis            bigint      not null default 0,
+    request_snapshot           jsonb       not null default '{}'::jsonb,
+    response_snapshot          jsonb       not null default '{}'::jsonb,
+    assertions                 jsonb       not null default '[]'::jsonb,
+    parameter_source_snapshots jsonb       not null default '[]'::jsonb,
+    error                      text        not null default '',
+    created_at                 timestamptz not null default now(),
+    deleted_at                 timestamptz
 );
 
 -- ── 认证与权限表 ──────────────────────────────────────────────────────────────
@@ -215,6 +290,207 @@ create table if not exists role_permissions (
     primary key (role_id, permission_id)
 );
 
+create table if not exists project_members (
+    project_id uuid not null references projects(id) on delete cascade,
+    user_id    uuid not null references users(id) on delete cascade,
+    role       text not null default 'developer',
+    created_at timestamptz not null default now(),
+    primary key (project_id, user_id),
+    constraint project_member_role_valid check (role in ('owner', 'developer', 'viewer'))
+);
+
+create table if not exists script_library_templates (
+    id uuid primary key default gen_random_uuid(),
+    project_id uuid references projects (id) on delete cascade,
+    name text not null,
+    category text not null default '自定义',
+    description text,
+    code text not null,
+    scopes jsonb not null default '["assertion", "scenario"]'::jsonb,
+    is_builtin boolean not null default false,
+    builtin_key text,
+    sort_order integer not null default 0,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now(),
+    constraint chk_script_library_templates_builtin_project
+        check (
+                (is_builtin = true and project_id is null)
+                or (is_builtin = false and project_id is not null)
+            )
+);
+
+insert into script_library_templates (
+    project_id, name, category, description, code, scopes, is_builtin, builtin_key, sort_order
+)
+select null,
+       '状态码与 JSON 业务码',
+       '响应断言',
+       '校验 HTTP 状态码与常见 body.code；按需改路径与期望值',
+       $c1$pm.test('HTTP 状态码为 200', () => {
+  pm.response.to.have.status(200);
+});
+
+pm.test('业务码为 0', () => {
+  const body = pm.response.json();
+  pm.expect(body).to.have.property('code');
+  pm.expect(body.code).to.equal(0);
+});$c1$,
+       '["assertion"]'::jsonb,
+       true,
+       'assert-status-json-code',
+       10
+where not exists (select 1 from script_library_templates where builtin_key = 'assert-status-json-code');
+
+insert into script_library_templates (
+    project_id, name, category, description, code, scopes, is_builtin, builtin_key, sort_order
+)
+select null,
+       'JSON 字段存在与类型',
+       '响应断言',
+       '检查 data.id 存在且为字符串；修改 data 路径',
+       $c2$pm.test('data.id 为字符串', () => {
+  const body = pm.response.json();
+  pm.expect(body.data).to.exist;
+  pm.expect(body.data.id).to.be.a('string').and.not.empty;
+});$c2$,
+       '["assertion"]'::jsonb,
+       true,
+       'assert-json-field',
+       20
+where not exists (select 1 from script_library_templates where builtin_key = 'assert-json-field');
+
+insert into script_library_templates (
+    project_id, name, category, description, code, scopes, is_builtin, builtin_key, sort_order
+)
+select null,
+       '响应头包含',
+       '响应断言',
+       '校验响应头；修改名称与可选期望值',
+       $c3$pm.test('Content-Type 存在', () => {
+  pm.response.to.have.header('content-type');
+});
+
+pm.test('Authorization 格式', () => {
+  pm.response.to.have.header('authorization', /Bearer\s+\S+/);
+});$c3$,
+       '["assertion"]'::jsonb,
+       true,
+       'assert-header',
+       30
+where not exists (select 1 from script_library_templates where builtin_key = 'assert-header');
+
+insert into script_library_templates (
+    project_id, name, category, description, code, scopes, is_builtin, builtin_key, sort_order
+)
+select null,
+       '响应时间上限',
+       '响应断言',
+       '毫秒上限可按需调整',
+       $c4$pm.test('响应时间不超过 500ms', () => {
+  pm.expect(pm.response.responseTime).to.be.below(500);
+});$c4$,
+       '["assertion"]'::jsonb,
+       true,
+       'assert-response-time',
+       40
+where not exists (select 1 from script_library_templates where builtin_key = 'assert-response-time');
+
+insert into script_library_templates (
+    project_id, name, category, description, code, scopes, is_builtin, builtin_key, sort_order
+)
+select null,
+       '写入场景变量',
+       '场景脚本',
+       'pm.variables.set 供后续步骤 {{变量名}} 使用',
+       $c5$// 将常量或拼接结果写入场景变量（按需改名）
+pm.variables.set('myToken', 'REPLACE_WITH_TOKEN');
+pm.variables.set('requestId', String(Date.now()));
+
+console.log('已设置 myToken / requestId');$c5$,
+       '["scenario"]'::jsonb,
+       true,
+       'scenario-set-vars',
+       50
+where not exists (select 1 from script_library_templates where builtin_key = 'scenario-set-vars');
+
+insert into script_library_templates (
+    project_id, name, category, description, code, scopes, is_builtin, builtin_key, sort_order
+)
+select null,
+       '从上一步结果取字段',
+       '场景脚本',
+       '配合 {{$steps[N].body.xxx}} 占位；将 N 改为实际步骤序号',
+       $c6$// 假设上一步 API 已将 body 写入变量 token（或通过模板引用解析）
+// 若上游步骤号为 1，可在 SQL/路径中使用 {{$steps[1].body.data.id}}
+
+const raw = pm.variables.get('upstreamPayload'); // 若上游 pm.variables.set 过
+if (raw) {
+  try {
+    const o = JSON.parse(raw);
+    pm.variables.set('extractedId', String(o.id || ''));
+  } catch (e) {
+    console.error('解析 upstreamPayload 失败', e.message);
+  }
+}$c6$,
+       '["scenario"]'::jsonb,
+       true,
+       'scenario-from-prev-step',
+       60
+where not exists (select 1 from script_library_templates where builtin_key = 'scenario-from-prev-step');
+
+insert into script_library_templates (
+    project_id, name, category, description, code, scopes, is_builtin, builtin_key, sort_order
+)
+select null,
+       '脚本内断言块',
+       '场景脚本',
+       '场景脚本无 pm.response，用 assert() 与 pm.test 组合（无 pm.expect）',
+       $c7$pm.test('变量已配置', () => {
+  const v = pm.variables.get('必填变量名');
+  assert(v && String(v).length > 0, '必填变量名不能为空');
+});
+
+pm.test('数值为正', () => {
+  const n = Number(pm.variables.get('某数字变量'));
+  assert(!isNaN(n) && n > 0, '某数字变量须为大于 0 的数字');
+});$c7$,
+       '["scenario"]'::jsonb,
+       true,
+       'scenario-pm-test',
+       70
+where not exists (select 1 from script_library_templates where builtin_key = 'scenario-pm-test');
+
+insert into script_library_templates (
+    project_id, name, category, description, code, scopes, is_builtin, builtin_key, sort_order
+)
+select null,
+       '打印变量调试',
+       '场景脚本',
+       '输出到步骤 stdout，便于运行结果中查看',
+       $c8$console.log('当前变量 token =', pm.variables.get('token'));
+console.log('environment 同名读取 =', pm.environment.get('token'));$c8$,
+       '["scenario"]'::jsonb,
+       true,
+       'scenario-console-debug',
+       80
+where not exists (select 1 from script_library_templates where builtin_key = 'scenario-console-debug');
+
+insert into script_library_templates (
+    project_id, name, category, description, code, scopes, is_builtin, builtin_key, sort_order
+)
+select null,
+       '布尔条件断言',
+       '通用',
+       'assert / pm.test 任选；断言脚本与场景脚本均可用',
+       $c9$pm.test('自定义条件', () => {
+  assert(pm.variables.get('flag') === 'true', 'flag 应为 true');
+});$c9$,
+       '["assertion","scenario"]'::jsonb,
+       true,
+       'common-assert-boolean',
+       90
+where not exists (select 1 from script_library_templates where builtin_key = 'common-assert-boolean');
+
 -- ── 索引 ──────────────────────────────────────────────────────────────────────
 
 create index if not exists idx_projects_active
@@ -260,6 +536,34 @@ create unique index if not exists idx_test_cases_auto_generation_active_unique
       and endpoint_id is not null
       and generation_rule_id <> '';
 
+create index if not exists idx_test_cases_parent_active
+    on test_cases(parent_case_id, created_at asc)
+    where deleted_at is null and parent_case_id is not null;
+
+create index if not exists idx_business_data_sources_project_list_active
+    on business_data_sources(project_id, created_at desc)
+    where deleted_at is null;
+
+create unique index if not exists idx_business_data_sources_project_name_active
+    on business_data_sources(project_id, name)
+    where deleted_at is null;
+
+create index if not exists idx_sql_parameter_sources_scope_active
+    on sql_parameter_sources(project_id, service_id, created_at desc)
+    where deleted_at is null;
+
+create index if not exists idx_sql_parameter_sources_data_source_active
+    on sql_parameter_sources(data_source_id)
+    where deleted_at is null;
+
+create unique index if not exists idx_sql_parameter_sources_scope_name_active
+    on sql_parameter_sources(project_id, service_id, name)
+    where deleted_at is null;
+
+create unique index if not exists idx_sql_parameter_sources_scope_key_active
+    on sql_parameter_sources(project_id, service_id, source_key)
+    where deleted_at is null and source_key <> '';
+
 create index if not exists idx_test_suite_items_suite_order
     on test_suite_items(suite_id, item_order);
 create index if not exists idx_test_suite_items_suite_active
@@ -283,7 +587,18 @@ create index if not exists idx_user_roles_role
 create index if not exists idx_role_permissions_permission
     on role_permissions(permission_id);
 
+create index if not exists project_members_user_id_idx on project_members(user_id);
+
+create index if not exists idx_script_library_templates_project_id
+    on script_library_templates (project_id);
+
+create unique index if not exists idx_script_library_templates_builtin_key
+    on script_library_templates (builtin_key)
+    where builtin_key is not null;
+
 -- +goose Down
+drop table if exists script_library_templates;
+drop table if exists project_members;
 drop table if exists role_permissions;
 drop table if exists user_roles;
 drop table if exists permissions;
@@ -293,6 +608,10 @@ drop table if exists test_run_results;
 drop table if exists test_runs;
 drop table if exists test_suite_items;
 drop table if exists test_suites;
+drop table if exists test_scenario_steps;
+drop table if exists test_scenarios;
+drop table if exists sql_parameter_sources;
+drop table if exists business_data_sources;
 drop table if exists test_case_steps;
 drop table if exists test_cases;
 drop table if exists api_endpoints;

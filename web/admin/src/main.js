@@ -5,6 +5,7 @@ import 'element-plus/dist/index.css'
 import './styles/global.css'
 
 import App from './App.vue'
+import ScenarioStepTreeNode from './views/scenarios/ScenarioStepTreeNode.vue'
 import router from './router'
 import './permission'
 import { initializeAppearance } from './utils/appearance'
@@ -22,6 +23,8 @@ if (typeof window !== 'undefined') {
 initializeAppearance()
 
 const app = createApp(App)
+
+app.component('ScenarioStepTreeNode', ScenarioStepTreeNode)
 
 for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
   app.component(key, component)

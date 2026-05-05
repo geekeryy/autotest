@@ -108,15 +108,14 @@ func toString(value any) string {
 // valueFromSchema picks a sample value for the given field. The fieldName is
 // used for semantic-aware fallback (e.g. a string field named "email" yields
 // a random email address) when the schema does not provide example/default/enum.
+//
+// example and default fields are intentionally NOT returned as-is: they are
+// used only for type inference so that every call produces a freshly randomised
+// value. enum values are sampled randomly instead of always picking the first.
 func valueFromSchema(fieldName string, schema map[string]any) any {
-	if example, ok := schema["example"]; ok {
-		return example
-	}
-	if def, ok := schema["default"]; ok {
-		return def
-	}
+	// enum: pick a random element so repeated calls return different values.
 	if enumValues, ok := schema["enum"].([]any); ok && len(enumValues) > 0 {
-		return enumValues[0]
+		return enumValues[gofakeit.IntRange(0, len(enumValues)-1)]
 	}
 	if allOf, ok := schema["allOf"].([]any); ok && len(allOf) > 0 {
 		out := map[string]any{}
@@ -138,6 +137,16 @@ func valueFromSchema(fieldName string, schema map[string]any) any {
 	}
 
 	schemaType, _ := schema["type"].(string)
+	// When the schema omits an explicit type, infer it from example or default
+	// so that gofakeit can still produce a correctly typed random value.
+	if schemaType == "" {
+		if ex, ok := schema["example"]; ok {
+			schemaType = inferSchemaType(ex)
+		} else if def, ok := schema["default"]; ok {
+			schemaType = inferSchemaType(def)
+		}
+	}
+
 	switch schemaType {
 	case "object":
 		return objectSample(schema)
@@ -156,8 +165,39 @@ func valueFromSchema(fieldName string, schema map[string]any) any {
 		if props, _ := schema["properties"].(map[string]any); len(props) > 0 {
 			return objectSample(schema)
 		}
+		// Last resort: use the example/default value verbatim when the type
+		// cannot be determined any other way.
+		if example, ok := schema["example"]; ok {
+			return example
+		}
+		if def, ok := schema["default"]; ok {
+			return def
+		}
 		return map[string]any{}
 	}
+}
+
+// inferSchemaType returns the JSON Schema type string that corresponds to the
+// runtime Go type of v (as produced by json.Unmarshal into an any).
+func inferSchemaType(v any) string {
+	switch v.(type) {
+	case string:
+		return "string"
+	case float64:
+		// json.Unmarshal always decodes numbers as float64; treat whole numbers
+		// as integers so integerSample is used for fields like "id".
+		if f, ok := v.(float64); ok && f == float64(int64(f)) {
+			return "integer"
+		}
+		return "number"
+	case bool:
+		return "boolean"
+	case map[string]any:
+		return "object"
+	case []any:
+		return "array"
+	}
+	return ""
 }
 
 func objectSample(schema map[string]any) map[string]any {

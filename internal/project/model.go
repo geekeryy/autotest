@@ -7,12 +7,51 @@ import (
 	"github.com/google/uuid"
 )
 
+type ProjectRole string
+
+const (
+	ProjectRoleOwner     ProjectRole = "owner"
+	ProjectRoleDeveloper ProjectRole = "developer"
+	ProjectRoleViewer    ProjectRole = "viewer"
+)
+
+// projectRoleRank maps each role to a numeric rank for comparison.
+var projectRoleRank = map[ProjectRole]int{
+	ProjectRoleViewer:    1,
+	ProjectRoleDeveloper: 2,
+	ProjectRoleOwner:     3,
+}
+
+// ProjectRoleAtLeast returns true if role is at least as privileged as min.
+func ProjectRoleAtLeast(role, min ProjectRole) bool {
+	return projectRoleRank[role] >= projectRoleRank[min]
+}
+
 type Project struct {
-	ID          uuid.UUID `json:"id"`
-	Name        string    `json:"name"`
-	Description string    `json:"description,omitempty"`
-	CreatedAt   time.Time `json:"createdAt"`
-	UpdatedAt   time.Time `json:"updatedAt"`
+	ID          uuid.UUID    `json:"id"`
+	Name        string       `json:"name"`
+	Description string       `json:"description,omitempty"`
+	MyRole      *ProjectRole `json:"myRole,omitempty"`
+	CreatedAt   time.Time    `json:"createdAt"`
+	UpdatedAt   time.Time    `json:"updatedAt"`
+}
+
+type ProjectMember struct {
+	ProjectID   uuid.UUID   `json:"projectId"`
+	UserID      uuid.UUID   `json:"userId"`
+	Username    string      `json:"username"`
+	DisplayName string      `json:"displayName"`
+	Role        ProjectRole `json:"role"`
+	CreatedAt   time.Time   `json:"createdAt"`
+}
+
+type AddMemberInput struct {
+	UserID uuid.UUID   `json:"userId"`
+	Role   ProjectRole `json:"role"`
+}
+
+type UpdateMemberInput struct {
+	Role ProjectRole `json:"role"`
 }
 
 type Service struct {

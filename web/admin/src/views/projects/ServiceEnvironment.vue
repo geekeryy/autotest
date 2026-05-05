@@ -1,7 +1,17 @@
 <template>
-  <div class="page-card">
-    <div class="page-header service-env-header">
+  <div :class="embedded ? 'service-env-root' : 'page-card'">
+    <div v-if="!embedded" class="page-header service-env-header">
       <h2 class="page-title">服务与环境管理</h2>
+      <div class="service-env-actions">
+        <el-button @click="$router.push({ path: '/projects', query: { tab: 'dataSources' } })">业务数据源</el-button>
+        <el-button @click="$router.push('/sql-parameter-sources')">SQL 参数源</el-button>
+      </div>
+    </div>
+    <div v-else class="service-env-embedded-toolbar">
+      <p class="page-subtitle">
+        按当前全局项目维护服务及其环境（Base URL、变量与认证配置）；用于接口调试与场景运行。
+      </p>
+      <el-button type="primary" :disabled="!projectId" @click="openCreateService">新增服务</el-button>
     </div>
 
     <el-alert
@@ -10,86 +20,51 @@
       type="info"
       show-icon
       :closable="false"
-      title="请先在顶部选择项目后再管理服务与环境。"
+      title="请先在左侧列表或顶部选择项目后再管理服务与环境。"
     />
 
-    <el-row :gutter="16" class="service-env-layout">
-      <el-col :span="10">
-        <div class="section-title">
-          <span>服务</span>
-          <el-tooltip content="请先选择项目" :disabled="!!projectId" placement="top">
-            <span class="tooltip-btn-wrap">
-              <el-button type="primary" size="small" :disabled="!projectId" @click="openCreateService">新增服务</el-button>
-            </span>
-          </el-tooltip>
-        </div>
-        <el-empty v-if="!services.length" :description="emptyServiceDescription">
-          <el-tooltip content="请先选择项目" :disabled="!!projectId" placement="top">
-            <span class="tooltip-btn-wrap">
-              <el-button type="primary" :disabled="!projectId" @click="openCreateService">新增服务</el-button>
-            </span>
-          </el-tooltip>
-        </el-empty>
-        <el-table
-          v-else
-          ref="serviceTable"
-          :data="services"
-          border
-          highlight-current-row
-          class="service-table"
-          @current-change="onServiceCurrentChange"
-        >
-          <el-table-column prop="name" label="名称" min-width="100" />
-          <el-table-column prop="description" label="描述" min-width="80" show-overflow-tooltip />
-          <el-table-column label="操作" width="140" fixed="right">
-            <template #default="{ row }">
-              <el-button type="text" @click.stop="openEditService(row)">编辑</el-button>
-              <el-button type="text" class="danger" :loading="deletingServiceId === row.id" @click.stop="removeService(row)">删除</el-button>
-            </template>
-          </el-table-column>
-        </el-table>
-      </el-col>
+    <div v-else class="service-env-tree-wrap">
+      <div v-if="!embedded" class="section-title">
+        <span></span>
+        <el-button type="primary" size="small" @click="openCreateService">新增服务</el-button>
+      </div>
 
-      <el-col :span="14">
-        <div class="section-title env-panel-title">
-          <div class="env-panel-heading">
-            <span class="env-panel-label">环境配置</span>
-            <el-select
-              v-model="selectedServiceId"
-              class="service-switcher"
-              filterable
-              clearable
-              placeholder="选择服务"
-              :disabled="!services.length"
-            >
-              <el-option
-                v-for="s in services"
-                :key="s.id"
-                :label="serviceOptionLabel(s)"
-                :value="s.id"
-              />
-            </el-select>
-          </div>
-          <el-button type="primary" size="small" :disabled="!selectedService" @click="openCreateEnvironment">新增环境</el-button>
-        </div>
-        <div v-if="!selectedService" class="env-panel-placeholder">
-          <el-empty :description="envPlaceholderDescription" />
-        </div>
-        <template v-else>
-          <el-table :data="environments" border v-loading="loadingEnvironments" class="env-table">
-            <el-table-column prop="name" label="名称" width="140" />
-            <el-table-column prop="baseUrl" label="Base URL" min-width="220" show-overflow-tooltip />
-            <el-table-column label="操作" width="140" fixed="right">
-              <template #default="{ row }">
-                <el-button type="text" @click="openEditEnvironment(row)">编辑</el-button>
-                <el-button type="text" class="danger" :loading="deletingEnvironmentId === row.id" @click="removeEnvironment(row)">删除</el-button>
+      <el-empty v-if="!services.length" :description="emptyServiceDescription" />
+
+      <el-tree
+        v-else
+        ref="serviceEnvTree"
+        :key="treeRenderKey"
+        class="service-env-tree"
+        node-key="treeKey"
+        lazy
+        :load="loadTreeNode"
+        :props="treeProps"
+        highlight-current
+        :expand-on-click-node="false"
+        @node-click="onTreeNodeClick"
+      >
+        <template #default="{ data }">
+          <div class="tree-node-row">
+            <div class="tree-node-main">
+              <span class="tree-node-title">{{ data.name }}</span>
+              <span v-if="data.kind === 'environment'" class="tree-node-meta" :title="data.baseUrl">{{ data.baseUrl }}</span>
+            </div>
+            <div class="tree-node-actions" @click.stop>
+              <template v-if="data.kind === 'service'">
+                <el-button type="primary" link size="small" @click="openCreateEnvironmentUnder(data)">新增环境</el-button>
+                <el-button type="primary" link size="small" @click="openEditService(data)">编辑</el-button>
+                <el-button type="danger" link size="small" :loading="deletingServiceId === data.id" @click="removeService(data)">删除</el-button>
               </template>
-            </el-table-column>
-          </el-table>
-          <el-empty v-if="!environments.length && !loadingEnvironments" description="当前服务暂无环境，点击「新增环境」添加" />
+              <template v-else>
+                <el-button type="primary" link size="small" @click="openEditEnvironment(data)">编辑</el-button>
+                <el-button type="danger" link size="small" :loading="deletingEnvironmentId === data.id" @click="removeEnvironment(data)">删除</el-button>
+              </template>
+            </div>
+          </div>
         </template>
-      </el-col>
-    </el-row>
+      </el-tree>
+    </div>
 
     <el-dialog v-model="serviceDialog" :title="editingService ? '编辑服务' : '新增服务'" width="420px">
       <el-form :model="serviceForm" label-width="90px">
@@ -213,18 +188,24 @@ import { persistServiceId, readStoredServiceId } from '../../utils/serviceSelect
 
 export default {
   name: 'ServiceEnvironment',
+  props: {
+    embedded: {
+      type: Boolean,
+      default: false
+    }
+  },
   data() {
     return {
       services: [],
-      environments: [],
       selectedService: null,
+      treeRenderKey: 0,
+      treeProps: { label: 'name', isLeaf: 'isLeaf', children: 'children' },
       serviceDialog: false,
       envDialog: false,
       editingService: null,
       editingEnvironment: null,
       deletingServiceId: '',
       deletingEnvironmentId: '',
-      loadingEnvironments: false,
       serviceForm: this.emptyServiceForm(),
       envForm: this.emptyEnvironmentForm()
     }
@@ -237,30 +218,8 @@ export default {
     projectId() {
       return projectState.currentProjectId
     },
-    selectedServiceId: {
-      get() {
-        return this.selectedService?.id ?? ''
-      },
-      set(id) {
-        if (!id) {
-          this.selectedService = null
-          this.environments = []
-          persistServiceId(this.projectId, '')
-          this.$nextTick(() => this.syncServiceTableCurrentRow())
-          return
-        }
-        const row = this.services.find((s) => s.id === id)
-        if (row) {
-          this.applySelectedService(row)
-        }
-      }
-    },
     emptyServiceDescription() {
       return this.projectId ? '暂无服务，请先新增服务' : '请先在顶部选择项目后再新增服务'
-    },
-    envPlaceholderDescription() {
-      if (!this.projectId) return '请先在顶部选择项目'
-      return '暂无可用服务，请在左侧新增服务'
     }
   },
   watch: {
@@ -286,41 +245,78 @@ export default {
       }
       return JSON.stringify(value, null, 2)
     },
-    serviceOptionLabel(s) {
-      return s.name
-    },
-    syncServiceTableCurrentRow() {
-      const table = this.$refs.serviceTable
-      if (!table) return
-      if (this.selectedService) {
-        const row = this.services.find((svc) => svc.id === this.selectedService.id)
-        if (row) {
-          table.setCurrentRow(row)
-          return
-        }
+    async loadTreeNode(node, resolve) {
+      if (!this.projectId) {
+        resolve([])
+        return
       }
-      table.setCurrentRow(null)
+      if (node.level === 0) {
+        const roots = (this.services || []).map((s) => ({
+          ...s,
+          kind: 'service',
+          treeKey: `service:${s.id}`,
+          isLeaf: false
+        }))
+        resolve(roots)
+        this.$nextTick(() => this.expandSelectedServiceInTree())
+        return
+      }
+      const d = node.data
+      if (d.kind === 'service') {
+        try {
+          const envs = await listServiceEnvironments(this.projectId, d.id)
+          resolve(
+            envs.map((e) => ({
+              ...e,
+              kind: 'environment',
+              treeKey: `environment:${e.id}`,
+              isLeaf: true,
+              serviceId: e.serviceId || d.id
+            }))
+          )
+        } catch {
+          resolve([])
+        }
+        return
+      }
+      resolve([])
+    },
+    expandSelectedServiceInTree() {
+      const tree = this.$refs.serviceEnvTree
+      if (!tree || !this.selectedService) return
+      const key = `service:${this.selectedService.id}`
+      this.$nextTick(() => {
+        const n = tree.getNode(key)
+        if (n && !n.expanded) {
+          n.expand()
+        }
+        tree.setCurrentKey(key)
+      })
+    },
+    onTreeNodeClick(data) {
+      const tree = this.$refs.serviceEnvTree
+      if (data.kind === 'service') {
+        this.applySelectedService(data)
+        this.$nextTick(() => tree?.setCurrentKey(data.treeKey))
+      } else if (data.kind === 'environment') {
+        const svc = this.services.find((s) => s.id === data.serviceId)
+        if (svc) {
+          this.selectedService = svc
+          persistServiceId(this.projectId, svc.id)
+        }
+        this.$nextTick(() => tree?.setCurrentKey(data.treeKey))
+      }
     },
     applySelectedService(row) {
       if (!row) return
-      const changed = this.selectedService?.id !== row.id
-      this.selectedService = row
+      this.selectedService = { id: row.id, name: row.name, description: row.description || '' }
       persistServiceId(this.projectId, row.id)
-      if (changed) {
-        this.loadEnvironments()
-      }
-      this.$nextTick(() => this.syncServiceTableCurrentRow())
-    },
-    onServiceCurrentChange(row) {
-      if (!row) return
-      if (this.selectedService?.id === row.id) return
-      this.applySelectedService(row)
     },
     async loadServices() {
       if (!this.projectId) {
         this.services = []
-        this.environments = []
         this.selectedService = null
+        this.treeRenderKey += 1
         return
       }
       this.services = await listServices(this.projectId)
@@ -330,27 +326,16 @@ export default {
         this.services.find((service) => service.id === this.selectedService?.id) ||
         this.services[0] ||
         null
-      this.selectedService = preferred
-      if (this.selectedService) {
-        persistServiceId(this.projectId, this.selectedService.id)
+      if (preferred) {
+        this.selectedService = { id: preferred.id, name: preferred.name, description: preferred.description || '' }
+        persistServiceId(this.projectId, preferred.id)
       } else {
+        this.selectedService = null
         persistServiceId(this.projectId, '')
       }
-      await this.loadEnvironments()
+      this.treeRenderKey += 1
       await this.$nextTick()
-      this.syncServiceTableCurrentRow()
-    },
-    async loadEnvironments() {
-      if (!this.projectId || !this.selectedService) {
-        this.environments = []
-        return
-      }
-      this.loadingEnvironments = true
-      try {
-        this.environments = await listServiceEnvironments(this.projectId, this.selectedService.id)
-      } finally {
-        this.loadingEnvironments = false
-      }
+      this.expandSelectedServiceInTree()
     },
     openCreateService() {
       if (!this.projectId) {
@@ -362,7 +347,7 @@ export default {
       this.serviceDialog = true
     },
     openEditService(row) {
-      this.editingService = row
+      this.editingService = { id: row.id, name: row.name, description: row.description || '' }
       this.serviceForm = {
         name: row.name,
         description: row.description || ''
@@ -382,7 +367,7 @@ export default {
       await this.loadServices()
     },
     async removeService(row) {
-      await this.$confirm(`确认删除服务 ${row.name}？服务关联的环境、接口、用例、套件和运行记录将被软删除。`, '提示')
+      await this.$confirm(`确认删除服务 ${row.name}？服务关联的环境、接口库、测试集和运行记录将被软删除。`, '提示')
       this.deletingServiceId = row.id
       try {
         await deleteService(this.projectId, row.id)
@@ -392,12 +377,24 @@ export default {
         this.deletingServiceId = ''
       }
     },
+    openCreateEnvironmentUnder(serviceRow) {
+      this.applySelectedService(serviceRow)
+      this.openCreateEnvironment()
+    },
     openCreateEnvironment() {
+      if (!this.selectedService) {
+        this.$message.warning('请先选择服务')
+        return
+      }
       this.editingEnvironment = null
       this.envForm = this.emptyEnvironmentForm()
       this.envDialog = true
     },
     openEditEnvironment(row) {
+      const svc = this.services.find((s) => s.id === row.serviceId)
+      if (svc) {
+        this.applySelectedService(svc)
+      }
       this.editingEnvironment = row
       this.envForm = {
         name: row.name,
@@ -441,7 +438,12 @@ export default {
         auth
       }
       if (this.editingEnvironment) {
-        await updateServiceEnvironment(this.projectId, this.selectedService.id, this.editingEnvironment.id, payload)
+        await updateServiceEnvironment(
+          this.projectId,
+          this.selectedService.id,
+          this.editingEnvironment.id,
+          payload
+        )
       } else {
         await createServiceEnvironment(this.projectId, this.selectedService.id, payload)
       }
@@ -449,15 +451,21 @@ export default {
       this.envDialog = false
       this.editingEnvironment = null
       this.envForm = this.emptyEnvironmentForm()
-      await this.loadEnvironments()
+      await this.loadServices()
     },
     async removeEnvironment(row) {
+      const sid = row.serviceId
+      const svc = this.services.find((s) => s.id === sid)
+      if (!svc) {
+        this.$message.error('未找到所属服务')
+        return
+      }
       await this.$confirm(`确认删除环境 ${row.name}？`, '提示')
       this.deletingEnvironmentId = row.id
       try {
-        await deleteServiceEnvironment(this.projectId, this.selectedService.id, row.id)
+        await deleteServiceEnvironment(this.projectId, sid, row.id)
         this.$message.success('环境已删除')
-        await this.loadEnvironments()
+        await this.loadServices()
       } finally {
         this.deletingEnvironmentId = ''
       }
@@ -471,12 +479,26 @@ export default {
   margin-bottom: 16px;
 }
 
-.tooltip-btn-wrap {
-  display: inline-block;
+.service-env-root {
+  min-height: 0;
 }
 
-.service-env-layout {
+.service-env-embedded-toolbar {
+  display: flex;
   align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.service-env-embedded-toolbar .page-subtitle {
+  margin: 0;
+  flex: 1;
+  min-width: 200px;
+  color: var(--app-secondary-text);
+  font-size: var(--app-font-size-small);
+  line-height: 1.5;
 }
 
 .service-env-header {
@@ -484,48 +506,75 @@ export default {
   flex-wrap: wrap;
 }
 
-.env-panel-title {
-  flex-wrap: wrap;
-  gap: 8px;
+.service-env-tree-wrap {
+  min-height: 280px;
 }
 
-.env-panel-heading {
+.service-env-tree {
+  width: 100%;
+  max-width: 100%;
+  padding: 8px 0;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: var(--el-border-radius-base);
+  background: var(--el-fill-color-blank);
+}
+
+.service-env-tree :deep(.el-tree-node__content) {
+  height: auto;
+  min-height: 36px;
+  align-items: stretch;
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+
+.tree-node-row {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+  padding-right: 8px;
+}
+
+.tree-node-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
   min-width: 0;
   flex: 1;
 }
 
-.env-panel-label {
+.tree-node-title {
+  font-weight: 500;
+  word-break: break-all;
+}
+
+.tree-node-meta {
+  font-size: var(--app-font-size-small);
+  color: var(--el-text-color-secondary);
+  word-break: break-all;
+  line-height: 1.35;
+}
+
+.tree-node-actions {
   flex-shrink: 0;
-}
-
-.service-switcher {
-  min-width: 160px;
-  max-width: 100%;
-  flex: 1;
-}
-
-.service-table {
-  width: 100%;
-}
-
-.env-table {
-  width: 100%;
-}
-
-.env-panel-placeholder {
-  min-height: 200px;
   display: flex;
   align-items: center;
-  justify-content: center;
+  flex-wrap: wrap;
+  gap: 4px;
 }
 
 .service-env-header .page-title {
   flex: 0 1 auto;
   min-width: 0;
+}
+
+.service-env-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .section-title {

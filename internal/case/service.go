@@ -2,9 +2,9 @@ package testcase
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"autotest/internal/sampler"
 
@@ -28,7 +28,7 @@ func (s *Service) CreateManual(ctx context.Context, input CreateManualInput) (*T
 		return nil, errors.New("serviceId is required")
 	}
 	if input.Name == "" {
-		return nil, errors.New("case name is required")
+		return nil, errors.New("接口名称不能为空")
 	}
 	if input.Method == "" || input.Path == "" {
 		return nil, errors.New("method and path are required")
@@ -40,6 +40,13 @@ func (s *Service) List(ctx context.Context, filter ListFilter) ([]TestCase, erro
 	return s.repo.List(ctx, filter)
 }
 
+func (s *Service) ListSaved(ctx context.Context, parentCaseID uuid.UUID) ([]TestCase, error) {
+	if parentCaseID == uuid.Nil {
+		return nil, errors.New("parent case id is required")
+	}
+	return s.repo.ListSaved(ctx, parentCaseID)
+}
+
 func (s *Service) Get(ctx context.Context, testCaseID uuid.UUID) (*TestCase, error) {
 	if testCaseID == uuid.Nil {
 		return nil, errors.New("testCaseId is required")
@@ -47,11 +54,63 @@ func (s *Service) Get(ctx context.Context, testCaseID uuid.UUID) (*TestCase, err
 	return s.repo.Get(ctx, testCaseID)
 }
 
-func (s *Service) SaveRunSnapshot(ctx context.Context, testCaseID uuid.UUID, request json.RawMessage, response json.RawMessage) error {
-	if testCaseID == uuid.Nil {
-		return errors.New("testCaseId is required")
+func (s *Service) CreateSaved(ctx context.Context, parentCaseID uuid.UUID, input CreateSavedInput) (*TestCase, error) {
+	if parentCaseID == uuid.Nil {
+		return nil, errors.New("parent case id is required")
 	}
-	return s.repo.SaveRunSnapshot(ctx, testCaseID, request, response)
+	if input.Name == "" {
+		return nil, errors.New("用例名称不能为空")
+	}
+	if input.Method == "" || input.Path == "" {
+		return nil, errors.New("method and path are required")
+	}
+	tc, err := s.repo.CreateSaved(ctx, parentCaseID, input)
+	if errors.Is(err, ErrTestCaseNotFound) {
+		return nil, ErrTestCaseNotFound
+	}
+	return tc, err
+}
+
+func (s *Service) DeleteSaved(ctx context.Context, parentCaseID, savedCaseID uuid.UUID) error {
+	if parentCaseID == uuid.Nil || savedCaseID == uuid.Nil {
+		return errors.New("case id is required")
+	}
+	return s.repo.DeleteSaved(ctx, parentCaseID, savedCaseID)
+}
+
+func (s *Service) Rename(ctx context.Context, testCaseID uuid.UUID, input RenameInput) (*TestCase, error) {
+	if testCaseID == uuid.Nil {
+		return nil, errors.New("testCaseId is required")
+	}
+	name := strings.TrimSpace(input.Name)
+	if name == "" {
+		return nil, errors.New("用例名称不能为空")
+	}
+	return s.repo.Rename(ctx, testCaseID, name)
+}
+
+// Patch applies a partial update to a test case. Currently supports name and assertions.
+func (s *Service) Patch(ctx context.Context, testCaseID uuid.UUID, input PatchInput) (*TestCase, error) {
+	if testCaseID == uuid.Nil {
+		return nil, errors.New("testCaseId is required")
+	}
+	if input.Name != nil {
+		name := strings.TrimSpace(*input.Name)
+		if name == "" {
+			return nil, errors.New("用例名称不能为空")
+		}
+		tc, err := s.repo.Rename(ctx, testCaseID, name)
+		if err != nil {
+			return tc, err
+		}
+		if input.Assertions == nil {
+			return tc, nil
+		}
+	}
+	if input.Assertions != nil {
+		return s.repo.PatchAssertions(ctx, testCaseID, input.Assertions)
+	}
+	return s.repo.Get(ctx, testCaseID)
 }
 
 // GenerateParams generates default request parameter values for a test case based on its
@@ -66,7 +125,7 @@ func (s *Service) GenerateParams(ctx context.Context, testCaseID uuid.UUID) (*Ge
 		return nil, err
 	}
 	if tc.EndpointID == nil || *tc.EndpointID == uuid.Nil {
-		return nil, fmt.Errorf("该用例未关联 OpenAPI 接口定义，无法自动生成参数")
+		return nil, fmt.Errorf("该接口未关联 OpenAPI 接口定义，无法自动生成参数")
 	}
 	if s.endpointSchema == nil {
 		return nil, fmt.Errorf("endpoint schema provider not configured")

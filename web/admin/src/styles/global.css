@@ -169,3 +169,8 @@ select {
   width: 100%;
   font-family: Menlo, Monaco, Consolas, monospace;
 }
+
+/* 场景编排：接口下拉 teleport 到 body，避免被主区 stacking/overflow 遮挡 */
+.scenario-case-select-dropdown.el-popper {
+  z-index: 5000 !important;
+}

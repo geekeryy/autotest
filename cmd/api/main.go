@@ -11,13 +11,14 @@ import (
 	testcase "autotest/internal/case"
 	"autotest/internal/generator"
 	"autotest/internal/httpx"
+	"autotest/internal/paramsource"
 	"autotest/internal/project"
 	"autotest/internal/report"
 	"autotest/internal/runner"
+	"autotest/internal/scenario"
+	"autotest/internal/scriptlibrary"
 	"autotest/internal/spec"
 	"autotest/internal/store"
-	"autotest/internal/suite"
-
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 )
@@ -47,12 +48,16 @@ func main() {
 	caseSvc := testcase.NewService(caseRepo, specRepo)
 	specSvc := spec.NewService(specRepo, caseRepo, spec.NewImporter(), generator.NewDefault())
 
-	suiteRepo := suite.NewRepository(repo)
-	suiteSvc := suite.NewService(suiteRepo)
+	scenarioRepo := scenario.NewRepository(repo)
+	scenarioSvc := scenario.NewService(scenarioRepo)
 
 	reportRepo := report.NewRepository(repo)
+	paramSourceRepo := paramsource.NewRepository(repo)
+	paramSourceSvc := paramsource.NewService(paramSourceRepo, paramsource.NewExecutor())
+	scriptLibraryRepo := scriptlibrary.NewRepository(repo)
+	scriptLibrarySvc := scriptlibrary.NewService(scriptLibraryRepo)
 	caseRunner := runner.New(nil, nil, reportRepo)
-	runSvc := runner.NewService(caseSvc, projectSvc, reportRepo, caseRunner)
+	runSvc := runner.NewService(caseSvc, projectSvc, reportRepo, caseRunner, paramSourceSvc)
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -75,8 +80,10 @@ func main() {
 		project.NewHandler(projectSvc).Register(r)
 		testcase.NewHandler(caseSvc).Register(r)
 		spec.NewHandler(specSvc).Register(r)
-		suite.NewHandler(suiteSvc).Register(r)
-		runner.NewHandler(runSvc).Register(r)
+		scenario.NewHandler(scenarioSvc).Register(r)
+		paramsource.NewHandler(paramSourceSvc).Register(r)
+		scriptlibrary.NewHandler(scriptLibrarySvc).Register(r)
+		runner.NewHandler(runSvc, scenarioRepo).Register(r)
 	})
 	r.Mount("/api/v1", api)
 

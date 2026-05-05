@@ -162,16 +162,19 @@ import {
 
 const icons = {
   '/dashboard': 'DataAnalysis',
-  '/projects': 'Folder',
-  '/services': 'Operation',
-  '/spec-import': 'Upload',
+  '/projects': 'OfficeBuilding',
+  '/test-data': 'TrendCharts',
+  '/sql-parameter-sources': 'Tickets',
+  '/case-mgmt': 'Document',
   '/cases': 'Document',
+  '/spec-import': 'Upload',
   '/run-console': 'Monitor',
-  '/suites': 'Collection',
+  '/platform': 'Files',
+  '/script-library': 'Notebook',
   '/system': 'Setting',
   '/users': 'User',
   '/roles': 'UserFilled',
-  '/permissions': 'Menu'
+  '/permissions': 'Key'
 }
 
 function buildVisibleMenus(routes) {

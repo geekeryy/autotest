@@ -9,21 +9,24 @@ import (
 	"autotest/internal/httpx"
 	"autotest/internal/project"
 	"autotest/internal/report"
+	"autotest/internal/scenario"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
 
 type Handler struct {
-	service *Service
+	service      *Service
+	scenarioRepo scenarioRepository
 }
 
-func NewHandler(service *Service) *Handler {
-	return &Handler{service: service}
+func NewHandler(service *Service, scenarioRepo scenarioRepository) *Handler {
+	return &Handler{service: service, scenarioRepo: scenarioRepo}
 }
 
 func (h *Handler) Register(r chi.Router) {
 	r.Post("/cases/{caseID}/run", h.runCase)
+	r.Post("/scenarios/{scenarioID}/run", h.runScenario)
 	r.Get("/runs/{runID}/result", h.getRunResult)
 }
 
@@ -41,6 +44,34 @@ func (h *Handler) getRunResult(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, output)
+}
+
+func (h *Handler) runScenario(w http.ResponseWriter, r *http.Request) {
+	scenarioID, err := uuid.Parse(chi.URLParam(r, "scenarioID"))
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, err)
+		return
+	}
+
+	var input RunScenarioInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		httpx.Error(w, http.StatusBadRequest, err)
+		return
+	}
+
+	output, err := h.service.RunScenario(r.Context(), h.scenarioRepo, scenarioID, input)
+	if err != nil {
+		switch {
+		case errors.Is(err, scenario.ErrScenarioNotFound):
+			httpx.Error(w, http.StatusNotFound, err)
+		case errors.Is(err, project.ErrEnvironmentNotFound):
+			httpx.Error(w, http.StatusNotFound, err)
+		default:
+			httpx.Error(w, http.StatusBadRequest, err)
+		}
 		return
 	}
 	httpx.JSON(w, http.StatusOK, output)

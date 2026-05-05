@@ -2,9 +2,31 @@
   <div class="debug-page" :class="{ 'is-embedded': embedded }">
     <div class="debug-header">
       <div>
-        <el-button v-if="!embedded" link type="primary" @click="$router.push('/cases')">返回用例列表</el-button>
-        <h2>{{ testCase?.name || '运行用例' }}</h2>
-        <p v-if="testCase">{{ testCase.method }} {{ testCase.path }}</p>
+        <el-button v-if="!embedded" link type="primary" @click="$router.push('/cases')">返回API管理</el-button>
+        <div class="debug-title-wrap">
+          <h2 class="debug-title">{{ displayTitle }}</h2>
+        </div>
+        <div v-if="savedRequests.length" class="saved-requests-tabs">
+          <div v-for="(saved, index) in savedRequests" :key="saved.id"
+            class="saved-request-tab"
+            :class="{ 'is-active': activeSavedIndex === index }"
+            @click.stop="applySavedRequest(saved, index)"
+            @dblclick.stop="startSavedRename(index)">
+            <input
+              v-if="renamingIndex === index"
+              :ref="(el) => setSavedRenameRef(index, el)"
+              v-model="renamingName"
+              class="saved-request-tab-rename"
+              @blur="finishSavedRename"
+              @keydown.enter.prevent="finishSavedRename"
+              @keydown.esc.prevent="cancelSavedRename"
+              @click.stop
+              @dblclick.stop
+            />
+            <span v-else class="saved-request-tab-label" :title="saved.label">{{ saved.label }}</span>
+            <button class="saved-request-tab-close" title="删除" @click.stop="deleteSavedRequest(index)">×</button>
+          </div>
+        </div>
       </div>
       <div v-if="!embedded" class="debug-actions">
         <div class="environment-picker">
@@ -54,11 +76,6 @@
     </Teleport>
 
     <el-card v-loading="loading" class="request-card">
-      <div class="request-meta">
-        <el-input v-model="runName" class="run-name" placeholder="运行名称，例如：登录接口调试" />
-        <el-checkbox v-model="saveSnapshot">保存本次请求和响应</el-checkbox>
-      </div>
-
       <div class="request-line">
         <el-select v-model="request.method" class="method-select">
           <el-option v-for="method in methods" :key="method" :label="method" :value="method" />
@@ -66,6 +83,9 @@
         <el-input v-model="request.path" class="path-input" placeholder="/api/users/{id}" />
         <div class="send-actions">
           <el-button :loading="generating" @click="generateParams">生成参数</el-button>
+          <el-tooltip content="将当前请求参数保存为一条测试用例（数据库持久化，可在路径右侧 Tab 切换并被场景/测试集引用）" placement="top">
+            <el-button :loading="savingCase" @click="saveCurrentRequest">保存用例</el-button>
+          </el-tooltip>
           <el-button class="send-button" type="primary" :loading="running" :disabled="!environmentId"
             @click="executeRun">
             发送
@@ -123,6 +143,13 @@
           </div>
           <div ref="bodyEditor" class="code-editor" contenteditable spellcheck="false"
             @input="bodyText = $event.target.innerText"></div>
+        </el-tab-pane>
+        <el-tab-pane label="断言" name="assertions">
+          <AssertionEditor v-model="editableAssertions" />
+          <div class="assertion-actions">
+            <el-button size="small" :loading="savingAssertions" @click="saveAssertions">保存断言</el-button>
+            <span v-if="assertionsSaved" class="save-ok-hint">已保存</span>
+          </div>
         </el-tab-pane>
         <el-tab-pane label="上次响应" name="lastResponse">
           <div v-if="hasLastResponse" class="response-preview">
@@ -223,14 +250,32 @@
 
         <el-tab-pane label="断言" name="assertions">
           <el-table :data="assertions" border>
-            <el-table-column prop="type" label="类型" width="160" />
-            <el-table-column label="状态" width="120">
+            <el-table-column label="类型" width="120">
               <template #default="{ row }">
-                <el-tag :type="row.passed ? 'success' : 'danger'">{{ row.passed ? '通过' : '失败' }}</el-tag>
+                <el-tag size="small" :type="assertionTypeColor(row.type)" effect="plain">
+                  {{ assertionTypeLabel(row.type) }}
+                </el-tag>
               </template>
             </el-table-column>
-            <el-table-column prop="message" label="信息" min-width="260" />
+            <el-table-column label="名称 / 路径" min-width="180">
+              <template #default="{ row }">
+                <span v-if="row.name" class="assertion-name">{{ row.name }}</span>
+                <code v-else-if="row.type === 'jsonpath' || row.type === 'header'" class="assertion-path">
+                  {{ assertionSummary(row) }}
+                </code>
+                <span v-else class="assertion-path">{{ assertionSummary(row) }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="状态" width="90">
+              <template #default="{ row }">
+                <el-tag :type="row.passed ? 'success' : 'danger'" size="small">
+                  {{ row.passed ? '通过' : '失败' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="message" label="详情" min-width="220" />
           </el-table>
+          <el-empty v-if="!assertions.length" description="暂无断言结果" :image-size="48" />
         </el-tab-pane>
       </el-tabs>
     </el-card>
@@ -334,12 +379,44 @@
         <el-button type="primary" :loading="savingEnvironment" @click="submitEnvironment">保存</el-button>
       </template>
     </el-dialog>
+
   </div>
 </template>
 
 <script>
-import { generateCaseParams, getCase, listEndpoints, listServiceEnvironments, runCase, updateServiceEnvironment } from '../../api'
+import { ElMessageBox } from 'element-plus'
+import {
+  createSavedCase,
+  deleteSavedCase,
+  generateCaseParams,
+  getCase,
+  listEndpoints,
+  listSavedCases,
+  listServiceEnvironments,
+  patchCase,
+  runCase,
+  updateServiceEnvironment
+} from '../../api'
 import { buildCurlFromRequestSnapshot } from '../../utils/curl'
+import AssertionEditor from '../../components/AssertionEditor.vue'
+
+const ASSERTION_TYPE_LABELS = {
+  status_code: '状态码',
+  jsonpath: 'JSONPath',
+  header: '响应头',
+  body_contains: 'Body',
+  response_time: '响应时间',
+  script: 'JS 脚本'
+}
+
+const ASSERTION_TYPE_COLORS = {
+  status_code: 'primary',
+  jsonpath: 'success',
+  header: 'warning',
+  body_contains: '',
+  response_time: 'info',
+  script: 'danger'
+}
 
 const ENVIRONMENT_STORAGE_KEY = 'autotest.currentEnvironmentIdByProject'
 
@@ -383,6 +460,7 @@ function storeEnvironmentId(projectId, serviceId, environmentId) {
 
 export default {
   name: 'CaseRun',
+  components: { AssertionEditor },
   props: {
     caseId: {
       type: String,
@@ -397,12 +475,13 @@ export default {
       default: true
     }
   },
-  emits: ['status-change'],
+  emits: ['status-change', 'tab-title-change'],
   data() {
     return {
       loading: false,
       running: false,
       generating: false,
+      savingCase: false,
       savingEnvironment: false,
       payload: null,
       testCase: null,
@@ -412,7 +491,6 @@ export default {
       envDialog: false,
       envForm: this.emptyEnvironmentForm(),
       runName: '',
-      saveSnapshot: true,
       activeTab: 'params',
       resultTab: 'response',
       responseDetailTab: 'headers',
@@ -422,10 +500,22 @@ export default {
       queryRows: [],
       headerRows: [],
       variableRows: [],
-      bodyText: '{}'
+      bodyText: '{}',
+      savedRequests: [],
+      activeSavedIndex: -1,
+      renamingIndex: -1,
+      renamingName: '',
+      editableAssertions: [],
+      savingAssertions: false,
+      assertionsSaved: false
     }
   },
   computed: {
+    displayTitle() {
+      const trimmed = (this.runName || '').trim()
+      if (trimmed) return trimmed
+      return this.testCase?.name || '接口调试'
+    },
     hasLastResponse() {
       const value = this.testCase?.lastResponseSnapshot
       return value && typeof value === 'object' && Object.keys(value).length > 0
@@ -437,7 +527,7 @@ export default {
       return this.payload?.run
     },
     result() {
-      return this.payload?.result
+      return this.payload?.result || this.payload?.results?.[0]
     },
     requestSnapshot() {
       return this.result?.requestSnapshot || {}
@@ -471,6 +561,7 @@ export default {
   async created() {
     await this.loadData()
   },
+  beforeUnmount() {},
   watch: {
     caseId() {
       this.loadData()
@@ -491,6 +582,9 @@ export default {
     }
   },
   methods: {
+    updateRunName(name) {
+      if (name && name.trim()) this.runName = name.trim()
+    },
     emptyEnvironmentForm() {
       return { name: '', baseUrl: '', variables: '{}', auth: '{}' }
     },
@@ -505,6 +599,8 @@ export default {
     },
     async loadData() {
       this.loading = true
+      this.activeSavedIndex = -1
+      this.savedRequests = []
       try {
         this.payload = null
         this.emitRunSummary({ running: false, runStatus: '', resultStatus: '', durationMillis: null })
@@ -517,11 +613,14 @@ export default {
         this.endpoint = this.findEndpoint(endpoints, this.testCase)
         this.environmentId = this.resolveEnvironmentId(this.testCase.projectId, this.testCase.serviceId)
         this.runName = this.testCase.name
+        this.editableAssertions = this.parseAssertions(this.testCase.assertions)
         this.applyRequest(this.buildGeneratedRequest(this.testCase))
+        await this.loadSavedRequests()
       } catch {
         // 错误已在全局请求拦截器中提示
         this.testCase = null
         this.environments = []
+        this.savedRequests = []
       } finally {
         this.loading = false
       }
@@ -534,11 +633,18 @@ export default {
         ...this.normalizeObject(saved.variables),
         ...this.normalizeObject(saved.pathVars)
       }
+      const savedQueryKeys = new Set(Object.keys(this.normalizeObject(saved.query)))
+      const mergedQuery = { ...generated.query, ...this.normalizeObject(saved.query) }
+      const queryEnabled = {}
+      for (const key of Object.keys(mergedQuery)) {
+        queryEnabled[key] = generated.queryRequired.has(key) || savedQueryKeys.has(key)
+      }
       const request = {
         method: saved.method || row.method,
         path: this.normalizePathVariables(saved.path || row.path),
         headers: { ...generated.headers, ...this.normalizeObject(saved.headers) },
-        query: { ...generated.query, ...this.normalizeObject(saved.query) },
+        query: mergedQuery,
+        queryEnabled,
         variables: mergedVariables,
         body: generated.hasBody ? generated.body : saved.body
       }
@@ -565,11 +671,12 @@ export default {
         ...raw,
         variables: { ...forPath, ...forRest }
       }
-      this.queryRows = this.objectToRows(raw.query)
+      this.queryRows = this.objectToRows(raw.query, raw.queryEnabled)
       this.headerRows = this.objectToRows(raw.headers)
       this.pathRows = this.objectToRows(forPath)
       this.variableRows = this.objectToRows(forRest)
       this.setBodyText(raw.body == null ? '' : this.formatJSON(raw.body))
+      this.activeTab = this.defaultTab()
     },
     async generateParams() {
       if (!this.testCase) return
@@ -577,11 +684,18 @@ export default {
       try {
         const generated = await generateCaseParams(this.testCase.id)
         const current = this.normalizeRequest(this.request)
+        const schemaGenerated = this.requestFromSchema(this.endpoint?.requestSchema)
+        const generatedQuery = this.normalizeObject(generated.query)
+        const queryEnabled = {}
+        for (const key of Object.keys(generatedQuery)) {
+          queryEnabled[key] = schemaGenerated.queryRequired.has(key)
+        }
         const request = {
           method: current.method || this.testCase.method,
           path: this.normalizePathVariables(current.path || this.testCase.path),
           headers: this.normalizeObject(current.headers),
-          query: this.normalizeObject(generated.query),
+          query: generatedQuery,
+          queryEnabled,
           variables: {
             ...this.normalizeObject(current.variables),
             ...this.normalizeObject(generated.path)
@@ -681,7 +795,8 @@ export default {
       this.running = true
       this.emitRunSummary({ running: true, runStatus: 'running', resultStatus: '', durationMillis: null })
       try {
-        const output = await runCase(this.testCase.id, {
+        const activeSaved = this.activeSavedIndex >= 0 ? this.savedRequests[this.activeSavedIndex] : null
+        const output = await runCase(activeSaved?.id || this.testCase.id, {
           name: this.runName,
           environmentId: this.environmentId,
           request: {
@@ -695,8 +810,7 @@ export default {
           variables: {
             ...this.rowsToObject(this.pathRows),
             ...this.rowsToObject(this.variableRows)
-          },
-          saveSnapshot: this.saveSnapshot
+          }
         })
         this.payload = output
         this.resultTab = 'response'
@@ -706,8 +820,8 @@ export default {
           resultStatus: output.result?.status || '',
           durationMillis: output.result?.durationMillis ?? null
         })
-        if (this.saveSnapshot && output.result?.responseSnapshot && this.testCase) {
-          this.testCase.lastResponseSnapshot = output.result.responseSnapshot
+        if (this.activeSavedIndex >= 0 && this.savedRequests[this.activeSavedIndex]) {
+          this.savedRequests[this.activeSavedIndex].payload = JSON.parse(JSON.stringify(output))
         }
         this.$message.success('运行完成')
       } catch {
@@ -739,8 +853,12 @@ export default {
     removeRow(rows, index) {
       rows.splice(index, 1)
     },
-    objectToRows(value) {
-      return Object.entries(value || {}).map(([key, item]) => ({ enabled: true, key, value: String(item) }))
+    objectToRows(value, enabledMap) {
+      return Object.entries(value || {}).map(([key, item]) => ({
+        enabled: enabledMap ? (enabledMap[key] !== false) : true,
+        key,
+        value: String(item)
+      }))
     },
     rowsToObject(rows) {
       return rows.reduce((out, row) => {
@@ -769,6 +887,7 @@ export default {
       const request = {
         headers: {},
         query: {},
+        queryRequired: new Set(),
         variables: {},
         body: undefined,
         hasBody: false,
@@ -780,6 +899,7 @@ export default {
         const value = this.stringifySample(this.sampleFromSchema(param.schema))
         if (param.in === 'query') {
           request.query[param.name] = value
+          if (param.required) request.queryRequired.add(param.name)
         } else if (param.in === 'header') {
           request.headers[param.name] = value
         } else if (param.in === 'path') {
@@ -860,11 +980,13 @@ export default {
       return String(path || '').replace(/(^|[^{])\{([^{}]+)\}(?!\})/g, '$1{{$2}}')
     },
     defaultTab() {
+      const m = String(this.request.method || '').toUpperCase()
+      if (m === 'POST' || m === 'PUT') {
+        return 'body'
+      }
       if (Object.keys(this.pathVariables(this.request.path)).length > 0) {
         return 'params'
       }
-      const m = String(this.request.method || '').toUpperCase()
-      if (m === 'POST' || m === 'PUT') return 'body'
       return this.activeTab
     },
     pathVariables(path) {
@@ -941,6 +1063,241 @@ export default {
       } catch (error) {
         return value
       }
+    },
+    async loadSavedRequests() {
+      if (!this.testCase?.id) {
+        this.savedRequests = []
+        return
+      }
+      try {
+        const rows = await listSavedCases(this.testCase.id)
+        this.savedRequests = rows.map((row) => this.savedCaseToTab(row))
+      } catch {
+        this.savedRequests = []
+      }
+    },
+    savedCaseToTab(row, payload = null) {
+      const request = this.normalizeRequest(row.request)
+      const path = this.normalizePathVariables(request.path || row.path)
+      const mergedVariables = {
+        ...this.normalizeObject(request.pathVars),
+        ...this.normalizeObject(request.variables)
+      }
+      const { forPath, forRest } = this.splitVariablesByPathTemplate(path, mergedVariables)
+      return {
+        id: row.id,
+        label: row.name,
+        createdAt: row.createdAt,
+        method: request.method || row.method,
+        path,
+        security: request.security,
+        pathRows: this.objectToRows(forPath),
+        queryRows: this.objectToRows(request.query, request.queryEnabled),
+        headerRows: this.objectToRows(request.headers),
+        variableRows: this.objectToRows(forRest),
+        bodyText: request.body == null ? '' : this.formatJSON(request.body),
+        payload
+      }
+    },
+    buildCurrentRequestDefinition(body) {
+      const queryEnabled = this.queryRows.reduce((out, row) => {
+        if (row.key) out[row.key] = row.enabled !== false
+        return out
+      }, {})
+      return {
+        method: this.request.method,
+        path: this.pathForRun(this.request.path),
+        headers: this.rowsToObject(this.headerRows),
+        query: this.rowsToObject(this.queryRows),
+        queryEnabled,
+        variables: {
+          ...this.rowsToObject(this.pathRows),
+          ...this.rowsToObject(this.variableRows)
+        },
+        body,
+        security: this.request.security
+      }
+    },
+    async saveCurrentRequest() {
+      if (!this.testCase) return
+      let body = null
+      if (this.bodyText.trim()) {
+        try {
+          body = JSON.parse(this.bodyText)
+        } catch (error) {
+          this.$message.error(`Body 不是合法 JSON：${error.message}`)
+          return
+        }
+      }
+      const label = this.runName.trim() || `参数 ${this.savedRequests.length + 1}`
+      this.savingCase = true
+      try {
+        const created = await createSavedCase(this.testCase.id, {
+          name: label,
+          method: this.request.method,
+          path: this.request.path,
+          request: this.buildCurrentRequestDefinition(body),
+          assertions: this.testCase.assertions || []
+        })
+        const saved = this.savedCaseToTab(
+          created,
+          this.payload ? JSON.parse(JSON.stringify(this.payload)) : null
+        )
+        const existedIndex = this.savedRequests.findIndex((item) => item.id === saved.id)
+        if (existedIndex >= 0) {
+          this.savedRequests.splice(existedIndex, 1, saved)
+          this.activeSavedIndex = existedIndex
+        } else {
+          this.savedRequests.push(saved)
+          this.activeSavedIndex = this.savedRequests.length - 1
+        }
+        this.$message.success(`测试用例「${label}」已保存到数据库`)
+      } finally {
+        this.savingCase = false
+      }
+    },
+    applySavedRequest(saved, index) {
+      if (this.activeSavedIndex === index) {
+        this.activeSavedIndex = -1
+        this.payload = null
+        this.emitRunSummary({ running: false, runStatus: '', resultStatus: '', durationMillis: null })
+        this.runName = this.testCase?.name || ''
+        this.applyRequest(this.buildGeneratedRequest(this.testCase))
+        return
+      }
+      this.request = {
+        method: saved.method,
+        path: saved.path,
+        headers: this.rowsToObject(saved.headerRows || []),
+        query: this.rowsToObject(saved.queryRows || []),
+        body: null,
+        security: saved.security
+      }
+      this.pathRows = (saved.pathRows || []).map((r) => ({ ...r }))
+      this.queryRows = (saved.queryRows || []).map((r) => ({ ...r }))
+      this.headerRows = (saved.headerRows || []).map((r) => ({ ...r }))
+      this.variableRows = (saved.variableRows || []).map((r) => ({ ...r }))
+      this.setBodyText(saved.bodyText || '')
+      if (saved.label) this.runName = saved.label
+      this.activeTab = this.defaultTab()
+      this.activeSavedIndex = index
+      this.payload = saved.payload ? JSON.parse(JSON.stringify(saved.payload)) : null
+      if (this.payload) {
+        this.resultTab = 'response'
+        const result = this.payload?.result || this.payload?.results?.[0]
+        this.emitRunSummary({
+          running: false,
+          runStatus: this.payload.run?.status || '',
+          resultStatus: result?.status || '',
+          durationMillis: result?.durationMillis ?? null
+        })
+      } else {
+        this.emitRunSummary({ running: false, runStatus: '', resultStatus: '', durationMillis: null })
+      }
+      this.$message.success(`已加载「${saved.label}」`)
+    },
+    async deleteSavedRequest(index) {
+      const label = this.savedRequests[index]?.label
+      const id = this.savedRequests[index]?.id
+      if (!id || !this.testCase?.id) return
+      try {
+        await ElMessageBox.confirm(`确定删除用例「${label}」吗？`, '删除确认', {
+          confirmButtonText: '删除',
+          cancelButtonText: '取消',
+          type: 'warning',
+          confirmButtonClass: 'el-button--danger'
+        })
+      } catch {
+        return
+      }
+      try {
+        await deleteSavedCase(this.testCase.id, id)
+        this.savedRequests.splice(index, 1)
+        if (this.activeSavedIndex === index) {
+          this.activeSavedIndex = -1
+        } else if (this.activeSavedIndex > index) {
+          this.activeSavedIndex -= 1
+        }
+        if (label) this.$message.info(`已删除「${label}」`)
+      } catch {
+        // 错误消息已由请求拦截器统一展示
+      }
+    },
+    startSavedRename(index) {
+      const saved = this.savedRequests[index]
+      if (!saved) return
+      this.renamingIndex = index
+      this.renamingName = saved.label
+      this.$nextTick(() => {
+        const input = this._savedRenameRefs?.[index]
+        if (input) { input.focus(); input.select() }
+      })
+    },
+    setSavedRenameRef(index, el) {
+      if (!this._savedRenameRefs) this._savedRenameRefs = {}
+      if (el) this._savedRenameRefs[index] = el
+      else delete this._savedRenameRefs[index]
+    },
+    async finishSavedRename() {
+      const index = this.renamingIndex
+      if (index < 0) return
+      const name = (this.renamingName || '').trim()
+      this.renamingIndex = -1
+      this.renamingName = ''
+      const saved = this.savedRequests[index]
+      if (!saved || !name || name === saved.label) return
+      const prevLabel = saved.label
+      saved.label = name
+      try {
+        await patchCase(saved.id, { name })
+      } catch {
+        saved.label = prevLabel
+      }
+    },
+    cancelSavedRename() {
+      this.renamingIndex = -1
+      this.renamingName = ''
+    },
+
+    parseAssertions(raw) {
+      if (!raw) return []
+      if (Array.isArray(raw)) return raw
+      if (typeof raw === 'string') {
+        try { return JSON.parse(raw) } catch { return [] }
+      }
+      return []
+    },
+
+    async saveAssertions() {
+      if (!this.testCase) return
+      this.savingAssertions = true
+      this.assertionsSaved = false
+      try {
+        await patchCase(this.testCase.id, { assertions: this.editableAssertions })
+        this.testCase.assertions = this.editableAssertions
+        this.assertionsSaved = true
+        setTimeout(() => { this.assertionsSaved = false }, 2000)
+      } finally {
+        this.savingAssertions = false
+      }
+    },
+
+    assertionTypeLabel(type) {
+      return ASSERTION_TYPE_LABELS[type] || type || '-'
+    },
+
+    assertionTypeColor(type) {
+      return ASSERTION_TYPE_COLORS[type] || ''
+    },
+
+    assertionSummary(row) {
+      if (!row) return ''
+      if (row.type === 'jsonpath') return row.path || ''
+      if (row.type === 'header') return row.name || ''
+      if (row.type === 'body_contains') return row.op || ''
+      if (row.type === 'response_time') return `${row.op} ${row.expected}ms`
+      if (row.type === 'status_code') return `= ${row.expected}`
+      return ''
     }
   }
 }
@@ -965,18 +1322,16 @@ export default {
   padding: 2px 2px 0;
 }
 
-.debug-header h2 {
+.debug-title-wrap {
+  min-width: 0;
+}
+
+.debug-title {
   margin: 4px 0;
   font-size: var(--app-font-size-title);
 }
 
-.debug-header p {
-  margin: 0;
-  color: var(--app-secondary-text);
-}
-
 .debug-actions,
-.request-meta,
 .request-line,
 .body-toolbar {
   display: flex;
@@ -1080,17 +1435,6 @@ export default {
   color: #dc2626;
 }
 
-.request-meta {
-  padding: 14px 16px;
-  border-bottom: 1px solid var(--app-border-color);
-  background: #f8fafc;
-  flex-wrap: wrap;
-}
-
-.run-name {
-  flex: 1 1 260px;
-}
-
 .environment-picker {
   display: flex;
   align-items: center;
@@ -1127,6 +1471,15 @@ export default {
   box-shadow: 0 0 0 1px var(--app-border-color) inset;
 }
 
+.inline-sql-hint {
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--app-border-color);
+  background: #f8fafc;
+  color: var(--app-secondary-text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: var(--app-font-size-small);
+}
+
 .send-actions {
   display: flex;
   align-items: center;
@@ -1138,6 +1491,89 @@ export default {
   min-width: 88px;
   min-height: 42px;
   font-weight: 700;
+}
+
+.saved-requests-tabs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 8px;
+}
+
+.saved-request-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px;
+  border-radius: 20px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--el-text-color-secondary, #909399);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s;
+  user-select: none;
+}
+
+.saved-request-tab:hover {
+  background: var(--el-fill-color-light, #f5f7fa);
+  color: var(--el-text-color-regular, #606266);
+}
+
+.saved-request-tab.is-active {
+  background: var(--el-color-primary-light-9, #ecf5ff);
+  color: var(--el-color-primary, #409eff);
+  font-weight: 500;
+}
+
+.saved-request-tab-label {
+  max-width: 100px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.saved-request-tab-rename {
+  width: 90px;
+  height: 18px;
+  padding: 0 4px;
+  border: 1px solid var(--el-color-primary);
+  border-radius: 3px;
+  outline: none;
+  font-size: 12px;
+  font-family: inherit;
+  line-height: 18px;
+  background: #fff;
+  color: inherit;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--el-color-primary) 20%, transparent);
+}
+
+.saved-request-tab-close {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border: none;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  color: var(--el-text-color-placeholder, #c0c4cc);
+  font-size: 14px;
+  line-height: 1;
+  flex-shrink: 0;
+  border-radius: 50%;
+  transition: background 0.1s, color 0.1s;
+}
+
+.saved-request-tab.is-active:hover .saved-request-tab-close {
+  display: inline-flex;
+}
+
+.saved-request-tab-close:hover {
+  background: var(--el-color-danger-light-8, #fde2e2);
+  color: var(--el-color-danger, #f56c6c);
 }
 
 .request-tabs {
@@ -1233,6 +1669,29 @@ export default {
 
 .code-view--curl {
   min-height: 160px;
+}
+
+.assertion-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.save-ok-hint {
+  font-size: var(--app-font-size-small);
+  color: var(--el-color-success);
+}
+
+.assertion-name {
+  font-size: var(--app-font-size-small);
+  font-weight: 500;
+}
+
+.assertion-path {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  color: var(--app-secondary-text);
 }
 
 .section-grid {
@@ -1395,6 +1854,7 @@ export default {
   .environment-select {
     width: 100%;
   }
+
 
   .send-button {
     width: 100%;

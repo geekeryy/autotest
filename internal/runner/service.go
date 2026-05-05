@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	testcase "autotest/internal/case"
+	"autotest/internal/paramsource"
 	"autotest/internal/project"
 	"autotest/internal/report"
 
@@ -20,6 +21,12 @@ type Service struct {
 	projects *project.ServiceLayer
 	reports  *report.Repository
 	runner   *Runner
+	params   parameterSourceService
+}
+
+type parameterSourceService interface {
+	ExecuteInlineReferences(ctx context.Context, projectID, serviceID uuid.UUID, refs []paramsource.InlineReference, vars map[string]string) (map[string]string, []paramsource.ExecutionSnapshot, error)
+	ExecuteSQLStep(ctx context.Context, projectID, serviceID, environmentID uuid.UUID, input paramsource.SQLStepInput, vars map[string]string) (paramsource.SQLStepResult, error)
 }
 
 type RunCaseInput struct {
@@ -27,12 +34,12 @@ type RunCaseInput struct {
 	Name          string          `json:"name"`
 	Request       json.RawMessage `json:"request"`
 	Variables     map[string]any  `json:"variables"`
-	SaveSnapshot  bool            `json:"saveSnapshot"`
 }
 
 type RunCaseOutput struct {
-	Run    *report.Run    `json:"run"`
-	Result *report.Result `json:"result"`
+	Run     *report.Run     `json:"run"`
+	Result  *report.Result  `json:"result"`
+	Results []report.Result `json:"results,omitempty"`
 }
 
 type RunResultOutput struct {
@@ -41,12 +48,13 @@ type RunResultOutput struct {
 	Results []report.Result `json:"results"`
 }
 
-func NewService(cases *testcase.Service, projects *project.ServiceLayer, reports *report.Repository, runner *Runner) *Service {
+func NewService(cases *testcase.Service, projects *project.ServiceLayer, reports *report.Repository, runner *Runner, params parameterSourceService) *Service {
 	return &Service{
 		cases:    cases,
 		projects: projects,
 		reports:  reports,
 		runner:   runner,
+		params:   params,
 	}
 }
 
@@ -70,23 +78,49 @@ func (s *Service) RunCase(ctx context.Context, testCaseID uuid.UUID, input RunCa
 		effectiveRequest = input.Request
 		effectiveCase.Request = effectiveRequest
 	}
+	var inlineRefs []paramsource.InlineReference
+	var inlineScanErr error
+	if reqDef, err := decodeRequest(effectiveRequest); err == nil {
+		if reqDef.Method == "" {
+			reqDef.Method = tc.Method
+		}
+		if reqDef.Path == "" {
+			reqDef.Path = tc.Path
+		}
+		inlineRefs, inlineScanErr = collectInlineSQLReferences(reqDef)
+	}
+	if inlineScanErr == nil {
+		var variableRefs []paramsource.InlineReference
+		variableRefs, inlineScanErr = collectInlineSQLReferencesFromVariables(input.Variables)
+		inlineRefs = append(inlineRefs, variableRefs...)
+	}
 
-	vars, err := mergeVariables(env.Variables, input.Variables)
+	baseVars, err := mergeVariables(env.Variables, input.Variables)
 	if err != nil {
 		return nil, err
 	}
-	rawVars, _ := json.Marshal(vars)
 	runName := strings.TrimSpace(input.Name)
 	if runName == "" {
 		runName = tc.Name
 	}
+
+	variants := []caseRunVariant{{Variables: baseVars}}
+	var runErr error
+	if inlineScanErr != nil {
+		runErr = inlineScanErr
+	} else {
+		variants, runErr = s.applyInlineSQLReferences(ctx, tc, inlineRefs, variants)
+	}
+	rawVars, _ := json.Marshal(variants[0].Variables)
+	rawParamSnapshots := paramsource.MarshalSnapshots(variants[0].ParameterSourceSnapshots)
 	snapshot, _ := json.Marshal(map[string]any{
-		"type":            "case",
-		"testCaseId":      tc.ID,
-		"testCaseName":    tc.Name,
-		"environmentId":   env.ID,
-		"environmentName": env.Name,
-		"runName":         runName,
+		"type":                     "case",
+		"testCaseId":               tc.ID,
+		"templateName":             tc.Name,
+		"environmentId":            env.ID,
+		"environmentName":          env.Name,
+		"runName":                  runName,
+		"parameterSourceSnapshots": variants[0].ParameterSourceSnapshots,
 	})
 
 	run, err := s.reports.CreateRun(ctx, report.CreateRunInput{
@@ -100,27 +134,64 @@ func (s *Service) RunCase(ctx context.Context, testCaseID uuid.UUID, input RunCa
 	if err != nil {
 		return nil, err
 	}
-
-	result, runErr := s.runner.ExecuteCase(ctx, run.ID, effectiveCase, *env, vars)
-	status := report.RunPassed
-	if runErr != nil || result == nil || result.Status != report.ResultPassed {
-		status = report.RunFailed
+	if runErr != nil {
+		result, saveErr := s.reports.SaveResult(ctx, report.Result{
+			RunID:                    run.ID,
+			TestCaseID:               tc.ID,
+			Status:                   report.ResultError,
+			ParameterSourceSnapshots: rawParamSnapshots,
+			Error:                    runErr.Error(),
+		})
+		if saveErr != nil {
+			return nil, saveErr
+		}
+		finished, finishErr := s.reports.FinishRun(ctx, run.ID, report.RunFailed)
+		if finishErr != nil {
+			return nil, finishErr
+		}
+		return &RunCaseOutput{Run: finished, Result: result, Results: []report.Result{*result}}, runErr
 	}
+
+	firstResult, results, status, firstRunErr := executeCaseRunVariants(ctx, variants, func(ctx context.Context, variant caseRunVariant) (*report.Result, error) {
+		return s.runner.ExecuteCase(
+			ctx,
+			run.ID,
+			effectiveCase,
+			*env,
+			variant.Variables,
+			paramsource.MarshalSnapshots(variant.ParameterSourceSnapshots),
+		)
+	})
 
 	finished, finishErr := s.reports.FinishRun(ctx, run.ID, status)
 	if finishErr != nil {
 		return nil, finishErr
 	}
-	if runErr != nil {
-		return nil, runErr
-	}
-	if input.SaveSnapshot && result != nil {
-		if err := s.cases.SaveRunSnapshot(ctx, tc.ID, effectiveRequest, result.ResponseSnapshot); err != nil {
-			return nil, err
-		}
+	if firstRunErr != nil {
+		return &RunCaseOutput{Run: finished, Result: firstResult, Results: results}, firstRunErr
 	}
 
-	return &RunCaseOutput{Run: finished, Result: result}, nil
+	return &RunCaseOutput{Run: finished, Result: firstResult, Results: results}, nil
+}
+
+func (s *Service) applyInlineSQLReferences(ctx context.Context, tc *testcase.TestCase, refs []paramsource.InlineReference, variants []caseRunVariant) ([]caseRunVariant, error) {
+	if len(refs) == 0 {
+		return variants, nil
+	}
+	if s.params == nil {
+		return variants, errors.New("sql parameter source service is unavailable")
+	}
+	for idx := range variants {
+		inlineVars, snapshots, err := s.params.ExecuteInlineReferences(ctx, tc.ProjectID, tc.ServiceID, refs, variants[idx].Variables)
+		variants[idx].ParameterSourceSnapshots = append(variants[idx].ParameterSourceSnapshots, snapshots...)
+		if err != nil {
+			return variants, err
+		}
+		for key, value := range inlineVars {
+			variants[idx].Variables[key] = value
+		}
+	}
+	return variants, nil
 }
 
 func (s *Service) GetRunResult(ctx context.Context, runID uuid.UUID) (*RunResultOutput, error) {
@@ -159,6 +230,40 @@ func mergeVariables(raw json.RawMessage, overrides map[string]any) (map[string]s
 		vars[key] = variableString(value)
 	}
 	return vars, nil
+}
+
+type caseRunVariant struct {
+	Variables                map[string]string
+	ParameterSourceSnapshots []paramsource.ExecutionSnapshot
+}
+
+type caseRunVariantExecutor func(context.Context, caseRunVariant) (*report.Result, error)
+
+func executeCaseRunVariants(ctx context.Context, variants []caseRunVariant, execute caseRunVariantExecutor) (*report.Result, []report.Result, report.RunStatus, error) {
+	status := report.RunPassed
+	var firstResult *report.Result
+	var results []report.Result
+	var firstErr error
+	for _, variant := range variants {
+		result, err := execute(ctx, variant)
+		if result != nil {
+			if firstResult == nil {
+				firstResult = result
+			}
+			results = append(results, *result)
+		}
+		if err != nil {
+			status = report.RunFailed
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		if result == nil || result.Status != report.ResultPassed {
+			status = report.RunFailed
+		}
+	}
+	return firstResult, results, status, firstErr
 }
 
 func variableString(value any) string {

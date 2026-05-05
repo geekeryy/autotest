@@ -9,9 +9,13 @@ export const login = (data) => request.post('/auth/login', data)
 export const logout = () => request.post('/auth/logout')
 export const getMe = () => request.get('/auth/me')
 
-export const listProjects = () => request.get('/projects')
+export const listProjects = () => request.get('/projects').then(asList)
 export const createProject = (data) => request.post('/projects', data)
 export const deleteProject = (id) => request.delete(`/projects/${id}`)
+export const listProjectMembers = (projectId) => request.get(`/projects/${projectId}/members`).then(asList)
+export const addProjectMember = (projectId, data) => request.post(`/projects/${projectId}/members`, data)
+export const updateProjectMember = (projectId, userId, data) => request.put(`/projects/${projectId}/members/${userId}`, data)
+export const removeProjectMember = (projectId, userId) => request.delete(`/projects/${projectId}/members/${userId}`)
 export const listServices = (projectId) => request.get(`/projects/${projectId}/services`)
 export const createService = (projectId, data) => request.post(`/projects/${projectId}/services`, data)
 export const updateService = (projectId, serviceId, data) => request.put(`/projects/${projectId}/services/${serviceId}`, data)
@@ -33,17 +37,73 @@ export const importSpec = (projectId, serviceId, content) =>
 export const listSpecs = (projectId, serviceId) => request.get(`/projects/${projectId}/services/${serviceId}/specs`)
 export const listEndpoints = (projectId, serviceId) => request.get(`/projects/${projectId}/services/${serviceId}/endpoints`)
 
-export const listCases = (params = {}) => request.get('/cases', { params })
+export const listCases = (params = {}) => request.get('/cases', { params }).then(asList)
 export const getCase = (caseId) => request.get(`/cases/${caseId}`)
+export const patchCase = (caseId, data) => request.patch(`/cases/${caseId}`, data)
 export const createCase = (data) => request.post('/cases', data)
+export const listSavedCases = (caseId) => request.get(`/cases/${caseId}/saved-cases`).then(asList)
+export const createSavedCase = (caseId, data) => request.post(`/cases/${caseId}/saved-cases`, data)
+export const deleteSavedCase = (caseId, savedCaseId) => request.delete(`/cases/${caseId}/saved-cases/${savedCaseId}`)
 export const generateCaseParams = (caseId) => request.get(`/cases/${caseId}/generate-params`)
 export const runCase = (caseId, data) => request.post(`/cases/${caseId}/run`, data)
 export const getRunResult = (runId) => request.get(`/runs/${runId}/result`)
 
-export const listSuites = (params = {}) => request.get('/suites', { params })
-export const createSuite = (data) => request.post('/suites', data)
-export const listSuiteItems = (suiteId) => request.get(`/suites/${suiteId}/items`)
-export const addSuiteItem = (suiteId, data) => request.post(`/suites/${suiteId}/items`, data)
+/**
+ * @typedef {Object} DataSource
+ * @property {string} id
+ * @property {string} projectId
+ * @property {string} serviceId
+ * @property {string} environmentId
+ * @property {string} name
+ * @property {string} driver
+ * @property {string=} dsn
+ * @property {Object=} config
+ */
+export const listDataSources = (params = {}) => request.get('/data-sources', { params }).then(asList)
+export const createDataSource = (data) => request.post('/data-sources', data)
+export const updateDataSource = (id, data) => request.put(`/data-sources/${id}`, data)
+export const deleteDataSource = (id) => request.delete(`/data-sources/${id}`)
+export const testDataSource = (id) => request.post(`/data-sources/${id}/test`)
+export const getDataSourceSchema = (id) => request.get(`/data-sources/${id}/schema`).then(asList)
+
+/**
+ * @typedef {Object} SQLParameterSource
+ * @property {string} id
+ * @property {string} projectId
+ * @property {string} serviceId
+ * @property {string} dataSourceId
+ * @property {string} key
+ * @property {string} name
+ * @property {string} sql
+ * @property {Object=} inputParams
+ */
+export const listSQLParameterSources = (params = {}) => request.get('/sql-parameter-sources', { params }).then(asList)
+export const createSQLParameterSource = (data) => request.post('/sql-parameter-sources', data)
+export const updateSQLParameterSource = (id, data) => request.put(`/sql-parameter-sources/${id}`, data)
+export const deleteSQLParameterSource = (id) => request.delete(`/sql-parameter-sources/${id}`)
+export const previewSQLParameterSource = (id, data = {}) => request.post(`/sql-parameter-sources/${id}/preview`, data)
+/** 新增/编辑弹窗内根据当前表单测试 SQL（无需已保存的记录） */
+export const previewSQLParameterSourceDraft = (data) => request.post('/sql-parameter-sources/preview', data)
+
+// Scenario orchestration
+export const listScenarios = (params = {}) => request.get('/scenarios', { params }).then(asList)
+export const createScenario = (data) => request.post('/scenarios', data)
+export const updateScenario = (id, data) => request.put(`/scenarios/${id}`, data)
+export const deleteScenario = (id) => request.delete(`/scenarios/${id}`)
+export const listScenarioSteps = (scenarioId) => request.get(`/scenarios/${scenarioId}/steps`).then(asList)
+export const reorderScenarioSteps = (scenarioId, data) =>
+  request.put(`/scenarios/${scenarioId}/steps/reorder`, data)
+export const upsertScenarioStep = (scenarioId, stepOrder, data) =>
+  request.put(`/scenarios/${scenarioId}/steps/${stepOrder}`, data)
+export const deleteScenarioStep = (scenarioId, stepId) => request.delete(`/scenarios/${scenarioId}/steps/${stepId}`)
+export const runScenario = (scenarioId, data) => request.post(`/scenarios/${scenarioId}/run`, data)
+
+/** @param {string} projectId */
+export const listScriptLibraryTemplates = (projectId) =>
+  request.get('/script-library-templates', { params: { projectId } }).then(asList)
+export const createScriptLibraryTemplate = (data) => request.post('/script-library-templates', data)
+export const updateScriptLibraryTemplate = (id, data) => request.put(`/script-library-templates/${id}`, data)
+export const deleteScriptLibraryTemplate = (id) => request.delete(`/script-library-templates/${id}`)
 
 export const listUsers = () => request.get('/users')
 export const createUser = (data) => request.post('/users', data)

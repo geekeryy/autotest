@@ -30,13 +30,14 @@ type Runner struct {
 }
 
 type RequestDefinition struct {
-	Method   string                `json:"method"`
-	Path     string                `json:"path"`
-	URL      string                `json:"url"`
-	Headers  map[string]string     `json:"headers"`
-	Query    map[string]string     `json:"query"`
-	Body     any                   `json:"body"`
-	Security []map[string][]string `json:"security,omitempty"`
+	Method    string                `json:"method"`
+	Path      string                `json:"path"`
+	URL       string                `json:"url"`
+	Headers   map[string]string     `json:"headers"`
+	Query     map[string]string     `json:"query"`
+	Body      any                   `json:"body"`
+	Variables map[string]any        `json:"variables"`
+	Security  []map[string][]string `json:"security,omitempty"`
 }
 
 func New(client *http.Client, engine *assertion.Engine, results ResultStore) *Runner {
@@ -49,16 +50,26 @@ func New(client *http.Client, engine *assertion.Engine, results ResultStore) *Ru
 	return &Runner{Client: client, Engine: engine, Results: results}
 }
 
-func (r *Runner) ExecuteCase(ctx context.Context, runID uuid.UUID, tc testcase.TestCase, env project.Environment, vars map[string]string) (*report.Result, error) {
+func (r *Runner) ExecuteCase(ctx context.Context, runID uuid.UUID, tc testcase.TestCase, env project.Environment, vars map[string]string, parameterSourceSnapshots json.RawMessage) (*report.Result, error) {
+	return r.executeCase(ctx, runID, nil, tc, env, vars, parameterSourceSnapshots)
+}
+
+func (r *Runner) ExecuteCaseWithStepID(ctx context.Context, runID uuid.UUID, stepID uuid.UUID, tc testcase.TestCase, env project.Environment, vars map[string]string, parameterSourceSnapshots json.RawMessage) (*report.Result, error) {
+	return r.executeCase(ctx, runID, &stepID, tc, env, vars, parameterSourceSnapshots)
+}
+
+func (r *Runner) executeCase(ctx context.Context, runID uuid.UUID, stepID *uuid.UUID, tc testcase.TestCase, env project.Environment, vars map[string]string, parameterSourceSnapshots json.RawMessage) (*report.Result, error) {
 	start := time.Now()
 	reqDef, err := decodeRequest(tc.Request)
 	if err != nil {
 		return r.finish(ctx, report.Result{
-			RunID:          runID,
-			TestCaseID:     tc.ID,
-			Status:         report.ResultError,
-			DurationMillis: time.Since(start).Milliseconds(),
-			Error:          err.Error(),
+			RunID:                    runID,
+			TestCaseID:               tc.ID,
+			StepID:                   stepID,
+			Status:                   report.ResultError,
+			DurationMillis:           time.Since(start).Milliseconds(),
+			ParameterSourceSnapshots: parameterSourceSnapshots,
+			Error:                    err.Error(),
 		})
 	}
 	if reqDef.Method == "" {
@@ -71,46 +82,55 @@ func (r *Runner) ExecuteCase(ctx context.Context, runID uuid.UUID, tc testcase.T
 	httpReq, requestSnapshot, err := buildHTTPRequest(ctx, reqDef, env, vars)
 	if err != nil {
 		return r.finish(ctx, report.Result{
-			RunID:           runID,
-			TestCaseID:      tc.ID,
-			Status:          report.ResultError,
-			DurationMillis:  time.Since(start).Milliseconds(),
-			RequestSnapshot: requestSnapshot,
-			Error:           err.Error(),
+			RunID:                    runID,
+			TestCaseID:               tc.ID,
+			StepID:                   stepID,
+			Status:                   report.ResultError,
+			DurationMillis:           time.Since(start).Milliseconds(),
+			RequestSnapshot:          requestSnapshot,
+			ParameterSourceSnapshots: parameterSourceSnapshots,
+			Error:                    err.Error(),
 		})
 	}
 
 	resp, err := r.Client.Do(httpReq)
 	if err != nil {
 		return r.finish(ctx, report.Result{
-			RunID:           runID,
-			TestCaseID:      tc.ID,
-			Status:          report.ResultError,
-			DurationMillis:  time.Since(start).Milliseconds(),
-			RequestSnapshot: requestSnapshot,
-			Error:           err.Error(),
+			RunID:                    runID,
+			TestCaseID:               tc.ID,
+			StepID:                   stepID,
+			Status:                   report.ResultError,
+			DurationMillis:           time.Since(start).Milliseconds(),
+			RequestSnapshot:          requestSnapshot,
+			ParameterSourceSnapshots: parameterSourceSnapshots,
+			Error:                    err.Error(),
 		})
 	}
 	defer resp.Body.Close()
 
 	body, readErr := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
+	durationMillis := time.Since(start).Milliseconds()
 	responseSnapshot := snapshotResponse(resp, body)
 	if readErr != nil {
 		return r.finish(ctx, report.Result{
-			RunID:            runID,
-			TestCaseID:       tc.ID,
-			Status:           report.ResultError,
-			DurationMillis:   time.Since(start).Milliseconds(),
-			RequestSnapshot:  requestSnapshot,
-			ResponseSnapshot: responseSnapshot,
-			Error:            readErr.Error(),
+			RunID:                    runID,
+			TestCaseID:               tc.ID,
+			StepID:                   stepID,
+			Status:                   report.ResultError,
+			DurationMillis:           durationMillis,
+			RequestSnapshot:          requestSnapshot,
+			ResponseSnapshot:         responseSnapshot,
+			ParameterSourceSnapshots: parameterSourceSnapshots,
+			Error:                    readErr.Error(),
 		})
 	}
 
 	assertionResults := r.Engine.Evaluate(ctx, tc.Assertions, assertion.Input{
-		StatusCode: resp.StatusCode,
-		Headers:    resp.Header,
-		Body:       body,
+		StatusCode:     resp.StatusCode,
+		Headers:        resp.Header,
+		Body:           body,
+		DurationMillis: durationMillis,
+		Variables:      vars,
 	})
 	rawAssertions, _ := json.Marshal(assertionResults)
 
@@ -120,13 +140,15 @@ func (r *Runner) ExecuteCase(ctx context.Context, runID uuid.UUID, tc testcase.T
 	}
 
 	return r.finish(ctx, report.Result{
-		RunID:            runID,
-		TestCaseID:       tc.ID,
-		Status:           status,
-		DurationMillis:   time.Since(start).Milliseconds(),
-		RequestSnapshot:  requestSnapshot,
-		ResponseSnapshot: responseSnapshot,
-		Assertions:       rawAssertions,
+		RunID:                    runID,
+		TestCaseID:               tc.ID,
+		StepID:                   stepID,
+		Status:                   status,
+		DurationMillis:           durationMillis,
+		RequestSnapshot:          requestSnapshot,
+		ResponseSnapshot:         responseSnapshot,
+		Assertions:               rawAssertions,
+		ParameterSourceSnapshots: parameterSourceSnapshots,
 	})
 }
 
@@ -149,10 +171,11 @@ func decodeRequest(raw json.RawMessage) (RequestDefinition, error) {
 }
 
 func buildHTTPRequest(ctx context.Context, def RequestDefinition, env project.Environment, vars map[string]string) (*http.Request, json.RawMessage, error) {
-	target := RenderVariables(def.URL, vars)
+	effectiveVars := mergeRequestVariables(def.Variables, vars)
+	target := renderVariables(def.URL, effectiveVars)
 	if target == "" {
 		base := strings.TrimRight(env.BaseURL, "/")
-		path := "/" + strings.TrimLeft(RenderVariables(def.Path, vars), "/")
+		path := "/" + strings.TrimLeft(renderVariables(def.Path, effectiveVars), "/")
 		target = base + path
 	}
 
@@ -161,12 +184,13 @@ func buildHTTPRequest(ctx context.Context, def RequestDefinition, env project.En
 		return nil, nil, fmt.Errorf("parse request url: %w", err)
 	}
 	query := parsed.Query()
-	for key, value := range RenderMap(def.Query, vars) {
+	for key, value := range renderMap(def.Query, effectiveVars) {
 		query.Set(key, value)
 	}
 	parsed.RawQuery = query.Encode()
 
-	body, err := json.Marshal(def.Body)
+	renderedBody := renderAny(def.Body, effectiveVars)
+	body, err := json.Marshal(renderedBody)
 	if err != nil {
 		return nil, nil, fmt.Errorf("marshal request body: %w", err)
 	}
@@ -174,15 +198,15 @@ func buildHTTPRequest(ctx context.Context, def RequestDefinition, env project.En
 		body = nil
 	}
 
-	method := strings.ToUpper(RenderVariables(def.Method, vars))
+	method := strings.ToUpper(renderVariables(def.Method, effectiveVars))
 	req, err := http.NewRequestWithContext(ctx, method, parsed.String(), bytes.NewReader(body))
 	if err != nil {
 		return nil, nil, fmt.Errorf("create request: %w", err)
 	}
-	for key, value := range RenderMap(def.Headers, vars) {
+	for key, value := range renderMap(def.Headers, effectiveVars) {
 		req.Header.Set(key, value)
 	}
-	if err := applyEnvironmentAuth(req, env.Auth, def, vars); err != nil {
+	if err := applyEnvironmentAuth(req, env.Auth, def, effectiveVars); err != nil {
 		return nil, nil, err
 	}
 
@@ -196,6 +220,20 @@ func buildHTTPRequest(ctx context.Context, def RequestDefinition, env project.En
 	}
 	rawSnapshot, _ := json.Marshal(snapshot)
 	return req, rawSnapshot, nil
+}
+
+func mergeRequestVariables(defaults map[string]any, overrides map[string]string) map[string]string {
+	if len(defaults) == 0 && len(overrides) == 0 {
+		return nil
+	}
+	merged := make(map[string]string, len(defaults)+len(overrides))
+	for key, value := range defaults {
+		merged[key] = variableString(value)
+	}
+	for key, value := range overrides {
+		merged[key] = value
+	}
+	return merged
 }
 
 func hasSecurityRequirements(security []map[string][]string) bool {
@@ -272,7 +310,7 @@ func selectEnvironmentAuth(rawAuth json.RawMessage, def RequestDefinition, reque
 		}
 	}
 
-	pathCandidates := []string{requestPath, RenderVariables(def.Path, vars)}
+	pathCandidates := []string{requestPath, renderVariables(def.Path, vars)}
 	if profileName := profileNameForPathRules(cfg, pathCandidates); profileName != "" {
 		return authProfile(cfg, profileName)
 	}
@@ -367,10 +405,10 @@ func authProfile(cfg environmentAuthConfig, profileName string) (*authDefinition
 }
 
 func applyAuthDefinition(req *http.Request, auth authDefinition, vars map[string]string) error {
-	for key, value := range RenderMap(auth.Headers, vars) {
+	for key, value := range renderMap(auth.Headers, vars) {
 		setHeaderIfAbsent(req, key, value)
 	}
-	for key, value := range RenderMap(auth.Query, vars) {
+	for key, value := range renderMap(auth.Query, vars) {
 		setQueryIfAbsent(req, key, value)
 	}
 
@@ -382,7 +420,7 @@ func applyAuthDefinition(req *http.Request, auth authDefinition, vars map[string
 		if tokenTemplate == "" {
 			tokenTemplate = auth.Value
 		}
-		token := strings.TrimSpace(RenderVariables(tokenTemplate, vars))
+		token := strings.TrimSpace(renderVariables(tokenTemplate, vars))
 		if token == "" {
 			return nil
 		}
@@ -394,14 +432,14 @@ func applyAuthDefinition(req *http.Request, auth authDefinition, vars map[string
 		if req.Header.Get("Authorization") != "" {
 			return nil
 		}
-		req.SetBasicAuth(RenderVariables(auth.Username, vars), RenderVariables(auth.Password, vars))
+		req.SetBasicAuth(renderVariables(auth.Username, vars), renderVariables(auth.Password, vars))
 	case "api_key", "apikey", "api-key":
-		name := strings.TrimSpace(RenderVariables(auth.Name, vars))
+		name := strings.TrimSpace(renderVariables(auth.Name, vars))
 		valueTemplate := auth.Value
 		if valueTemplate == "" {
 			valueTemplate = auth.Token
 		}
-		value := RenderVariables(valueTemplate, vars)
+		value := renderVariables(valueTemplate, vars)
 		if name == "" {
 			return nil
 		}
@@ -411,14 +449,14 @@ func applyAuthDefinition(req *http.Request, auth authDefinition, vars map[string
 			setHeaderIfAbsent(req, name, value)
 		}
 	case "header":
-		name := strings.TrimSpace(RenderVariables(auth.Name, vars))
+		name := strings.TrimSpace(renderVariables(auth.Name, vars))
 		if name != "" {
-			setHeaderIfAbsent(req, name, RenderVariables(auth.Value, vars))
+			setHeaderIfAbsent(req, name, renderVariables(auth.Value, vars))
 		}
 	case "query":
-		name := strings.TrimSpace(RenderVariables(auth.Name, vars))
+		name := strings.TrimSpace(renderVariables(auth.Name, vars))
 		if name != "" {
-			setQueryIfAbsent(req, name, RenderVariables(auth.Value, vars))
+			setQueryIfAbsent(req, name, renderVariables(auth.Value, vars))
 		}
 	default:
 		return fmt.Errorf("unsupported environment auth type %q", auth.Type)

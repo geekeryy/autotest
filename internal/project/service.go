@@ -15,15 +15,60 @@ func NewServiceLayer(repo *Repository) *ServiceLayer {
 	return &ServiceLayer{repo: repo}
 }
 
-func (s *ServiceLayer) CreateProject(ctx context.Context, input CreateProjectInput) (*Project, error) {
+func (s *ServiceLayer) CreateProject(ctx context.Context, input CreateProjectInput, createdBy uuid.UUID) (*Project, error) {
 	if input.Name == "" {
 		return nil, errors.New("project name is required")
 	}
-	return s.repo.CreateProject(ctx, input)
+	return s.repo.CreateProject(ctx, input, createdBy)
 }
 
+// ListProjects returns all projects for admin users.
 func (s *ServiceLayer) ListProjects(ctx context.Context) ([]Project, error) {
 	return s.repo.ListProjects(ctx)
+}
+
+// ListProjectsForUser returns only projects the user is a member of.
+func (s *ServiceLayer) ListProjectsForUser(ctx context.Context, userID uuid.UUID) ([]Project, error) {
+	return s.repo.ListProjectsForUser(ctx, userID)
+}
+
+func (s *ServiceLayer) GetMembership(ctx context.Context, projectID, userID uuid.UUID) (*ProjectMember, error) {
+	return s.repo.GetMembership(ctx, projectID, userID)
+}
+
+func (s *ServiceLayer) ListMembers(ctx context.Context, projectID uuid.UUID) ([]ProjectMember, error) {
+	return s.repo.ListMembers(ctx, projectID)
+}
+
+func (s *ServiceLayer) AddMember(ctx context.Context, projectID uuid.UUID, input AddMemberInput) (*ProjectMember, error) {
+	if input.UserID == uuid.Nil {
+		return nil, errors.New("userId is required")
+	}
+	if input.Role == "" {
+		input.Role = ProjectRoleDeveloper
+	}
+	if !ProjectRoleAtLeast(input.Role, ProjectRoleViewer) || !ProjectRoleAtLeast(ProjectRoleOwner, input.Role) {
+		return nil, errors.New("invalid project role")
+	}
+	existing, err := s.repo.GetMembership(ctx, projectID, input.UserID)
+	if err != nil {
+		return nil, err
+	}
+	if existing != nil {
+		return nil, ErrMemberAlreadyExists
+	}
+	return s.repo.AddMember(ctx, projectID, input)
+}
+
+func (s *ServiceLayer) UpdateMember(ctx context.Context, projectID, userID uuid.UUID, input UpdateMemberInput) (*ProjectMember, error) {
+	if !ProjectRoleAtLeast(input.Role, ProjectRoleViewer) || !ProjectRoleAtLeast(ProjectRoleOwner, input.Role) {
+		return nil, errors.New("invalid project role")
+	}
+	return s.repo.UpdateMember(ctx, projectID, userID, input)
+}
+
+func (s *ServiceLayer) RemoveMember(ctx context.Context, projectID, userID uuid.UUID) error {
+	return s.repo.RemoveMember(ctx, projectID, userID)
 }
 
 func (s *ServiceLayer) DeleteProject(ctx context.Context, projectID uuid.UUID) error {

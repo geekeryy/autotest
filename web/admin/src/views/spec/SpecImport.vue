@@ -22,11 +22,11 @@
 
     <el-input v-model="content" class="json-editor" type="textarea" :rows="16" placeholder="粘贴 OpenAPI/Swagger JSON 或 YAML 内容" />
     <div class="actions">
-      <el-button type="primary" :disabled="!projectId || !serviceId || !content" :loading="loading" @click="submit">导入并生成用例</el-button>
+      <el-button type="primary" :disabled="!projectId || !serviceId || !content" :loading="loading" @click="submit">导入并生成接口</el-button>
     </div>
 
     <el-alert v-if="summary" type="success" show-icon :closable="false" class="summary">
-      <template #title>导入成功：接口 {{ summary.endpoints.length }} 个，生成用例 {{ summary.generatedCases }} 个</template>
+      <template #title>导入成功：接口定义 {{ summary.endpoints.length }} 个，生成可运行接口 {{ summary.generatedCases }} 条</template>
     </el-alert>
 
     <el-table :data="specs" border>

@@ -1,8 +1,8 @@
 <template>
   <div class="page-card">
     <div class="page-header">
-      <h2 class="page-title">测试用例管理</h2>
-      <el-button type="primary" :disabled="!projectId || !serviceId" @click="dialogVisible = true">新增用例</el-button>
+      <h2 class="page-title">API管理</h2>
+      <el-button type="primary" :disabled="!projectId || !serviceId" @click="dialogVisible = true">新增接口</el-button>
     </div>
 
     <div class="toolbar case-toolbar">
@@ -20,7 +20,7 @@
     </div>
 
     <el-table :data="cases" border row-key="id">
-      <el-table-column prop="name" label="用例名称" min-width="180" />
+      <el-table-column prop="name" label="接口名称" min-width="180" />
       <el-table-column prop="method" label="方法" width="90" />
       <el-table-column prop="path" label="路径" min-width="220" />
       <el-table-column prop="source" label="来源" width="100" />
@@ -32,7 +32,7 @@
       </el-table-column>
     </el-table>
 
-    <el-dialog v-model="dialogVisible" title="新增手工用例" width="640px">
+    <el-dialog v-model="dialogVisible" title="新增手工接口" width="640px">
       <el-form :model="form" label-width="90px">
         <el-form-item label="名称"><el-input v-model="form.name" /></el-form-item>
         <el-form-item label="方法"><el-select v-model="form.method"><el-option v-for="m in methods" :key="m" :label="m" :value="m" /></el-select></el-form-item>
@@ -111,7 +111,7 @@ export default {
         request: JSON.parse(this.form.request || '{}'),
         assertions: JSON.parse(this.form.assertions || '[]')
       })
-      this.$message.success('用例已创建')
+      this.$message.success('接口已创建')
       this.dialogVisible = false
       this.form = { name: '', method: 'GET', path: '', request: '{}', assertions: '[{"type":"status_code","expected":200}]' }
       this.loadCases()

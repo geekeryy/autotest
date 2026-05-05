@@ -34,17 +34,17 @@ func (r *Repository) CreateRun(ctx context.Context, input CreateRunInput) (*Run,
 
 	row := r.DB.QueryRow(ctx, `
 		insert into test_runs (
-			name, project_id, service_id, suite_id, environment_id, status,
+			name, project_id, service_id, suite_id, scenario_id, environment_id, status,
 			variables, snapshot, started_at
 		)
-		select $1, p.id, s.id, $4, e.id, $6, $7, $8, now()
+		select $1, p.id, s.id, $4, $5, e.id, $7, $8, $9, now()
 		from projects p
 		join services s on s.project_id = p.id and s.id = $3 and s.deleted_at is null
-		join environments e on e.project_id = p.id and e.service_id = s.id and e.id = $5 and e.deleted_at is null
+		join environments e on e.project_id = p.id and e.service_id = s.id and e.id = $6 and e.deleted_at is null
 		where p.id = $2 and p.deleted_at is null
-		returning id, name, project_id, service_id, suite_id, environment_id, status,
+		returning id, name, project_id, service_id, suite_id, scenario_id, environment_id, status,
 			variables, snapshot, started_at, finished_at, created_at
-	`, input.Name, input.ProjectID, input.ServiceID, input.SuiteID, input.EnvironmentID, RunRunning, input.Variables, input.Snapshot)
+	`, input.Name, input.ProjectID, input.ServiceID, input.SuiteID, input.ScenarioID, input.EnvironmentID, RunRunning, input.Variables, input.Snapshot)
 
 	run, err := scanRun(row)
 	if err != nil {
@@ -62,7 +62,7 @@ func (r *Repository) FinishRun(ctx context.Context, runID uuid.UUID, status RunS
 		update test_runs
 		set status = $2, finished_at = now()
 		where id = $1 and deleted_at is null
-		returning id, name, project_id, service_id, suite_id, environment_id, status,
+		returning id, name, project_id, service_id, suite_id, scenario_id, environment_id, status,
 			variables, snapshot, started_at, finished_at, created_at
 	`, runID, status)
 
@@ -82,7 +82,7 @@ func (r *Repository) GetRun(ctx context.Context, runID uuid.UUID) (*Run, error) 
 	}
 
 	row := r.DB.QueryRow(ctx, `
-		select id, name, project_id, service_id, suite_id, environment_id, status,
+		select id, name, project_id, service_id, suite_id, scenario_id, environment_id, status,
 			variables, snapshot, started_at, finished_at, created_at
 		from test_runs
 		where id = $1 and deleted_at is null
@@ -106,7 +106,7 @@ func (r *Repository) ListResults(ctx context.Context, runID uuid.UUID) ([]Result
 	rows, err := r.DB.Query(ctx, `
 		select rr.id, rr.run_id, rr.test_case_id, rr.step_id, rr.status,
 			rr.duration_millis, rr.request_snapshot, rr.response_snapshot,
-			rr.assertions, rr.error, rr.created_at
+			rr.assertions, rr.parameter_source_snapshots, rr.error, rr.created_at
 		from test_run_results rr
 		join test_runs tr on tr.id = rr.run_id and tr.deleted_at is null
 		where rr.run_id = $1 and rr.deleted_at is null
@@ -132,25 +132,45 @@ func (r *Repository) SaveResult(ctx context.Context, result Result) (*Result, er
 	if r.DB == nil {
 		return nil, fmt.Errorf("database unavailable")
 	}
+	if len(result.RequestSnapshot) == 0 {
+		result.RequestSnapshot = []byte(`{}`)
+	}
+	if len(result.ResponseSnapshot) == 0 {
+		result.ResponseSnapshot = []byte(`{}`)
+	}
+	if len(result.Assertions) == 0 {
+		result.Assertions = []byte(`[]`)
+	}
+	if len(result.ParameterSourceSnapshots) == 0 {
+		result.ParameterSourceSnapshots = []byte(`[]`)
+	}
 
 	row := r.DB.QueryRow(ctx, `
 		insert into test_run_results (
 			run_id, test_case_id, step_id, status, duration_millis,
-			request_snapshot, response_snapshot, assertions, error
+			request_snapshot, response_snapshot, assertions, parameter_source_snapshots, error
 		)
-		select tr.id, tc.id, $3, $4, $5, $6, $7, $8, $9
+		select tr.id, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10
 		from test_runs tr
-		join test_cases tc on tc.id = $2 and tc.deleted_at is null
+		left join test_cases tc on tc.id = $2 and tc.deleted_at is null
 		where tr.id = $1 and tr.deleted_at is null
+		  and ($2::uuid is null or tc.id is not null)
 		returning id, run_id, test_case_id, step_id, status, duration_millis,
-			request_snapshot, response_snapshot, assertions, error, created_at
-	`, result.RunID, result.TestCaseID, result.StepID, result.Status, result.DurationMillis, result.RequestSnapshot, result.ResponseSnapshot, result.Assertions, result.Error)
+			request_snapshot, response_snapshot, assertions, parameter_source_snapshots, error, created_at
+	`, result.RunID, nullUUID(result.TestCaseID), result.StepID, result.Status, result.DurationMillis, result.RequestSnapshot, result.ResponseSnapshot, result.Assertions, result.ParameterSourceSnapshots, result.Error)
 
 	saved, err := scanResult(row)
 	if err != nil {
 		return nil, fmt.Errorf("save run result: %w", err)
 	}
 	return saved, nil
+}
+
+func nullUUID(id uuid.UUID) any {
+	if id == uuid.Nil {
+		return nil
+	}
+	return id
 }
 
 type rowScanner interface {
@@ -165,6 +185,7 @@ func scanRun(row rowScanner) (*Run, error) {
 		&run.ProjectID,
 		&run.ServiceID,
 		&run.SuiteID,
+		&run.ScenarioID,
 		&run.EnvironmentID,
 		&run.Status,
 		&run.Variables,
@@ -180,20 +201,25 @@ func scanRun(row rowScanner) (*Run, error) {
 
 func scanResult(row rowScanner) (*Result, error) {
 	var result Result
+	var testCaseID *uuid.UUID
 	if err := row.Scan(
 		&result.ID,
 		&result.RunID,
-		&result.TestCaseID,
+		&testCaseID,
 		&result.StepID,
 		&result.Status,
 		&result.DurationMillis,
 		&result.RequestSnapshot,
 		&result.ResponseSnapshot,
 		&result.Assertions,
+		&result.ParameterSourceSnapshots,
 		&result.Error,
 		&result.CreatedAt,
 	); err != nil {
 		return nil, fmt.Errorf("scan run result: %w", err)
+	}
+	if testCaseID != nil {
+		result.TestCaseID = *testCaseID
 	}
 	return &result, nil
 }
