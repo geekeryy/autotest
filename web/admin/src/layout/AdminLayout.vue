@@ -165,6 +165,7 @@ const icons = {
   '/projects': 'OfficeBuilding',
   '/test-data': 'TrendCharts',
   '/sql-parameter-sources': 'Tickets',
+  '/mock-servers': 'Connection',
   '/case-mgmt': 'Document',
   '/cases': 'Document',
   '/spec-import': 'Upload',

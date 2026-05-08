@@ -18,6 +18,7 @@ func TestHappyPathFingerprintIsIdempotent(t *testing.T) {
 		Method:      "POST",
 		Path:        "/users",
 		OperationID: "createUser",
+		Summary:     "Create user",
 		RequestSchema: []byte(`{
 			"body": {
 				"type": "object",
@@ -48,6 +49,9 @@ func TestHappyPathFingerprintIsIdempotent(t *testing.T) {
 	if first[0].Fingerprint != second[0].Fingerprint {
 		t.Fatalf("expected stable fingerprint: %s != %s", first[0].Fingerprint, second[0].Fingerprint)
 	}
+	if first[0].Name != "Create user" {
+		t.Fatalf("expected API name, got %s", first[0].Name)
+	}
 }
 
 func TestHappyPathSamplesRequestSchema(t *testing.T) {
@@ -60,6 +64,7 @@ func TestHappyPathSamplesRequestSchema(t *testing.T) {
 		Method:      "POST",
 		Path:        "/auth/login",
 		OperationID: "login",
+		Summary:     "Login",
 		RequestSchema: []byte(`{
 			"parameters": [
 				{"name": "tenant", "in": "query", "schema": {"type": "string", "example": "demo"}},

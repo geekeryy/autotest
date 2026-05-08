@@ -227,6 +227,9 @@ func (h *Handler) listServices(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, err)
 		return
 	}
+	if services == nil {
+		services = []Service{}
+	}
 	httpx.JSON(w, http.StatusOK, services)
 }
 

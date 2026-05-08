@@ -18,6 +18,7 @@ type Endpoint struct {
 	Method         string
 	Path           string
 	OperationID    string
+	Summary        string
 	RequestSchema  json.RawMessage
 	ResponseSchema json.RawMessage
 }
@@ -80,10 +81,13 @@ func defaultExpectedStatus(responseSchema json.RawMessage) int {
 	return code
 }
 
-func caseName(prefix string, endpoint Endpoint) string {
-	name := endpoint.OperationID
+func caseName(endpoint Endpoint) string {
+	name := endpoint.Summary
+	if name == "" {
+		name = endpoint.OperationID
+	}
 	if name == "" {
 		name = strings.ToUpper(endpoint.Method) + " " + endpoint.Path
 	}
-	return prefix + " " + name
+	return name
 }

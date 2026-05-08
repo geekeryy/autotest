@@ -1,11 +1,8 @@
 <template>
   <div class="debug-page" :class="{ 'is-embedded': embedded }">
-    <div class="debug-header">
+    <div v-if="!embedded || savedRequests.length" class="debug-header">
       <div>
         <el-button v-if="!embedded" link type="primary" @click="$router.push('/cases')">返回API管理</el-button>
-        <div class="debug-title-wrap">
-          <h2 class="debug-title">{{ displayTitle }}</h2>
-        </div>
         <div v-if="savedRequests.length" class="saved-requests-tabs">
           <div v-for="(saved, index) in savedRequests" :key="saved.id"
             class="saved-request-tab"
@@ -104,6 +101,11 @@
                     placeholder="路径变量名" /></template></el-table-column>
               <el-table-column label="参数值" min-width="260"><template #default="{ row }"><el-input v-model="row.value"
                     placeholder="参数值" /></template></el-table-column>
+              <el-table-column label="字段注释" min-width="220">
+                <template #default="{ row }">
+                  <span class="param-comment">{{ parameterComment(row, 'path') }}</span>
+                </template>
+              </el-table-column>
               <el-table-column width="90" label="操作"><template #default="{ $index }"><el-button link type="danger"
                     @click="removeRow(pathRows, $index)">删除</el-button></template></el-table-column>
             </el-table>
@@ -115,8 +117,19 @@
                     v-model="row.enabled" /></template></el-table-column>
               <el-table-column label="参数名" min-width="180"><template #default="{ row }"><el-input v-model="row.key"
                     placeholder="参数名" /></template></el-table-column>
-              <el-table-column label="参数值" min-width="260"><template #default="{ row }"><el-input v-model="row.value"
-                    placeholder="参数值" /></template></el-table-column>
+              <el-table-column label="参数值" min-width="260">
+                <template #default="{ row }">
+                  <div class="query-value-cell">
+                    <el-input v-model="row.value" placeholder="参数值" />
+                    <span v-if="row.required" class="required-star" aria-label="必填">*</span>
+                  </div>
+                </template>
+              </el-table-column>
+              <el-table-column label="字段注释" min-width="220">
+                <template #default="{ row }">
+                  <span class="param-comment">{{ parameterComment(row, 'query') }}</span>
+                </template>
+              </el-table-column>
               <el-table-column width="90" label="操作"><template #default="{ $index }"><el-button link type="danger"
                     @click="removeRow(queryRows, $index)">删除</el-button></template></el-table-column>
             </el-table>
@@ -131,6 +144,11 @@
                   placeholder="Header" /></template></el-table-column>
             <el-table-column label="Value" min-width="260"><template #default="{ row }"><el-input v-model="row.value"
                   placeholder="Value" /></template></el-table-column>
+            <el-table-column label="字段注释" min-width="220">
+              <template #default="{ row }">
+                <span class="param-comment">{{ parameterComment(row, 'header') }}</span>
+              </template>
+            </el-table-column>
             <el-table-column width="90" label="操作"><template #default="{ $index }"><el-button link type="danger"
                   @click="removeRow(headerRows, $index)">删除</el-button></template></el-table-column>
           </el-table>
@@ -139,10 +157,34 @@
         <el-tab-pane label="Body" name="body">
           <div class="body-toolbar">
             <span>JSON Body</span>
-            <el-button size="small" @click="formatBody">格式化</el-button>
           </div>
-          <div ref="bodyEditor" class="code-editor" contenteditable spellcheck="false"
-            @input="bodyText = $event.target.innerText"></div>
+          <div class="body-schema-layout" :style="bodySchemaLayoutStyle">
+            <div ref="bodyEditor" class="code-editor" contenteditable spellcheck="false"
+              @input="bodyText = $event.target.innerText" @blur="formatBody"></div>
+            <div class="body-schema-resizer" title="拖拽调整注释区宽度" @pointerdown="startBodySchemaResize"></div>
+            <div class="schema-panel">
+              <div class="schema-panel-title-row">
+                <div class="schema-panel-title">请求 Body</div>
+                <span v-if="requestBodyDocRows.length" class="schema-field-count">{{ requestBodyDocRows.length }} 字段</span>
+              </div>
+              <div v-if="requestBodyDocRows.length" class="schema-field-table">
+                <div class="schema-field-table-head">
+                  <span>字段</span>
+                  <span>类型</span>
+                  <span>说明</span>
+                </div>
+                <div v-for="row in requestBodyDocRows" :key="row.path" class="schema-field-row">
+                  <div class="schema-field-name" :style="{ paddingLeft: `${row.depth * 12}px` }">
+                    <code :title="row.path">{{ row.path }}</code>
+                    <span v-if="row.required" class="schema-required">*</span>
+                  </div>
+                  <span class="schema-type-chip">{{ row.type }}</span>
+                  <span class="schema-field-meaning" :title="row.meaning">{{ row.meaning || '-' }}</span>
+                </div>
+              </div>
+              <el-empty v-else description="暂无字段说明" :image-size="42" />
+            </div>
+          </div>
         </el-tab-pane>
         <el-tab-pane label="断言" name="assertions">
           <AssertionEditor v-model="editableAssertions" />
@@ -150,12 +192,6 @@
             <el-button size="small" :loading="savingAssertions" @click="saveAssertions">保存断言</el-button>
             <span v-if="assertionsSaved" class="save-ok-hint">已保存</span>
           </div>
-        </el-tab-pane>
-        <el-tab-pane label="上次响应" name="lastResponse">
-          <div v-if="hasLastResponse" class="response-preview">
-            <pre>{{ formatJSON(testCase.lastResponseSnapshot) }}</pre>
-          </div>
-          <el-empty v-else description="暂无保存的响应" />
         </el-tab-pane>
       </el-tabs>
     </el-card>
@@ -210,6 +246,11 @@
               <el-table :data="requestQueryRows" border>
                 <el-table-column prop="key" label="名称" />
                 <el-table-column prop="value" label="值" />
+                <el-table-column label="字段注释" min-width="220">
+                  <template #default="{ row }">
+                    <span class="param-comment">{{ parameterComment(row, 'query') }}</span>
+                  </template>
+                </el-table-column>
               </el-table>
             </div>
             <div class="section-block">
@@ -217,11 +258,41 @@
               <el-table :data="headersToRows(requestSnapshot.headers)" border>
                 <el-table-column prop="key" label="名称" />
                 <el-table-column prop="value" label="值" />
+                <el-table-column label="字段注释" min-width="220">
+                  <template #default="{ row }">
+                    <span class="param-comment">{{ parameterComment(row, 'header') }}</span>
+                  </template>
+                </el-table-column>
               </el-table>
             </div>
             <div class="section-block full">
               <h3>Body</h3>
-              <pre class="code-view">{{ formatSnapshotBody(requestSnapshot.body) }}</pre>
+              <div class="body-schema-layout" :style="bodySchemaLayoutStyle">
+                <pre class="code-view">{{ formatSnapshotBody(requestSnapshot.body) }}</pre>
+                <div class="body-schema-resizer" title="拖拽调整注释区宽度" @pointerdown="startBodySchemaResize"></div>
+                <div class="schema-panel">
+                  <div class="schema-panel-title-row">
+                    <div class="schema-panel-title">请求 Body</div>
+                    <span v-if="requestBodyDocRows.length" class="schema-field-count">{{ requestBodyDocRows.length }} 字段</span>
+                  </div>
+                  <div v-if="requestBodyDocRows.length" class="schema-field-table">
+                    <div class="schema-field-table-head">
+                      <span>字段</span>
+                      <span>类型</span>
+                      <span>说明</span>
+                    </div>
+                    <div v-for="row in requestBodyDocRows" :key="row.path" class="schema-field-row">
+                      <div class="schema-field-name" :style="{ paddingLeft: `${row.depth * 12}px` }">
+                        <code :title="row.path">{{ row.path }}</code>
+                        <span v-if="row.required" class="schema-required">*</span>
+                      </div>
+                      <span class="schema-type-chip">{{ row.type }}</span>
+                      <span class="schema-field-meaning" :title="row.meaning">{{ row.meaning || '-' }}</span>
+                    </div>
+                  </div>
+                  <el-empty v-else description="暂无字段说明" :image-size="42" />
+                </div>
+              </div>
             </div>
           </div>
         </el-tab-pane>
@@ -230,7 +301,32 @@
           <div class="section-grid">
             <div class="section-block full">
               <h3>Body</h3>
-              <pre class="code-view">{{ formatSnapshotBody(responseSnapshot.body) }}</pre>
+              <div class="body-schema-layout" :style="bodySchemaLayoutStyle">
+                <pre class="code-view">{{ formatSnapshotBody(responseSnapshot.body) }}</pre>
+                <div class="body-schema-resizer" title="拖拽调整注释区宽度" @pointerdown="startBodySchemaResize"></div>
+                <div class="schema-panel">
+                  <div class="schema-panel-title-row">
+                    <div class="schema-panel-title">响应 Body</div>
+                    <span v-if="responseBodyDocRows.length" class="schema-field-count">{{ responseBodyDocRows.length }} 字段</span>
+                  </div>
+                  <div v-if="responseBodyDocRows.length" class="schema-field-table">
+                    <div class="schema-field-table-head">
+                      <span>字段</span>
+                      <span>类型</span>
+                      <span>说明</span>
+                    </div>
+                    <div v-for="row in responseBodyDocRows" :key="row.path" class="schema-field-row">
+                      <div class="schema-field-name" :style="{ paddingLeft: `${row.depth * 12}px` }">
+                        <code :title="row.path">{{ row.path }}</code>
+                        <span v-if="row.required" class="schema-required">*</span>
+                      </div>
+                      <span class="schema-type-chip">{{ row.type }}</span>
+                      <span class="schema-field-meaning" :title="row.meaning">{{ row.meaning || '-' }}</span>
+                    </div>
+                  </div>
+                  <el-empty v-else description="暂无字段说明" :image-size="42" />
+                </div>
+              </div>
             </div>
             <div class="section-block full">
               <el-tabs v-model="responseDetailTab" class="response-detail-tabs" type="card">
@@ -322,10 +418,9 @@
                   <span class="field-help-icon" aria-label="变量 JSON 填写说明">?</span>
                 </el-tooltip>
               </div>
-              <el-button size="small" @click="formatEnvironmentVariablesJson">格式化</el-button>
             </div>
             <el-input v-model="envForm.variables" class="json-editor" type="textarea"
-              :autosize="{ minRows: 6, maxRows: 28 }" placeholder='{"token":"env-token","page":1}' />
+              :autosize="{ minRows: 6, maxRows: 28 }" placeholder='{"token":"env-token","page":1}' @blur="formatEnvironmentVariablesJson" />
           </div>
         </el-form-item>
         <el-form-item class="json-form-item" label-width="0">
@@ -367,10 +462,9 @@
                   <span class="field-help-icon" aria-label="认证 JSON 填写说明">?</span>
                 </el-tooltip>
               </div>
-              <el-button size="small" @click="formatEnvironmentAuthJson">格式化</el-button>
             </div>
             <el-input v-model="envForm.auth" class="json-editor" type="textarea" :autosize="{ minRows: 6, maxRows: 28 }"
-              placeholder='{"defaultProfile":"user","profiles":{"user":{"type":"bearer","token":"{{userToken}}"},"admin":{"type":"api_key","in":"query","name":"admin_token","value":"{{adminToken}}"}},"securitySchemes":{"UserAuth":"user","AdminAuth":"admin"}}' />
+              placeholder='{"defaultProfile":"user","profiles":{"user":{"type":"bearer","token":"{{userToken}}"},"admin":{"type":"api_key","in":"query","name":"admin_token","value":"{{adminToken}}"}},"securitySchemes":{"UserAuth":"user","AdminAuth":"admin"}}' @blur="formatEnvironmentAuthJson" />
           </div>
         </el-form-item>
       </el-form>
@@ -419,6 +513,34 @@ const ASSERTION_TYPE_COLORS = {
 }
 
 const ENVIRONMENT_STORAGE_KEY = 'autotest.currentEnvironmentIdByProject'
+const BODY_SCHEMA_WIDTH_STORAGE_KEY = 'autotest.runConsole.bodySchemaPanelWidth'
+const BODY_SCHEMA_PANEL_MIN_WIDTH = 260
+const BODY_SCHEMA_PANEL_MAX_WIDTH = 760
+const BODY_SCHEMA_EDITOR_MIN_WIDTH = 320
+
+function clampNumber(value, min, max) {
+  return Math.min(Math.max(value, min), max)
+}
+
+function readStoredBodySchemaPanelWidth() {
+  try {
+    const value = Number(localStorage.getItem(BODY_SCHEMA_WIDTH_STORAGE_KEY))
+    if (Number.isFinite(value) && value > 0) {
+      return clampNumber(value, BODY_SCHEMA_PANEL_MIN_WIDTH, BODY_SCHEMA_PANEL_MAX_WIDTH)
+    }
+  } catch {
+    // Use the CSS default when localStorage is unavailable.
+  }
+  return null
+}
+
+function storeBodySchemaPanelWidth(width) {
+  try {
+    localStorage.setItem(BODY_SCHEMA_WIDTH_STORAGE_KEY, String(Math.round(width)))
+  } catch {
+    // Ignore storage failures; the width remains effective for this session.
+  }
+}
 
 function readStoredEnvironmentIds() {
   try {
@@ -507,19 +629,12 @@ export default {
       renamingName: '',
       editableAssertions: [],
       savingAssertions: false,
-      assertionsSaved: false
+      assertionsSaved: false,
+      bodySchemaPanelWidth: readStoredBodySchemaPanelWidth(),
+      bodySchemaResizeState: null
     }
   },
   computed: {
-    displayTitle() {
-      const trimmed = (this.runName || '').trim()
-      if (trimmed) return trimmed
-      return this.testCase?.name || '接口调试'
-    },
-    hasLastResponse() {
-      const value = this.testCase?.lastResponseSnapshot
-      return value && typeof value === 'object' && Object.keys(value).length > 0
-    },
     currentEnvironment() {
       return this.environments.find((env) => env.id === this.environmentId) || null
     },
@@ -556,12 +671,37 @@ export default {
     },
     requestCurlCommand() {
       return buildCurlFromRequestSnapshot(this.requestSnapshot)
+    },
+    requestSchema() {
+      return this.normalizeRequest(this.endpoint?.requestSchema)
+    },
+    responseSchema() {
+      return this.normalizeRequest(this.endpoint?.responseSchema)
+    },
+    requestBodySchema() {
+      return this.requestSchema?.body || null
+    },
+    responseBodySchema() {
+      return this.responseSchema?.body || null
+    },
+    requestBodyDocRows() {
+      return this.schemaDocRows(this.requestBodySchema)
+    },
+    responseBodyDocRows() {
+      return this.schemaDocRows(this.responseBodySchema)
+    },
+    bodySchemaLayoutStyle() {
+      return Number.isFinite(this.bodySchemaPanelWidth)
+        ? { '--body-schema-panel-width': `${this.bodySchemaPanelWidth}px` }
+        : {}
     }
   },
   async created() {
     await this.loadData()
   },
-  beforeUnmount() {},
+  beforeUnmount() {
+    this.stopBodySchemaResize()
+  },
   watch: {
     caseId() {
       this.loadData()
@@ -597,6 +737,46 @@ export default {
     rememberCurrentEnvironment() {
       storeEnvironmentId(this.testCase?.projectId, this.testCase?.serviceId, this.environmentId)
     },
+    startBodySchemaResize(event) {
+      if (event.button !== undefined && event.button !== 0) return
+      const layout = event.currentTarget?.closest?.('.body-schema-layout')
+      if (!layout) return
+      const rect = layout.getBoundingClientRect()
+      this.bodySchemaResizeState = {
+        right: rect.right,
+        maxWidth: Math.max(
+          BODY_SCHEMA_PANEL_MIN_WIDTH,
+          Math.min(BODY_SCHEMA_PANEL_MAX_WIDTH, rect.width - BODY_SCHEMA_EDITOR_MIN_WIDTH)
+        )
+      }
+      document.addEventListener('pointermove', this.onBodySchemaResize)
+      document.addEventListener('pointerup', this.stopBodySchemaResize)
+      document.addEventListener('pointercancel', this.stopBodySchemaResize)
+      document.body.style.cursor = 'col-resize'
+      document.body.style.userSelect = 'none'
+      event.currentTarget.setPointerCapture?.(event.pointerId)
+      event.preventDefault()
+      this.onBodySchemaResize(event)
+    },
+    onBodySchemaResize(event) {
+      if (!this.bodySchemaResizeState) return
+      const nextWidth = this.bodySchemaResizeState.right - event.clientX
+      this.bodySchemaPanelWidth = clampNumber(
+        nextWidth,
+        BODY_SCHEMA_PANEL_MIN_WIDTH,
+        this.bodySchemaResizeState.maxWidth
+      )
+    },
+    stopBodySchemaResize() {
+      if (!this.bodySchemaResizeState) return
+      document.removeEventListener('pointermove', this.onBodySchemaResize)
+      document.removeEventListener('pointerup', this.stopBodySchemaResize)
+      document.removeEventListener('pointercancel', this.stopBodySchemaResize)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      storeBodySchemaPanelWidth(this.bodySchemaPanelWidth)
+      this.bodySchemaResizeState = null
+    },
     async loadData() {
       this.loading = true
       this.activeSavedIndex = -1
@@ -611,6 +791,7 @@ export default {
         ])
         this.environments = environments
         this.endpoint = this.findEndpoint(endpoints, this.testCase)
+        this.emitTabTitle()
         this.environmentId = this.resolveEnvironmentId(this.testCase.projectId, this.testCase.serviceId)
         this.runName = this.testCase.name
         this.editableAssertions = this.parseAssertions(this.testCase.assertions)
@@ -633,11 +814,21 @@ export default {
         ...this.normalizeObject(saved.variables),
         ...this.normalizeObject(saved.pathVars)
       }
-      const savedQueryKeys = new Set(Object.keys(this.normalizeObject(saved.query)))
-      const mergedQuery = { ...generated.query, ...this.normalizeObject(saved.query) }
+      const savedQuery = this.normalizeObject(saved.query)
+      const savedQueryEnabled = this.normalizeObject(saved.queryEnabled)
+      const savedQueryForMerge = {}
+      for (const key of Object.keys(savedQuery)) {
+        if (row.source !== 'auto' || generated.queryRequired.has(key) || savedQueryEnabled[key] === true) {
+          savedQueryForMerge[key] = savedQuery[key]
+        }
+      }
+      const savedQueryKeys = new Set(Object.keys(savedQueryForMerge))
+      const mergedQuery = { ...generated.query, ...savedQueryForMerge }
       const queryEnabled = {}
+      const queryRequired = { ...generated.queryRequiredMap }
       for (const key of Object.keys(mergedQuery)) {
         queryEnabled[key] = generated.queryRequired.has(key) || savedQueryKeys.has(key)
+        if (!Object.prototype.hasOwnProperty.call(queryRequired, key)) queryRequired[key] = false
       }
       const request = {
         method: saved.method || row.method,
@@ -645,6 +836,7 @@ export default {
         headers: { ...generated.headers, ...this.normalizeObject(saved.headers) },
         query: mergedQuery,
         queryEnabled,
+        queryRequired,
         variables: mergedVariables,
         body: generated.hasBody ? generated.body : saved.body
       }
@@ -671,7 +863,7 @@ export default {
         ...raw,
         variables: { ...forPath, ...forRest }
       }
-      this.queryRows = this.objectToRows(raw.query, raw.queryEnabled)
+      this.queryRows = this.objectToRows(raw.query, raw.queryEnabled, raw.queryRequired)
       this.headerRows = this.objectToRows(raw.headers)
       this.pathRows = this.objectToRows(forPath)
       this.variableRows = this.objectToRows(forRest)
@@ -685,17 +877,14 @@ export default {
         const generated = await generateCaseParams(this.testCase.id)
         const current = this.normalizeRequest(this.request)
         const schemaGenerated = this.requestFromSchema(this.endpoint?.requestSchema)
-        const generatedQuery = this.normalizeObject(generated.query)
-        const queryEnabled = {}
-        for (const key of Object.keys(generatedQuery)) {
-          queryEnabled[key] = schemaGenerated.queryRequired.has(key)
-        }
+        const generatedQueryState = this.mergeGeneratedQueryParams(schemaGenerated, generated.query)
         const request = {
           method: current.method || this.testCase.method,
           path: this.normalizePathVariables(current.path || this.testCase.path),
           headers: this.normalizeObject(current.headers),
-          query: generatedQuery,
-          queryEnabled,
+          query: generatedQueryState.query,
+          queryEnabled: generatedQueryState.queryEnabled,
+          queryRequired: generatedQueryState.queryRequired,
           variables: {
             ...this.normalizeObject(current.variables),
             ...this.normalizeObject(generated.path)
@@ -848,16 +1037,35 @@ export default {
       })
     },
     addRow(rows) {
-      rows.push({ enabled: true, key: '', value: '' })
+      rows.push({ enabled: true, key: '', value: '', required: false })
     },
     removeRow(rows, index) {
       rows.splice(index, 1)
     },
-    objectToRows(value, enabledMap) {
+    rowsToValueMap(rows) {
+      return rows.reduce((out, row) => {
+        if (row.key) out[row.key] = row.value
+        return out
+      }, {})
+    },
+    rowsToEnabledMap(rows) {
+      return rows.reduce((out, row) => {
+        if (row.key) out[row.key] = row.enabled !== false
+        return out
+      }, {})
+    },
+    rowsToRequiredMap(rows) {
+      return rows.reduce((out, row) => {
+        if (row.key) out[row.key] = row.required === true
+        return out
+      }, {})
+    },
+    objectToRows(value, enabledMap, requiredMap) {
       return Object.entries(value || {}).map(([key, item]) => ({
         enabled: enabledMap ? (enabledMap[key] !== false) : true,
         key,
-        value: String(item)
+        value: String(item),
+        required: requiredMap ? requiredMap[key] === true : false
       }))
     },
     rowsToObject(rows) {
@@ -865,6 +1073,50 @@ export default {
         if (row.enabled && row.key) out[row.key] = row.value
         return out
       }, {})
+    },
+    mergeGeneratedQueryParams(schemaGenerated, generatedQuery) {
+      const schemaValues = this.normalizeObject(schemaGenerated.query)
+      const generatedValues = this.normalizeObject(generatedQuery)
+      const currentValues = this.rowsToValueMap(this.queryRows)
+      const currentEnabled = this.rowsToEnabledMap(this.queryRows)
+      const currentRequired = this.rowsToRequiredMap(this.queryRows)
+      const query = {}
+      const queryEnabled = {}
+      const queryRequired = { ...schemaGenerated.queryRequiredMap }
+      const keys = new Set([
+        ...Object.keys(schemaValues),
+        ...Object.keys(generatedValues),
+        ...Object.keys(currentValues)
+      ])
+
+      for (const key of keys) {
+        const hasCurrentValue = Object.prototype.hasOwnProperty.call(currentValues, key)
+        const hasCurrentEnabled = Object.prototype.hasOwnProperty.call(currentEnabled, key)
+        const hasCurrentRequired = Object.prototype.hasOwnProperty.call(currentRequired, key)
+        const hasGeneratedValue = Object.prototype.hasOwnProperty.call(generatedValues, key)
+        const hasSchemaValue = Object.prototype.hasOwnProperty.call(schemaValues, key)
+        const schemaRequired = schemaGenerated.queryRequired.has(key)
+        const required = hasCurrentRequired ? currentRequired[key] === true : schemaRequired
+        const enabled = hasCurrentEnabled
+          ? currentEnabled[key]
+          : schemaRequired || (!hasSchemaValue && hasGeneratedValue)
+
+        queryRequired[key] = required
+        queryEnabled[key] = enabled
+        if (enabled && hasGeneratedValue) {
+          query[key] = generatedValues[key]
+        } else if (enabled && hasSchemaValue) {
+          query[key] = schemaValues[key]
+        } else if (hasCurrentValue) {
+          query[key] = currentValues[key]
+        } else if (hasSchemaValue) {
+          query[key] = schemaValues[key]
+        } else {
+          query[key] = generatedValues[key]
+        }
+      }
+
+      return { query, queryEnabled, queryRequired }
     },
     splitVariablesByPathTemplate(path, variables) {
       const defaults = this.pathVariables(path)
@@ -888,6 +1140,7 @@ export default {
         headers: {},
         query: {},
         queryRequired: new Set(),
+        queryRequiredMap: {},
         variables: {},
         body: undefined,
         hasBody: false,
@@ -898,8 +1151,10 @@ export default {
         if (!param || !param.name) continue
         const value = this.stringifySample(this.sampleFromSchema(param.schema))
         if (param.in === 'query') {
-          request.query[param.name] = value
-          if (param.required) request.queryRequired.add(param.name)
+          const required = param.required === true
+          request.query[param.name] = required ? value : ''
+          request.queryRequiredMap[param.name] = required
+          if (required) request.queryRequired.add(param.name)
         } else if (param.in === 'header') {
           request.headers[param.name] = value
         } else if (param.in === 'path') {
@@ -915,6 +1170,112 @@ export default {
         request.security = this.cloneSample(schema.security)
       }
       return request
+    },
+    parameterComment(row, location) {
+      const name = row?.key
+      if (!name) return '-'
+      const parameters = Array.isArray(this.requestSchema?.parameters) ? this.requestSchema.parameters : []
+      const param = parameters.find((item) => item?.name === name && item?.in === location)
+      if (!param) return '-'
+      const description = typeof param.description === 'string' ? param.description.trim() : ''
+      if (description) return description
+      return this.schemaFieldMeaning(param.schema)
+    },
+    schemaDocRows(schema) {
+      if (!schema || typeof schema !== 'object' || Array.isArray(schema)) return []
+      const root = this.normalizeSchemaNode(schema)
+      if (!Object.keys(root).length) return []
+      const rows = []
+      this.collectSchemaDocRows(root, '$', 0, false, rows)
+      return rows.length > 1 ? rows.filter((row) => row.path !== '$') : rows
+    },
+    collectSchemaDocRows(schema, path, depth, required, rows) {
+      const node = this.normalizeSchemaNode(schema)
+      rows.push({
+        path,
+        depth,
+        required,
+        type: this.schemaTypeLabel(node),
+        meaning: this.schemaFieldMeaning(node)
+      })
+
+      const type = this.schemaType(node)
+      if (type === 'object') {
+        const requiredFields = new Set(Array.isArray(node.required) ? node.required : [])
+        for (const [key, property] of Object.entries(this.normalizeObject(node.properties))) {
+          this.collectSchemaDocRows(
+            property,
+            path === '$' ? key : `${path}.${key}`,
+            depth + 1,
+            requiredFields.has(key),
+            rows
+          )
+        }
+        if (node.additionalProperties && typeof node.additionalProperties === 'object') {
+          this.collectSchemaDocRows(node.additionalProperties, `${path}.{key}`, depth + 1, false, rows)
+        }
+      } else if (type === 'array' && node.items && typeof node.items === 'object') {
+        this.collectSchemaDocRows(node.items, `${path}[]`, depth + 1, false, rows)
+      }
+    },
+    normalizeSchemaNode(schema) {
+      if (!schema || typeof schema !== 'object' || Array.isArray(schema)) return {}
+      let out = { ...schema }
+
+      if (Array.isArray(schema.allOf) && schema.allOf.length > 0) {
+        const composed = schema.allOf.reduce((merged, item) => {
+          return this.mergeSchemaNodes(merged, this.normalizeSchemaNode(item))
+        }, {})
+        out = this.mergeSchemaNodes(composed, { ...schema, allOf: undefined })
+      }
+
+      const alternatives = Array.isArray(out.oneOf) && out.oneOf.length > 0
+        ? out.oneOf
+        : (Array.isArray(out.anyOf) && out.anyOf.length > 0 ? out.anyOf : null)
+      if (alternatives && !out.properties && !out.items) {
+        out = this.mergeSchemaNodes(this.normalizeSchemaNode(alternatives[0]), out)
+      }
+
+      return out
+    },
+    mergeSchemaNodes(base, override) {
+      const merged = { ...base, ...override }
+      if (base.properties || override.properties) {
+        merged.properties = {
+          ...this.normalizeObject(base.properties),
+          ...this.normalizeObject(override.properties)
+        }
+      }
+      const required = [
+        ...(Array.isArray(base.required) ? base.required : []),
+        ...(Array.isArray(override.required) ? override.required : [])
+      ]
+      if (required.length > 0) merged.required = Array.from(new Set(required))
+      return merged
+    },
+    schemaFieldMeaning(schema) {
+      const node = this.normalizeSchemaNode(schema)
+      const description = typeof node.description === 'string' ? node.description.trim() : ''
+      if (description) return description
+      const title = typeof node.title === 'string' ? node.title.trim() : ''
+      if (title) return title
+      return ''
+    },
+    schemaTypeLabel(schema) {
+      const node = this.normalizeSchemaNode(schema)
+      const type = this.schemaType(node)
+      const format = typeof node.format === 'string' ? node.format.trim() : ''
+      if (!type && Array.isArray(node.enum) && node.enum.length > 0) return 'enum'
+      return format ? `${type || 'value'}:${format}` : (type || 'value')
+    },
+    schemaType(schema) {
+      if (!schema || typeof schema !== 'object') return ''
+      if (Array.isArray(schema.type) && schema.type.length > 0) return schema.type.join('|')
+      if (typeof schema.type === 'string' && schema.type) return schema.type
+      if (schema.properties) return 'object'
+      if (schema.items) return 'array'
+      if (Array.isArray(schema.enum) && schema.enum.length > 0) return 'enum'
+      return ''
     },
     sampleFromSchema(schema) {
       if (!schema || typeof schema !== 'object') return {}
@@ -1049,6 +1410,11 @@ export default {
     emitRunSummary(summary) {
       this.$emit('status-change', summary)
     },
+    emitTabTitle() {
+      const name = (this.endpoint?.summary || '').trim() || this.testCase?.path || this.testCase?.name || '接口'
+      const caseId = this.testCase?.id || this.caseId || this.$route.params.caseID
+      if (caseId && name) this.$emit('tab-title-change', { caseId, name })
+    },
     headersToRows(headers) {
       return Object.entries(headers || {}).map(([key, value]) => ({
         key,
@@ -1078,6 +1444,11 @@ export default {
     },
     savedCaseToTab(row, payload = null) {
       const request = this.normalizeRequest(row.request)
+      const schemaGenerated = this.requestFromSchema(this.endpoint?.requestSchema)
+      const queryRequired = {
+        ...schemaGenerated.queryRequiredMap,
+        ...this.normalizeObject(request.queryRequired)
+      }
       const path = this.normalizePathVariables(request.path || row.path)
       const mergedVariables = {
         ...this.normalizeObject(request.pathVars),
@@ -1092,7 +1463,7 @@ export default {
         path,
         security: request.security,
         pathRows: this.objectToRows(forPath),
-        queryRows: this.objectToRows(request.query, request.queryEnabled),
+        queryRows: this.objectToRows(request.query, request.queryEnabled, queryRequired),
         headerRows: this.objectToRows(request.headers),
         variableRows: this.objectToRows(forRest),
         bodyText: request.body == null ? '' : this.formatJSON(request.body),
@@ -1104,12 +1475,17 @@ export default {
         if (row.key) out[row.key] = row.enabled !== false
         return out
       }, {})
+      const queryRequired = this.queryRows.reduce((out, row) => {
+        if (row.key) out[row.key] = row.required === true
+        return out
+      }, {})
       return {
         method: this.request.method,
         path: this.pathForRun(this.request.path),
         headers: this.rowsToObject(this.headerRows),
         query: this.rowsToObject(this.queryRows),
         queryEnabled,
+        queryRequired,
         variables: {
           ...this.rowsToObject(this.pathRows),
           ...this.rowsToObject(this.variableRows)
@@ -1320,15 +1696,6 @@ export default {
   justify-content: space-between;
   gap: 16px;
   padding: 2px 2px 0;
-}
-
-.debug-title-wrap {
-  min-width: 0;
-}
-
-.debug-title {
-  margin: 4px 0;
-  font-size: var(--app-font-size-title);
 }
 
 .debug-actions,
@@ -1617,6 +1984,31 @@ export default {
   letter-spacing: 0.02em;
 }
 
+.query-value-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+
+.query-value-cell :deep(.el-input) {
+  flex: 1 1 auto;
+}
+
+.required-star {
+  flex: 0 0 auto;
+  color: var(--el-color-danger);
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.param-comment {
+  color: var(--app-secondary-text);
+  line-height: 1.45;
+  word-break: break-word;
+}
+
 .path-input {
   flex: 1 1 0;
   min-width: 0;
@@ -1634,7 +2026,6 @@ export default {
 }
 
 .code-editor,
-.response-preview pre,
 .code-view {
   min-height: 260px;
   max-height: 520px;
@@ -1648,6 +2039,152 @@ export default {
   line-height: 1.6;
   white-space: pre-wrap;
   outline: none;
+}
+
+.body-schema-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 8px minmax(260px, var(--body-schema-panel-width, 1fr));
+  gap: 8px;
+  align-items: stretch;
+}
+
+.body-schema-layout > .code-editor,
+.body-schema-layout > .code-view {
+  min-width: 0;
+}
+
+.body-schema-resizer {
+  position: relative;
+  width: 8px;
+  min-height: 100%;
+  border-radius: 999px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.body-schema-resizer::before {
+  content: '';
+  position: absolute;
+  top: 10px;
+  bottom: 10px;
+  left: 3px;
+  width: 2px;
+  border-radius: 999px;
+  background: var(--app-border-color);
+  transition: background 0.12s ease, width 0.12s ease, left 0.12s ease;
+}
+
+.body-schema-resizer:hover::before {
+  left: 2px;
+  width: 4px;
+  background: var(--el-color-primary-light-5, #a0cfff);
+}
+
+.schema-panel {
+  min-height: 260px;
+  max-height: 520px;
+  overflow: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--app-border-color);
+  border-radius: 10px;
+  background: var(--app-card-bg);
+}
+
+.schema-panel-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.schema-panel-title {
+  color: var(--el-text-color-primary);
+  font-size: var(--app-font-size-small);
+  font-weight: 700;
+}
+
+.schema-field-count {
+  flex: 0 0 auto;
+  color: var(--app-secondary-text);
+  font-size: 12px;
+}
+
+.schema-field-table {
+  border: 1px solid var(--app-border-color);
+  border-radius: 8px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.schema-field-table-head,
+.schema-field-row {
+  display: grid;
+  grid-template-columns: minmax(112px, 1.25fr) minmax(72px, 0.65fr) minmax(120px, 1.2fr);
+  align-items: center;
+  column-gap: 8px;
+}
+
+.schema-field-table-head {
+  min-height: 32px;
+  padding: 0 10px;
+  background: #f8fafc;
+  color: var(--app-secondary-text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.schema-field-row {
+  min-height: 34px;
+  padding: 6px 10px;
+  border-top: 1px solid var(--app-border-color);
+}
+
+.schema-field-name {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+}
+
+.schema-field-name code {
+  overflow: hidden;
+  color: var(--el-text-color-primary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.schema-required {
+  flex: 0 0 auto;
+  color: var(--el-color-danger);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.schema-type-chip {
+  justify-self: start;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #64748b;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.schema-field-meaning {
+  overflow: hidden;
+  color: var(--app-secondary-text);
+  font-size: var(--app-font-size-small);
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .response-empty-card {
@@ -1846,6 +2383,14 @@ export default {
 
   .section-grid {
     grid-template-columns: 1fr;
+  }
+
+  .body-schema-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .body-schema-resizer {
+    display: none;
   }
 
   .method-select,

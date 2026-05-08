@@ -102,7 +102,6 @@
                   <span class="field-help-icon" aria-label="变量 JSON 填写说明">?</span>
                 </el-tooltip>
               </div>
-              <el-button size="small" @click="formatEnvironmentVariablesJson">格式化</el-button>
             </div>
             <el-input
               v-model="envForm.variables"
@@ -110,6 +109,7 @@
               type="textarea"
               :autosize="{ minRows: 6, maxRows: 28 }"
               placeholder='{"token":"env-token","page":1}'
+              @blur="formatEnvironmentVariablesJson"
             />
           </div>
         </el-form-item>
@@ -152,7 +152,6 @@
                   <span class="field-help-icon" aria-label="认证 JSON 填写说明">?</span>
                 </el-tooltip>
               </div>
-              <el-button size="small" @click="formatEnvironmentAuthJson">格式化</el-button>
             </div>
             <el-input
               v-model="envForm.auth"
@@ -160,6 +159,7 @@
               type="textarea"
               :autosize="{ minRows: 6, maxRows: 28 }"
               placeholder='{"defaultProfile":"user","profiles":{"user":{"type":"bearer","token":"{{userToken}}"},"admin":{"type":"api_key","in":"query","name":"admin_token","value":"{{adminToken}}"}},"securitySchemes":{"UserAuth":"user","AdminAuth":"admin"}}'
+              @blur="formatEnvironmentAuthJson"
             />
           </div>
         </el-form-item>

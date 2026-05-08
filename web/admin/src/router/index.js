@@ -5,6 +5,7 @@ import Login from '../views/Login.vue'
 import Dashboard from '../views/Dashboard.vue'
 import ProjectManagement from '../views/projects/ProjectManagement.vue'
 import SQLParameterSourceList from '../views/data/SQLParameterSourceList.vue'
+import MockServerList from '../views/data/MockServerList.vue'
 import SpecImport from '../views/spec/SpecImport.vue'
 import CaseList from '../views/cases/CaseList.vue'
 import CaseRunWorkspace from '../views/cases/CaseRunWorkspace.vue'
@@ -23,7 +24,8 @@ export const menuRoutes = [
     redirect: '/sql-parameter-sources',
     meta: { title: '测试数据', permission: 'projects:read' },
     children: [
-      { path: '/sql-parameter-sources', component: SQLParameterSourceList, meta: { title: 'SQL 参数源', permission: 'projects:read' } }
+      { path: '/sql-parameter-sources', component: SQLParameterSourceList, meta: { title: 'SQL 参数源', permission: 'projects:read' } },
+      { path: '/mock-servers', component: MockServerList, meta: { title: 'Mock Server', permission: 'projects:read' } }
     ]
   },
   {

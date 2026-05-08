@@ -11,6 +11,7 @@ import (
 	testcase "autotest/internal/case"
 	"autotest/internal/generator"
 	"autotest/internal/httpx"
+	"autotest/internal/mockserver"
 	"autotest/internal/paramsource"
 	"autotest/internal/project"
 	"autotest/internal/report"
@@ -19,6 +20,7 @@ import (
 	"autotest/internal/scriptlibrary"
 	"autotest/internal/spec"
 	"autotest/internal/store"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 )
@@ -56,6 +58,9 @@ func main() {
 	paramSourceSvc := paramsource.NewService(paramSourceRepo, paramsource.NewExecutor())
 	scriptLibraryRepo := scriptlibrary.NewRepository(repo)
 	scriptLibrarySvc := scriptlibrary.NewService(scriptLibraryRepo)
+	mockServerRepo := mockserver.NewRepository(repo)
+	mockServerRuntime := mockserver.NewRuntime(mockServerRepo)
+	mockServerSvc := mockserver.NewService(mockServerRepo, mockServerRuntime)
 	caseRunner := runner.New(nil, nil, reportRepo)
 	runSvc := runner.NewService(caseSvc, projectSvc, reportRepo, caseRunner, paramSourceSvc)
 
@@ -73,16 +78,18 @@ func main() {
 
 	api := chi.NewRouter()
 	authHandler := auth.NewHandler(authSvc)
+	projectHandler := project.NewHandler(projectSvc)
 	authHandler.RegisterPublic(api)
 	api.Group(func(r chi.Router) {
 		r.Use(authSvc.Authenticate)
 		authHandler.RegisterProtected(r)
-		project.NewHandler(projectSvc).Register(r)
+		projectHandler.Register(r)
 		testcase.NewHandler(caseSvc).Register(r)
 		spec.NewHandler(specSvc).Register(r)
 		scenario.NewHandler(scenarioSvc).Register(r)
 		paramsource.NewHandler(paramSourceSvc).Register(r)
 		scriptlibrary.NewHandler(scriptLibrarySvc).Register(r)
+		mockserver.NewHandler(mockServerSvc, projectHandler).Register(r)
 		runner.NewHandler(runSvc, scenarioRepo).Register(r)
 	})
 	r.Mount("/api/v1", api)

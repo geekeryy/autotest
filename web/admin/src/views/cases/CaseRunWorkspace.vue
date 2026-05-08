@@ -87,19 +87,8 @@
         >
           <el-tab-pane v-for="tab in tabs" :key="tab.id" :name="tab.id">
             <template #label>
-              <span class="run-tab-label" @dblclick.stop="startTabRename(tab)">
-                <input
-                  v-if="editingTabId === tab.id"
-                  :ref="(el) => setTabInputRef(tab.id, el)"
-                  v-model="editingTabName"
-                  class="tab-rename-input"
-                  @blur="finishTabRename"
-                  @keydown.enter.prevent="finishTabRename"
-                  @keydown.esc.prevent="cancelTabRename"
-                  @click.stop
-                  @dblclick.stop
-                />
-                <span v-else class="tab-title" :title="tab.name">{{ tab.name }}</span>
+              <span class="run-tab-label">
+                <span class="tab-title" :title="tab.name">{{ tab.name }}</span>
               </span>
             </template>
           </el-tab-pane>
@@ -124,7 +113,7 @@
 </template>
 
 <script>
-import { getCase, listCases, listEndpoints, listServices, patchCase } from '../../api'
+import { getCase, listCases, listEndpoints, listServices } from '../../api'
 import { loadGlobalProjects, projectState, setCurrentProjectId } from '../../utils/currentProject'
 import { persistServiceId, readStoredServiceId } from '../../utils/serviceSelection'
 import CaseRun from './CaseRun.vue'
@@ -158,9 +147,7 @@ export default {
       layoutNarrow: false,
       layoutMediaQuery: null,
       _sidebarResize: null,
-      caseRunRefs: {},
-      editingTabId: '',
-      editingTabName: ''
+      caseRunRefs: {}
     }
   },
   computed: {
@@ -380,7 +367,7 @@ export default {
           return byId || bySignature
         })
         endpointCases.forEach((item) => usedCaseIds.add(item.id))
-        const caseNodes = endpointCases.map((item) => this.buildCaseNode(item))
+        const caseNodes = endpointCases.map((item) => this.buildCaseNode(item, endpoint))
 
         if (caseNodes.length === 1) {
           const testCase = endpointCases[0]
@@ -393,7 +380,8 @@ export default {
             tagName: this.endpointTagName(endpoint),
             searchText: `${baseSearch} ${testCase.name} ${testCase.method} ${testCase.path} ${testCase.source || ''}`,
             caseCount: 1,
-            case: testCase
+            tabName: this.caseTabName(testCase, endpoint),
+            case: this.caseWithEndpoint(testCase, endpoint)
           }
         }
 
@@ -448,14 +436,30 @@ export default {
       }
       return Array.from(groups.values()).sort((left, right) => left.label.localeCompare(right.label, 'zh-CN'))
     },
-    buildCaseNode(testCase) {
+    caseTabName(testCase, endpoint = null) {
+      return (endpoint?.summary || testCase.endpointSummary || '').trim() ||
+        testCase.name ||
+        endpoint?.path ||
+        testCase.path ||
+        '接口'
+    },
+    caseWithEndpoint(testCase, endpoint = null) {
+      if (!endpoint) return testCase
+      return {
+        ...testCase,
+        endpointSummary: endpoint.summary || '',
+        endpointPath: endpoint.path || ''
+      }
+    },
+    buildCaseNode(testCase, endpoint = null) {
       return {
         id: `case:${testCase.id}`,
         type: 'case',
         label: testCase.name,
         method: testCase.method,
-        searchText: `${testCase.name} ${testCase.method} ${testCase.path} ${testCase.source || ''}`,
-        case: testCase
+        searchText: `${testCase.name} ${endpoint?.summary || ''} ${testCase.method} ${testCase.path} ${testCase.source || ''}`,
+        tabName: this.caseTabName(testCase, endpoint),
+        case: this.caseWithEndpoint(testCase, endpoint)
       }
     },
     buildEmptyNode(endpointId) {
@@ -470,7 +474,7 @@ export default {
     handleTreeNodeClick(data) {
       if (data.disabled) return
       if (data.type === 'case') {
-        this.openCase(data.case)
+        this.openCase(data.case, { tabName: data.tabName })
       }
     },
     async openCaseById(caseId, options = {}) {
@@ -493,7 +497,7 @@ export default {
       if (!existed) {
         this.tabs.push({
           id: testCase.id,
-          name: testCase.name,
+          name: options.tabName || this.caseTabName(testCase),
           method: testCase.method,
           path: testCase.path,
           summary: emptySummary()
@@ -528,53 +532,6 @@ export default {
       } else {
         delete this.caseRunRefs[caseId]
       }
-    },
-    startTabRename(tab) {
-      if (!tab?.id) return
-      if (this.activeCaseId !== tab.id) {
-        this.activeCaseId = tab.id
-        this.syncRoute(tab.id)
-      }
-      this.editingTabId = tab.id
-      this.editingTabName = tab.name
-      this.$nextTick(() => {
-        const input = this._tabInputRefs?.[tab.id]
-        if (input) {
-          input.focus()
-          input.select()
-        }
-      })
-    },
-    setTabInputRef(tabId, el) {
-      if (!this._tabInputRefs) this._tabInputRefs = {}
-      if (el) {
-        this._tabInputRefs[tabId] = el
-      } else {
-        delete this._tabInputRefs[tabId]
-      }
-    },
-    async finishTabRename() {
-      const tabId = this.editingTabId
-      if (!tabId) return
-      const name = (this.editingTabName || '').trim()
-      this.editingTabId = ''
-      this.editingTabName = ''
-      if (!name) return
-      const tab = this.tabs.find((t) => t.id === tabId)
-      if (!tab || name === tab.name) return
-      const prevName = tab.name
-      tab.name = name
-      try {
-        await patchCase(tabId, { name })
-        const comp = this.caseRunRefs[tabId]
-        if (comp && typeof comp.updateRunName === 'function') comp.updateRunName(name)
-      } catch {
-        tab.name = prevName
-      }
-    },
-    cancelTabRename() {
-      this.editingTabId = ''
-      this.editingTabName = ''
     },
     syncRoute(caseId) {
       const target = caseId ? `/run-console/${caseId}` : '/run-console'
@@ -634,8 +591,9 @@ export default {
   flex-direction: row;
   align-items: stretch;
   gap: 0;
-  /* 随主内容区高度填充；过长时由 el-main 滚动，不再用 100vh 估算撑高整页 */
-  min-height: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
   padding: 2px;
   background: #f3f6fb;
 }
@@ -647,12 +605,13 @@ export default {
   border-radius: 12px;
   background: var(--app-card-bg);
   box-shadow: 0 8px 20px rgba(15, 23, 42, 0.06);
+  overflow: hidden;
 }
 
 .api-sidebar {
   display: flex;
   flex-direction: column;
-  padding: 14px;
+  padding: 10px;
   flex: 0 0 320px;
   width: 320px;
   background:
@@ -661,8 +620,8 @@ export default {
 }
 
 .sidebar-resizer {
-  flex: 0 0 10px;
-  margin: 0 4px;
+  flex: 0 0 6px;
+  margin: 0 2px;
   align-self: stretch;
   border-radius: 6px;
   cursor: col-resize;
@@ -714,14 +673,14 @@ export default {
 }
 
 .tree-search {
-  margin: 14px 0;
+  margin: 10px 0;
 }
 
 .api-tree {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 8px;
+  padding: 6px;
   border: 1px solid color-mix(in srgb, var(--app-border-color) 78%, #94a3b8);
   border-radius: 10px;
   background: rgba(248, 250, 252, 0.72);
@@ -819,6 +778,7 @@ export default {
 }
 
 .console-tabs {
+  flex: 0 0 auto;
   margin-top: 12px;
   padding: 8px 8px 0;
   border: 1px solid color-mix(in srgb, var(--app-border-color) 76%, #94a3b8);
@@ -854,24 +814,8 @@ export default {
   font-weight: 600;
 }
 
-.tab-rename-input {
-  width: 140px;
-  max-width: 200px;
-  height: 22px;
-  padding: 0 6px;
-  border: 1px solid var(--el-color-primary);
-  border-radius: 4px;
-  outline: none;
-  font-size: inherit;
-  font-weight: 600;
-  font-family: inherit;
-  line-height: 22px;
-  background: #fff;
-  color: inherit;
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--el-color-primary) 20%, transparent);
-}
-
 .console-panels {
+  flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
   padding: 12px;
@@ -894,7 +838,7 @@ export default {
 @media (max-width: 1100px) {
   .run-workspace {
     flex-direction: column;
-    gap: 12px;
+    gap: 8px;
   }
 
   .api-sidebar {

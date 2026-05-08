@@ -55,7 +55,7 @@ func (HappyPathRule) Generate(endpoint Endpoint) ([]testcase.Draft, error) {
 		ServiceID:        endpoint.ServiceID,
 		EndpointID:       &endpointID,
 		Source:           testcase.SourceAuto,
-		Name:             caseName("Happy path", endpoint),
+		Name:             caseName(endpoint),
 		Method:           endpoint.Method,
 		Path:             endpoint.Path,
 		GenerationRuleID: RuleHappyPath,

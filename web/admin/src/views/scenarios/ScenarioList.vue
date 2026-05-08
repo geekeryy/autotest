@@ -249,7 +249,6 @@
                       <el-tab-pane label="Body" name="body">
                         <div class="body-toolbar">
                           <span>JSON Body</span>
-                          <el-button size="small" @click="formatStepBody">格式化</el-button>
                         </div>
                         <el-input
                           v-model="stepForm.bodyText"
@@ -257,6 +256,7 @@
                           type="textarea"
                           :autosize="{ minRows: 6, maxRows: 18 }"
                           placeholder='{"token":"{{token}}"}'
+                          @blur="formatStepBody"
                         />
                       </el-tab-pane>
                       <el-tab-pane label="断言" name="assertions">

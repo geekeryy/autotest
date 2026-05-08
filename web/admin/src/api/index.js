@@ -16,7 +16,7 @@ export const listProjectMembers = (projectId) => request.get(`/projects/${projec
 export const addProjectMember = (projectId, data) => request.post(`/projects/${projectId}/members`, data)
 export const updateProjectMember = (projectId, userId, data) => request.put(`/projects/${projectId}/members/${userId}`, data)
 export const removeProjectMember = (projectId, userId) => request.delete(`/projects/${projectId}/members/${userId}`)
-export const listServices = (projectId) => request.get(`/projects/${projectId}/services`)
+export const listServices = (projectId) => request.get(`/projects/${projectId}/services`).then(asList)
 export const createService = (projectId, data) => request.post(`/projects/${projectId}/services`, data)
 export const updateService = (projectId, serviceId, data) => request.put(`/projects/${projectId}/services/${serviceId}`, data)
 export const deleteService = (projectId, serviceId) => request.delete(`/projects/${projectId}/services/${serviceId}`)
@@ -25,7 +25,7 @@ export const listServiceEnvironments = (projectId, serviceId) =>
 export const createServiceEnvironment = (projectId, serviceId, data) => request.post(`/projects/${projectId}/services/${serviceId}/environments`, data)
 export const updateServiceEnvironment = (projectId, serviceId, environmentId, data) => request.put(`/projects/${projectId}/services/${serviceId}/environments/${environmentId}`, data)
 export const deleteServiceEnvironment = (projectId, serviceId, environmentId) => request.delete(`/projects/${projectId}/services/${serviceId}/environments/${environmentId}`)
-export const listEnvironments = (projectId) => request.get(`/projects/${projectId}/environments`)
+export const listEnvironments = (projectId) => request.get(`/projects/${projectId}/environments`).then(asList)
 export const createEnvironment = (projectId, data) => request.post(`/projects/${projectId}/environments`, data)
 export const updateEnvironment = (projectId, environmentId, data) => request.put(`/projects/${projectId}/environments/${environmentId}`, data)
 export const deleteEnvironment = (projectId, environmentId) => request.delete(`/projects/${projectId}/environments/${environmentId}`)
@@ -84,6 +84,20 @@ export const deleteSQLParameterSource = (id) => request.delete(`/sql-parameter-s
 export const previewSQLParameterSource = (id, data = {}) => request.post(`/sql-parameter-sources/${id}/preview`, data)
 /** 新增/编辑弹窗内根据当前表单测试 SQL（无需已保存的记录） */
 export const previewSQLParameterSourceDraft = (data) => request.post('/sql-parameter-sources/preview', data)
+
+export const listMockServers = (projectId) => request.get(`/projects/${projectId}/mock-servers`).then(asList)
+export const createMockServer = (projectId, data) => request.post(`/projects/${projectId}/mock-servers`, data)
+export const updateMockServer = (projectId, serverId, data) => request.put(`/projects/${projectId}/mock-servers/${serverId}`, data)
+export const deleteMockServer = (projectId, serverId) => request.delete(`/projects/${projectId}/mock-servers/${serverId}`)
+export const startMockServer = (projectId, serverId) => request.post(`/projects/${projectId}/mock-servers/${serverId}/start`)
+export const stopMockServer = (projectId, serverId) => request.post(`/projects/${projectId}/mock-servers/${serverId}/stop`)
+export const listMockRoutes = (projectId, serverId) =>
+  request.get(`/projects/${projectId}/mock-servers/${serverId}/routes`).then(asList)
+export const createMockRoute = (projectId, serverId, data) => request.post(`/projects/${projectId}/mock-servers/${serverId}/routes`, data)
+export const updateMockRoute = (projectId, serverId, routeId, data) =>
+  request.put(`/projects/${projectId}/mock-servers/${serverId}/routes/${routeId}`, data)
+export const deleteMockRoute = (projectId, serverId, routeId) =>
+  request.delete(`/projects/${projectId}/mock-servers/${serverId}/routes/${routeId}`)
 
 // Scenario orchestration
 export const listScenarios = (params = {}) => request.get('/scenarios', { params }).then(asList)

@@ -171,6 +171,11 @@ func requestSchema(op *openapi3.Operation, globalSecurity openapi3.SecurityRequi
 	}
 	if op.RequestBody != nil && op.RequestBody.Value != nil {
 		if schema := contentSchema(op.RequestBody.Value.Content); len(schema) > 0 {
+			if op.RequestBody.Value.Description != "" {
+				if _, exists := schema["description"]; !exists {
+					schema["description"] = op.RequestBody.Value.Description
+				}
+			}
 			payload["body"] = schema
 		}
 	}
@@ -230,10 +235,14 @@ func responseSchema(op *openapi3.Operation) json.RawMessage {
 		if resp == nil || resp.Value == nil {
 			continue
 		}
-		return mustJSON(map[string]any{
+		payload := map[string]any{
 			"status": code,
 			"body":   contentSchema(resp.Value.Content),
-		})
+		}
+		if resp.Value.Description != nil && *resp.Value.Description != "" {
+			payload["description"] = *resp.Value.Description
+		}
+		return mustJSON(payload)
 	}
 
 	return []byte(`{}`)
@@ -249,6 +258,9 @@ func parameters(params openapi3.Parameters) []map[string]any {
 			"name":     param.Value.Name,
 			"in":       param.Value.In,
 			"required": param.Value.Required,
+		}
+		if param.Value.Description != "" {
+			item["description"] = param.Value.Description
 		}
 		if param.Value.Schema != nil {
 			item["schema"] = schemaAsMap(param.Value.Schema)
@@ -303,6 +315,12 @@ func schemaValueAsMap(schema *openapi3.Schema, seen map[*openapi3.Schema]bool) m
 	defer delete(seen, schema)
 
 	out := map[string]any{}
+	if schema.Title != "" {
+		out["title"] = schema.Title
+	}
+	if schema.Description != "" {
+		out["description"] = schema.Description
+	}
 	if schema.Type != nil {
 		types := schema.Type.Slice()
 		if len(types) == 1 {

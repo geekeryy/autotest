@@ -119,16 +119,14 @@
                 >声明 SQL 位置参数（与 <code class="inline-code">$1</code>… 顺序一致）。未写 <code class="inline-code">value</code> 时从合并变量按 <code class="inline-code">name</code> 取值；<code class="inline-code">value</code> 中可使用
                 <code v-pre class="inline-code">{{变量名}}</code> 动态拼接。</span
               >
-              <el-button size="small" @click="formatInputParams">格式化</el-button>
             </div>
-            <el-input v-model="form.inputParams" class="json-editor" type="textarea" :autosize="{ minRows: 5, maxRows: 14 }" />
+            <el-input v-model="form.inputParams" class="json-editor" type="textarea" :autosize="{ minRows: 5, maxRows: 14 }" @blur="formatInputParams" />
           </div>
         </el-form-item>
         <el-form-item label="测试 SQL">
           <div class="json-field">
             <div class="json-toolbar">
               <span>使用当前表单连接所选数据源执行只读 SQL，无需先保存。下方为本次预览传入的变量（对应入参 JSON 中的占位符）。</span>
-              <el-button size="small" @click="formatDraftPreviewVars">格式化变量</el-button>
             </div>
             <el-input
               v-model="draftPreviewVariables"
@@ -136,6 +134,7 @@
               type="textarea"
               :autosize="{ minRows: 3, maxRows: 10 }"
               placeholder='例如：{ "status": "active" }'
+              @blur="formatDraftPreviewVars"
             />
             <div class="draft-preview-actions">
               <el-button type="primary" plain :loading="previewDraftLoading" :disabled="!form.dataSourceId" @click="runDraftPreview">
@@ -161,9 +160,8 @@
           <div class="json-field">
             <div class="json-toolbar">
               <span>填写本次预览可用变量，不会修改参数源配置。</span>
-              <el-button size="small" @click="formatPreviewInput">格式化</el-button>
             </div>
-            <el-input v-model="previewInput" class="json-editor" type="textarea" :autosize="{ minRows: 5, maxRows: 14 }" />
+            <el-input v-model="previewInput" class="json-editor" type="textarea" :autosize="{ minRows: 5, maxRows: 14 }" @blur="formatPreviewInput" />
           </div>
         </el-form-item>
         <el-form-item label="预览结果">

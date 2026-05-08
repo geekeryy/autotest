@@ -46,6 +46,7 @@ func (s *Service) Import(ctx context.Context, projectID, serviceID uuid.UUID, da
 			Method:         endpoint.Method,
 			Path:           endpoint.Path,
 			OperationID:    endpoint.OperationID,
+			Summary:        endpoint.Summary,
 			RequestSchema:  endpoint.RequestSchema,
 			ResponseSchema: endpoint.ResponseSchema,
 		})

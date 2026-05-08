@@ -68,9 +68,8 @@
           <div class="json-field">
             <div class="json-toolbar">
               <span>用于后端扩展连接参数，保存时会与上方字段合并。</span>
-              <el-button size="small" @click="formatExtraConfig">格式化</el-button>
             </div>
-            <el-input v-model="form.extraConfig" class="json-editor" type="textarea" :autosize="{ minRows: 5, maxRows: 14 }" />
+            <el-input v-model="form.extraConfig" class="json-editor" type="textarea" :autosize="{ minRows: 5, maxRows: 14 }" @blur="formatExtraConfig" />
           </div>
         </el-form-item>
       </el-form>

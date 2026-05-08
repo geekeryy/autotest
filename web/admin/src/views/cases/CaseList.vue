@@ -20,7 +20,9 @@
     </div>
 
     <el-table :data="cases" border row-key="id">
-      <el-table-column prop="name" label="接口名称" min-width="180" />
+      <el-table-column label="接口名称" min-width="180">
+        <template #default="{ row }">{{ displayCaseName(row) }}</template>
+      </el-table-column>
       <el-table-column prop="method" label="方法" width="90" />
       <el-table-column prop="path" label="路径" min-width="220" />
       <el-table-column prop="source" label="来源" width="100" />
@@ -49,7 +51,7 @@
 </template>
 
 <script>
-import { createCase, listCases, listServices } from '../../api'
+import { createCase, listCases, listEndpoints, listServices } from '../../api'
 import { loadGlobalProjects, projectState } from '../../utils/currentProject'
 
 export default {
@@ -58,6 +60,7 @@ export default {
     return {
       services: [],
       cases: [],
+      endpoints: [],
       serviceId: '',
       dialogVisible: false,
       methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
@@ -88,6 +91,7 @@ export default {
     async loadServices() {
       this.serviceId = ''
       this.cases = []
+      this.endpoints = []
       this.services = this.projectId ? await listServices(this.projectId) : []
       if (this.services[0]) {
         this.serviceId = this.services[0].id
@@ -97,9 +101,23 @@ export default {
     async loadCases() {
       if (!this.projectId || !this.serviceId) {
         this.cases = []
+        this.endpoints = []
         return
       }
-      this.cases = await listCases({ projectId: this.projectId, serviceId: this.serviceId })
+      const [cases, endpoints] = await Promise.all([
+        listCases({ projectId: this.projectId, serviceId: this.serviceId }),
+        listEndpoints(this.projectId, this.serviceId)
+      ])
+      this.cases = cases
+      this.endpoints = endpoints
+    },
+    endpointForCase(row) {
+      return this.endpoints.find((endpoint) => endpoint.id === row.endpointId) ||
+        this.endpoints.find((endpoint) => endpoint.method === row.method && endpoint.path === row.path) ||
+        null
+    },
+    displayCaseName(row) {
+      return this.endpointForCase(row)?.summary || row.name || row.path
     },
     async submit() {
       await createCase({

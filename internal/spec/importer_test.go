@@ -25,17 +25,27 @@ paths:
   /users:
     post:
       operationId: createUser
+      summary: Create user
       tags: [users]
+      parameters:
+        - in: query
+          name: trace
+          description: 调试追踪号
+          schema:
+            type: string
       requestBody:
         required: true
+        description: 创建用户请求
         content:
           application/json:
             schema:
+              title: 创建用户参数
               type: object
               required: [name]
               properties:
                 name:
                   type: string
+                  description: 用户姓名
       responses:
         "201":
           description: created
@@ -46,6 +56,7 @@ paths:
                 properties:
                   id:
                     type: string
+                    description: 用户 ID
 `)
 
 	result, err := NewImporter().Import(context.Background(), doc)
@@ -66,6 +77,9 @@ paths:
 	if endpoint.OperationID != "createUser" {
 		t.Fatalf("unexpected operation id: %s", endpoint.OperationID)
 	}
+	if endpoint.Summary != "Create user" {
+		t.Fatalf("unexpected summary: %s", endpoint.Summary)
+	}
 	if len(endpoint.RequestSchema) == 0 || len(endpoint.ResponseSchema) == 0 {
 		t.Fatalf("expected request and response schemas")
 	}
@@ -76,6 +90,27 @@ paths:
 	security, _ := requestSchema["security"].([]any)
 	if len(security) != 1 {
 		t.Fatalf("expected inherited security requirement, got %#v", requestSchema["security"])
+	}
+	parameters, _ := requestSchema["parameters"].([]any)
+	param, _ := parameters[0].(map[string]any)
+	if param["description"] != "调试追踪号" {
+		t.Fatalf("expected parameter description, got %#v", param)
+	}
+	body, _ := requestSchema["body"].(map[string]any)
+	properties, _ := body["properties"].(map[string]any)
+	name, _ := properties["name"].(map[string]any)
+	if body["title"] != "创建用户参数" || body["description"] != "创建用户请求" || name["description"] != "用户姓名" {
+		t.Fatalf("expected body field descriptions, got %#v", body)
+	}
+	var responseSchema map[string]any
+	if err := json.Unmarshal(endpoint.ResponseSchema, &responseSchema); err != nil {
+		t.Fatalf("decode response schema: %v", err)
+	}
+	responseBody, _ := responseSchema["body"].(map[string]any)
+	responseProperties, _ := responseBody["properties"].(map[string]any)
+	id, _ := responseProperties["id"].(map[string]any)
+	if id["description"] != "用户 ID" {
+		t.Fatalf("expected response field description, got %#v", responseBody)
 	}
 }
 
@@ -94,6 +129,7 @@ paths:
   /pets:
     get:
       operationId: listPets
+      summary: List pets
       produces: [application/json]
       responses:
         "200":
@@ -120,6 +156,9 @@ paths:
 	}
 	if endpoint.OperationID != "listPets" {
 		t.Fatalf("unexpected operation id: %s", endpoint.OperationID)
+	}
+	if endpoint.Summary != "List pets" {
+		t.Fatalf("unexpected summary: %s", endpoint.Summary)
 	}
 }
 

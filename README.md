@@ -24,9 +24,10 @@ postgres://autotest:autotest@localhost:5432/autotest?sslmode=disable
 
 可通过 `ADMIN_USERNAME`、`ADMIN_PASSWORD` 和 `JWT_SECRET` 覆盖本地默认值。应用启动时会确保默认管理员、管理员角色和基础权限点存在。
 
-根目录 `Makefile` 会自动读取 `.env`（如果存在），并在 `make init` 中启动 PostgreSQL、等待数据库就绪、按顺序执行 `migrations/*.sql`。常用环境变量：
+根目录 `Makefile` 会自动读取 `.env`（如果存在），并在 `make init` 中准备 PostgreSQL、等待数据库就绪、按顺序执行 `migrations/*.sql`。默认使用外部 PostgreSQL，不依赖 Docker Compose。常用环境变量：
 
 ```text
+DB_MANAGED=external
 POSTGRES_DB=autotest
 POSTGRES_USER=autotest
 POSTGRES_PASSWORD=autotest
@@ -38,6 +39,8 @@ ADMIN_USERNAME=admin
 ADMIN_PASSWORD=admin123
 JWT_SECRET=autotest-dev-secret-change-me
 ```
+
+`DB_MANAGED` 默认值为 `external`，表示使用 `.env` 中的 `POSTGRES_HOST` / `POSTGRES_PORT` 指向的已有 PostgreSQL，`make init` 不会启动 Docker Compose。需要使用项目内 `docker-compose.yml` 托管 PostgreSQL 时，可设置 `DB_MANAGED=docker` 后再执行 `make init`。
 
 ## 管理后台
 
