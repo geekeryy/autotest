@@ -23,7 +23,11 @@
       <el-table-column label="接口名称" min-width="180">
         <template #default="{ row }">{{ displayCaseName(row) }}</template>
       </el-table-column>
-      <el-table-column prop="method" label="方法" width="90" />
+      <el-table-column label="方法" width="90">
+        <template #default="{ row }">
+          <el-tag size="small" :type="methodType(row.method)">{{ row.method }}</el-tag>
+        </template>
+      </el-table-column>
       <el-table-column prop="path" label="路径" min-width="220" />
       <el-table-column prop="source" label="来源" width="100" />
       <el-table-column prop="status" label="状态" width="100" />
@@ -136,6 +140,14 @@ export default {
     },
     openRun(row) {
       this.$router.push(`/run-console/${row.id}`)
+    },
+    methodType(method) {
+      const value = String(method || '').toUpperCase()
+      if (value === 'GET') return 'success'
+      if (value === 'POST') return 'primary'
+      if (value === 'DELETE') return 'danger'
+      if (value === 'PUT' || value === 'PATCH') return 'warning'
+      return 'info'
     }
   }
 }

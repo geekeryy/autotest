@@ -17,7 +17,14 @@
       >
         <el-option v-for="service in services" :key="service.id" :label="service.name" :value="service.id" />
       </el-select>
-      <input class="spec-file-input" type="file" accept=".json,.yaml,.yml" title="选择 .json、.yaml 或 .yml 格式的 OpenAPI/Swagger 文件" @change="readFile" />
+      <div class="spec-file-input">
+        <el-button @click="$refs.fileInput.click()">
+          <el-icon><Upload /></el-icon>
+          <span>选择文件</span>
+        </el-button>
+        <span class="spec-file-name">{{ fileName || '支持 .json、.yaml、.yml 格式' }}</span>
+        <input ref="fileInput" type="file" hidden accept=".json,.yaml,.yml" @change="readFile" />
+      </div>
     </div>
 
     <el-input v-model="content" class="json-editor" type="textarea" :rows="16" placeholder="粘贴 OpenAPI/Swagger JSON 或 YAML 内容" />
@@ -39,6 +46,7 @@
 </template>
 
 <script>
+import { Upload } from '@element-plus/icons-vue'
 import { importSpec, listServices, listSpecs } from '../../api'
 import { loadGlobalProjects, projectState } from '../../utils/currentProject'
 import { formatDateTime } from '../../utils/datetime'
@@ -52,7 +60,8 @@ export default {
       serviceId: '',
       content: '',
       summary: null,
-      loading: false
+      loading: false,
+      fileName: ''
     }
   },
   async created() {
@@ -89,6 +98,7 @@ export default {
     readFile(event) {
       const file = event.target.files?.[0]
       if (!file) return
+      this.fileName = file.name
       const reader = new FileReader()
       reader.onload = () => {
         this.content = reader.result
@@ -121,9 +131,20 @@ export default {
 }
 
 .spec-file-input {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
   align-self: center;
   flex: 1 1 240px;
   min-width: 220px;
+}
+
+.spec-file-name {
+  color: var(--app-secondary-text);
+  font-size: var(--app-font-size-small);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .actions {

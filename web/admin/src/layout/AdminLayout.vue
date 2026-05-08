@@ -94,7 +94,7 @@
               <el-option v-for="project in projectState.projects" :key="project.id" :label="project.name" :value="project.id" />
             </el-select>
           </div>
-          <el-popover placement="bottom-end" :width="460" trigger="click">
+          <el-popover placement="bottom-end" :width="420" trigger="click">
             <template #reference>
               <el-button>
                 <el-icon><Brush /></el-icon>

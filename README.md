@@ -1,48 +1,74 @@
-# Autotest MVP
+# Autotest
 
-Go + PostgreSQL 后端和 Vue 3 + Element UI 管理后台组成的接口自动化测试平台 MVP。
+API 自动化测试平台，支持接口管理、用例编排、场景执行、Mock Server 与 AI 辅助生成。
 
-## 本地运行
+## Features
+
+- **接口管理** -- 导入 OpenAPI Spec，自动解析端点与数据模型
+- **用例 & 场景** -- 拖拽编排测试步骤，支持前置/后置脚本、断言与参数化
+- **Mock Server** -- 按项目配置 Mock 规则，拦截并模拟接口响应
+- **AI 辅助** -- 接入 DeepSeek / OpenAI / Anthropic / Ollama 等大模型，一键生成请求参数、断言脚本与测试数据
+- **RBAC 权限** -- 基于角色的访问控制，细粒度管理项目与资源
+- **运行控制台** -- 实时查看执行状态、响应详情与断言结果
+
+## Architecture
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                        Frontend (Vue 3)                      │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────────┐ │
+│  │ Projects │ │  Cases   │ │Scenarios │ │  Spec Import     │ │
+│  │ Services │ │  Suites  │ │  Runner  │ │  Mock / RBAC     │ │
+│  └──────────┘ └──────────┘ └──────────┘ └──────────────────┘ │
+└──────────────────────────┬───────────────────────────────────┘
+                           │ /api/v1/*
+┌──────────────────────────┴───────────────────────────────────┐
+│                       Backend (Go)                            │
+│  ┌─────────────────────────────────────────────────────────┐ │
+│  │                    HTTP Layer (Gin)                      │ │
+│  │   auth middleware · JWT · RBAC permission check         │ │
+│  └─────────────────────────┬───────────────────────────────┘ │
+│                            │                                  │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────────┐ │
+│  │   spec   │ │   case   │ │ scenario │ │   mockserver     │ │
+│  │ importer │ │  CRUD    │ │  runner  │ │  matcher/runtime │ │
+│  └────┬─────┘ └────┬─────┘ └────┬─────┘ └────┬─────────────┘ │
+│       │            │            │             │               │
+│  ┌────┴────────────┴────────────┴─────────────┴─────────────┐ │
+│  │              Shared Services & Utils                     │ │
+│  │  httpx · assertion · sampler · generator · paramsource   │ │
+│  │  aiprovider · scriptlibrary · projectprompt · report     │ │
+│  └──────────────────────────┬───────────────────────────────┘ │
+│                             │                                  │
+│  ┌──────────────────────────┴───────────────────────────────┐ │
+│  │                    Store (PostgreSQL)                     │ │
+│  └──────────────────────────────────────────────────────────┘ │
+└──────────────────────────────────────────────────────────────┘
+```
+
+## Quick Start
+
+### Prerequisites
+
+- Go >= 1.23
+- Node.js >= 18
+- PostgreSQL >= 14 (本地已安装，或使用 Docker Compose)
+
+### 1. 启动后端
 
 ```bash
-make init
+make init   # 等待数据库就绪 + 执行迁移
 make run-api
 ```
 
-默认连接：
+默认连接 `postgres://autotest:autotest@localhost:5432/autotest`，启动后自动创建管理员账号：
 
-```text
-postgres://autotest:autotest@localhost:5432/autotest?sslmode=disable
-```
+| 项目   | 默认值     |
+| ------ | ---------- |
+| 用户名 | `admin`    |
+| 密码   | `admin123` |
 
-默认后台管理员：
-
-```text
-用户名：admin
-密码：admin123
-```
-
-可通过 `ADMIN_USERNAME`、`ADMIN_PASSWORD` 和 `JWT_SECRET` 覆盖本地默认值。应用启动时会确保默认管理员、管理员角色和基础权限点存在。
-
-根目录 `Makefile` 会自动读取 `.env`（如果存在），并在 `make init` 中准备 PostgreSQL、等待数据库就绪、按顺序执行 `migrations/*.sql`。默认使用外部 PostgreSQL，不依赖 Docker Compose。常用环境变量：
-
-```text
-DB_MANAGED=external
-POSTGRES_DB=autotest
-POSTGRES_USER=autotest
-POSTGRES_PASSWORD=autotest
-POSTGRES_HOST=localhost
-POSTGRES_PORT=5432
-DATABASE_URL=postgres://autotest:autotest@localhost:5432/autotest?sslmode=disable
-ADDR=:8080
-ADMIN_USERNAME=admin
-ADMIN_PASSWORD=admin123
-JWT_SECRET=autotest-dev-secret-change-me
-```
-
-`DB_MANAGED` 默认值为 `external`，表示使用 `.env` 中的 `POSTGRES_HOST` / `POSTGRES_PORT` 指向的已有 PostgreSQL，`make init` 不会启动 Docker Compose。需要使用项目内 `docker-compose.yml` 托管 PostgreSQL 时，可设置 `DB_MANAGED=docker` 后再执行 `make init`。
-
-## 管理后台
+### 2. 启动前端
 
 ```bash
 cd web/admin
@@ -50,47 +76,62 @@ npm install
 npm run dev
 ```
 
-默认开发地址为 `http://localhost:5173`，开发服务器会把 `/api` 代理到 `http://localhost:8080`。生产构建：
+访问 `http://localhost:5173`，开发服务器自动将 `/api` 代理到后端 `http://localhost:8080`。
+
+### 3. 生产构建
 
 ```bash
 cd web/admin
 npm run build
 ```
 
-核心接口：
+## Configuration
 
-- `GET /healthz`
-- `POST /api/v1/auth/login`
-- `GET /api/v1/auth/me`
-- `POST /api/v1/projects`
-- `GET /api/v1/projects/{projectID}/services`
-- `POST /api/v1/projects/{projectID}/services`
-- `GET /api/v1/projects/{projectID}/environments`
-- `POST /api/v1/projects/{projectID}/environments`
-- `POST /api/v1/projects/{projectID}/services/{serviceID}/specs/import`
-- `GET /api/v1/projects/{projectID}/services/{serviceID}/specs`
-- `GET /api/v1/projects/{projectID}/services/{serviceID}/endpoints`
-- `GET /api/v1/cases`
-- `POST /api/v1/cases`
-- `GET /api/v1/suites`
-- `POST /api/v1/suites`
-- `GET /api/v1/suites/{suiteID}/items`
-- `POST /api/v1/suites/{suiteID}/items`
-- `GET/POST/PUT/DELETE /api/v1/users`
-- `GET/POST/PUT/DELETE /api/v1/roles`
-- `GET/POST /api/v1/permissions`
+根目录创建 `.env` 文件覆盖默认值，`Makefile` 会自动加载：
 
-除 `GET /healthz` 和 `POST /api/v1/auth/login` 外，`/api/v1` 下管理接口都需要 Bearer Token。Migration 文件位于 `migrations/`，可用 goose 或 psql 执行。
+```env
+# PostgreSQL
+DB_MANAGED=external          # external | docker
+POSTGRES_DB=autotest
+POSTGRES_USER=autotest
+POSTGRES_PASSWORD=autotest
+POSTGRES_HOST=localhost
+POSTGRES_PORT=5432
 
-## AI 提供商
+# Application
+ADDR=:8080
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=admin123
+JWT_SECRET=autotest-dev-secret-change-me
+```
 
-- 「平台资源 / AI 提供商」按项目维护 DeepSeek、Xiaomi、OpenAI、Anthropic、Kimi、Ollama 等大模型配置（API Key 仅以脱敏形式返回）。
-- 运行控制台「生成参数」旁、断言编辑器以及场景脚本步骤区均提供「AI 生成」入口，支持基于 OpenAPI/响应快照生成请求参数、断言脚本与测试用例数据。
-- 接口：
-  - `GET /api/v1/ai-provider-types`
-  - `GET/POST /api/v1/projects/{projectID}/ai-providers`
-  - `PUT/DELETE /api/v1/projects/{projectID}/ai-providers/{providerID}`
-  - `POST /api/v1/projects/{projectID}/ai-providers/{providerID}/test`
-  - `POST /api/v1/projects/{projectID}/ai/chat`
-- Ollama 走 OpenAI 兼容端点（默认 `http://localhost:11434/v1`），无需 API Key。
+> `DB_MANAGED=external` 使用外部 PostgreSQL；设为 `docker` 则通过 `docker compose up -d postgres` 启动容器。
 
+## TODO
+- CI/CD 集成与自动化触发
+- 基于 OpenAPI Spec 自动生成完整测试场景
+- 自动生成正向、反向用例
+- 集成通知（飞书/钉钉/Slack webhook）
+- 认证方式扩展、API Key 认证（供 CI/CD 调用）
+- 审计日志
+- API 文档页面
+- 测试报告与统计分析
+- AI 智能分析（测试失败、接口变更的影响分析）
+- 变量引用与函数计算增强
+- 测试数据管理
+- 断言能力增强
+- gRPC / WebSocket / TCP 协议支持
+- 性能测试能力
+- 定时任务
+
+## Contributing
+
+1. Fork 本仓库
+2. 创建特性分支 (`git checkout -b feature/my-feature`)
+3. 提交变更 (`git commit -m 'feat: add my feature'`)
+4. 推送到远程 (`git push origin feature/my-feature`)
+5. 创建 Pull Request
+
+## License
+
+MIT

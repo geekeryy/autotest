@@ -24,6 +24,8 @@
   --app-secondary-text: #64748b;
   --app-border-color: #e2e8f0;
   --app-code-bg: #f1f5f9;
+  --app-workspace-bg: #f3f6fb;
+  --app-border-radius: 8px;
 }
 
 html,
@@ -139,9 +141,9 @@ select {
 .page-card {
   background: var(--app-card-bg);
   border: 1px solid var(--app-border-color);
-  border-radius: 6px;
+  border-radius: var(--app-border-radius);
   padding: 18px;
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.06);
 }
 
 .page-header {

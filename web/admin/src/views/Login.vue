@@ -34,8 +34,8 @@ export default {
     return {
       loading: false,
       form: {
-        username: 'admin',
-        password: 'admin123'
+        username: '',
+        password: ''
       },
       rules: {
         username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],

@@ -595,7 +595,7 @@ export default {
   min-height: 0;
   overflow: hidden;
   padding: 2px;
-  background: #f3f6fb;
+  background: var(--app-workspace-bg);
 }
 
 .api-sidebar,

@@ -12,8 +12,11 @@
 
     <el-row :gutter="16" v-loading="loading" class="metric-row">
       <el-col :span="6" v-for="card in cards" :key="card.title">
-        <el-card class="metric">
-          <div class="metric-value">{{ card.value }}</div>
+        <el-card class="metric" :style="{ borderTopColor: card.color }">
+          <div class="metric-icon" :style="{ color: card.color }">
+            <el-icon :size="28"><component :is="card.icon" /></el-icon>
+          </div>
+          <div class="metric-value" :style="{ color: card.color }">{{ card.value }}</div>
           <div class="metric-title">{{ card.title }}</div>
           <div v-if="card.hint" class="metric-hint">{{ card.hint }}</div>
         </el-card>
@@ -47,7 +50,8 @@ import {
   Refresh,
   Setting,
   Tickets,
-  Upload
+  Upload,
+  DataAnalysis
 } from '@element-plus/icons-vue'
 import { listCases, listDataSources, listProjects, listScenarios } from '../api'
 import { hasPermission } from '../auth'
@@ -76,7 +80,11 @@ const SHORTCUT_ORDER_KEYS = SHORTCUTS.map((s) => s.key)
 export default {
   name: 'Dashboard',
   components: {
-    Refresh
+    Refresh,
+    Folder,
+    Document,
+    Connection,
+    Tickets
   },
   data() {
     return {
@@ -105,13 +113,15 @@ export default {
     cards() {
       const scoped = !!this.currentProjectId
       return [
-        { title: '项目数', value: this.counts.projects, hint: '全部项目' },
-        { title: '接口数', value: this.counts.cases, hint: scoped ? '当前项目' : '全部可见' },
-        { title: '场景数', value: this.counts.scenarios, hint: scoped ? '当前项目' : '全部可见' },
+        { title: '项目数', value: this.counts.projects, hint: '全部项目', icon: 'Folder', color: '#2563eb' },
+        { title: '接口数', value: this.counts.cases, hint: scoped ? '当前项目' : '全部可见', icon: 'Document', color: '#14b8a6' },
+        { title: '场景数', value: this.counts.scenarios, hint: scoped ? '当前项目' : '全部可见', icon: 'Connection', color: '#f97316' },
         {
           title: '业务数据源',
           value: scoped ? this.counts.dataSources : '—',
-          hint: scoped ? '当前项目' : '请先选择项目'
+          hint: scoped ? '当前项目' : '请先选择项目',
+          icon: 'Tickets',
+          color: '#8b5cf6'
         }
       ]
     }
@@ -170,12 +180,17 @@ export default {
 
 .metric {
   margin-bottom: 16px;
+  border-top: 3px solid transparent;
+  transition: border-top-color 0.2s ease;
+}
+
+.metric-icon {
+  margin-bottom: 10px;
 }
 
 .metric-value {
   font-size: var(--app-font-size-metric);
   font-weight: 700;
-  color: var(--app-primary-color);
 }
 
 .metric-title {
@@ -218,11 +233,13 @@ export default {
 .shortcut-card {
   height: 100%;
   cursor: pointer;
-  transition: border-color 0.15s ease;
+  transition: border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
 }
 
 .shortcut-card:hover {
   border-color: var(--app-primary-color);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
 }
 
 .shortcut-icon {

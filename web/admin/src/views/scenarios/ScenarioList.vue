@@ -51,7 +51,7 @@
         <div class="main-header">
           <div class="main-title">
             <span>{{ selectedScenario.name }}</span>
-            <el-tag v-if="selectedScenario.description" type="info" size="small" style="margin-left:8px">
+            <el-tag v-if="selectedScenario.description" type="info" size="small" class="scenario-desc-tag">
               {{ selectedScenario.description }}
             </el-tag>
           </div>
@@ -59,7 +59,7 @@
             <el-select
               v-model="runEnvId"
               placeholder="选择运行环境"
-              style="width:200px;margin-right:10px"
+              class="run-env-select"
               filterable
             >
               <el-option v-for="env in environments" :key="env.id" :label="env.name" :value="env.id" />
@@ -3617,6 +3617,15 @@ export default {
 .main-actions {
   display: flex;
   align-items: center;
+}
+
+.scenario-desc-tag {
+  margin-left: 8px;
+}
+
+.run-env-select {
+  width: 200px;
+  margin-right: 10px;
 }
 
 /* Run result */

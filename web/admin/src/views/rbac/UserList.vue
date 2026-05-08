@@ -19,8 +19,8 @@
       </el-table-column>
       <el-table-column label="操作" width="160">
         <template #default="{ row }">
-          <el-button type="text" @click="openEdit(row)">编辑</el-button>
-          <el-button type="text" class="danger" @click="remove(row)">删除</el-button>
+          <el-button type="primary" link @click="openEdit(row)">编辑</el-button>
+          <el-button type="danger" link @click="remove(row)">删除</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -112,10 +112,6 @@ export default {
 </script>
 
 <style scoped>
-.danger {
-  color: #f56c6c;
-}
-
 .el-tag {
   margin-right: 4px;
 }
