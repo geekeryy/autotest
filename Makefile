@@ -37,9 +37,16 @@ up: ## 准备 PostgreSQL；DB_MANAGED=docker 时启动 compose，否则跳过。
 wait-db: ## 等待 PostgreSQL 就绪。
 	@echo "等待 PostgreSQL 就绪..."
 	@for i in $$(seq 1 15); do \
-		if PGPASSWORD="$(POSTGRES_PASSWORD)" pg_isready -h "$(POSTGRES_HOST)" -p "$(POSTGRES_PORT)" -U "$(POSTGRES_USER)" -d "$(POSTGRES_DB)" >/dev/null 2>&1; then \
-			echo "PostgreSQL 已就绪。"; \
-			exit 0; \
+		if [ "$(DB_MANAGED)" = "docker" ]; then \
+			if docker compose exec -T postgres pg_isready -U "$(POSTGRES_USER)" -d "$(POSTGRES_DB)" >/dev/null 2>&1; then \
+				echo "PostgreSQL 已就绪。"; \
+				exit 0; \
+			fi; \
+		else \
+			if PGPASSWORD="$(POSTGRES_PASSWORD)" pg_isready -h "$(POSTGRES_HOST)" -p "$(POSTGRES_PORT)" -U "$(POSTGRES_USER)" -d "$(POSTGRES_DB)" >/dev/null 2>&1; then \
+				echo "PostgreSQL 已就绪。"; \
+				exit 0; \
+			fi; \
 		fi; \
 		sleep 2; \
 	done; \
@@ -50,8 +57,13 @@ migrate: wait-db ## 执行 migrations/ 目录下的 SQL 迁移。
 	@set -e; \
 	for file in $(MIGRATIONS); do \
 		echo "执行迁移 $$file"; \
-		awk '/^--[[:space:]]+\+goose[[:space:]]+Up[[:space:]]*$$/{in_up=1; next} /^--[[:space:]]+\+goose[[:space:]]+Down[[:space:]]*$$/{in_up=0} in_up {print}' "$$file" | \
-			PGPASSWORD="$(POSTGRES_PASSWORD)" psql -v ON_ERROR_STOP=1 "$$DATABASE_URL"; \
+		awk '/^--[[:space:]]+\+goose[[:space:]]+Up[[:space:]]*$$/{in_up=1; next} /^--[[:space:]]+\+goose[[:space:]]+Down[[:space:]]*$$/{in_up=0} in_up {print}' "$$file" | { \
+			if [ "$(DB_MANAGED)" = "docker" ]; then \
+				docker compose exec -T -i postgres psql -v ON_ERROR_STOP=1 -U "$(POSTGRES_USER)" -d "$(POSTGRES_DB)"; \
+			else \
+				PGPASSWORD="$(POSTGRES_PASSWORD)" psql -v ON_ERROR_STOP=1 "$$DATABASE_URL"; \
+			fi; \
+		}; \
 	done
 
 run-api: ## 使用已加载的环境变量运行 Go API。

@@ -80,6 +80,7 @@
         <el-input v-model="request.path" class="path-input" placeholder="/api/users/{id}" />
         <div class="send-actions">
           <el-button :loading="generating" @click="generateParams">生成参数</el-button>
+          <el-button :loading="aiParamsLoading" :disabled="aiParamsLoading" @click="openAIParamsDialog">AI 生成</el-button>
           <el-tooltip content="将当前请求参数保存为一条测试用例（数据库持久化，可在路径右侧 Tab 切换并被场景/测试集引用）" placement="top">
             <el-button :loading="savingCase" @click="saveCurrentRequest">保存用例</el-button>
           </el-tooltip>
@@ -157,17 +158,49 @@
         <el-tab-pane label="Body" name="body">
           <div class="body-toolbar">
             <span>JSON Body</span>
+            <div class="body-view-toggle">
+              <span :class="{ active: requestBodyViewMode === 'edit' }" @click="requestBodyViewMode = 'edit'">编辑</span>
+              <span :class="{ active: requestBodyViewMode === 'preview' }" @click="requestBodyViewMode = 'preview'">预览</span>
+            </div>
           </div>
           <div class="body-schema-layout" :style="bodySchemaLayoutStyle">
-            <div ref="bodyEditor" class="code-editor" contenteditable spellcheck="false"
+            <div v-if="requestBodyViewMode === 'preview' && requestBodyEditorJsonLines !== null" class="json-viewer code-view">
+              <div v-for="line in requestBodyEditorJsonLines" :key="line.id" class="json-line" :style="{ paddingLeft: `${line.depth * 16}px` }">
+                <span v-if="line.type === 'open'" class="json-toggle" @click="toggleSchemaCollapse(requestBodyJsonCollapsed, line.path)" />
+                <span v-else-if="line.type === 'collapsed'" class="json-toggle is-collapsed" @click="toggleSchemaCollapse(requestBodyJsonCollapsed, line.path)" />
+                <span v-else class="json-toggle-ph" />
+                <span v-if="line.key !== null && line.key !== undefined" class="json-key">"{{ line.key }}"<span class="json-colon">: </span></span>
+                <template v-if="line.type === 'primitive'">
+                  <span class="json-value" :class="`json-${line.valueType}`">{{ line.displayValue }}</span>
+                </template>
+                <template v-else-if="line.type === 'open'">
+                  <span class="json-bracket">{{ line.bracket }}</span>
+                </template>
+                <template v-else-if="line.type === 'close'">
+                  <span class="json-bracket">{{ line.bracket }}</span>
+                </template>
+                <template v-else-if="line.type === 'collapsed'">
+                  <span class="json-bracket">{{ line.open }}</span><span class="json-collapsed-preview"> {{ line.count }} {{ line.open === '[' ? 'items' : 'keys' }} </span><span class="json-bracket">{{ line.close }}</span>
+                </template>
+                <template v-else-if="line.type === 'empty-object'">
+                  <span class="json-bracket">{}</span>
+                </template>
+                <template v-else-if="line.type === 'empty-array'">
+                  <span class="json-bracket">[]</span>
+                </template>
+                <span v-if="line.hasComma" class="json-comma">,</span>
+              </div>
+            </div>
+            <pre v-else-if="requestBodyViewMode === 'preview'" class="code-view">{{ bodyText }}</pre>
+            <div v-show="requestBodyViewMode === 'edit'" ref="bodyEditor" class="code-editor" contenteditable spellcheck="false"
               @input="bodyText = $event.target.innerText" @blur="formatBody"></div>
             <div class="body-schema-resizer" title="拖拽调整注释区宽度" @pointerdown="startBodySchemaResize"></div>
             <div class="schema-panel">
               <div class="schema-panel-title-row">
                 <div class="schema-panel-title">请求 Body</div>
-                <span v-if="requestBodyDocRows.length" class="schema-field-count">{{ requestBodyDocRows.length }} 字段</span>
+                <span v-if="requestBodyAllRows.length" class="schema-field-count">{{ requestBodyAllRows.length }} 字段</span>
               </div>
-              <div v-if="requestBodyDocRows.length" class="schema-field-table">
+              <div v-if="requestBodyAllRows.length" class="schema-field-table">
                 <div class="schema-field-table-head">
                   <span>字段</span>
                   <span>类型</span>
@@ -175,7 +208,9 @@
                 </div>
                 <div v-for="row in requestBodyDocRows" :key="row.path" class="schema-field-row">
                   <div class="schema-field-name" :style="{ paddingLeft: `${row.depth * 12}px` }">
-                    <code :title="row.path">{{ row.path }}</code>
+                    <span v-if="row.hasChildren" class="schema-toggle" :class="{ 'is-collapsed': requestBodyCollapsed[row.path] }" @click="toggleSchemaCollapse(requestBodyCollapsed, row.path)" />
+                    <span v-else class="schema-toggle-placeholder" />
+                    <code :title="row.path">{{ row.name }}</code>
                     <span v-if="row.required" class="schema-required">*</span>
                   </div>
                   <span class="schema-type-chip">{{ row.type }}</span>
@@ -187,7 +222,7 @@
           </div>
         </el-tab-pane>
         <el-tab-pane label="断言" name="assertions">
-          <AssertionEditor v-model="editableAssertions" />
+          <AssertionEditor v-model="editableAssertions" :ai-response-snapshot="responseSnapshot" />
           <div class="assertion-actions">
             <el-button size="small" :loading="savingAssertions" @click="saveAssertions">保存断言</el-button>
             <span v-if="assertionsSaved" class="save-ok-hint">已保存</span>
@@ -196,8 +231,8 @@
       </el-tabs>
     </el-card>
 
-    <el-card v-if="payload" class="result-card">
-      <div class="result-title">
+    <el-card class="result-card">
+      <div v-if="payload" class="result-title">
         <div>
           <h3>运行结果</h3>
           <p>Run ID: {{ runRecord?.id || '-' }}</p>
@@ -268,14 +303,41 @@
             <div class="section-block full">
               <h3>Body</h3>
               <div class="body-schema-layout" :style="bodySchemaLayoutStyle">
-                <pre class="code-view">{{ formatSnapshotBody(requestSnapshot.body) }}</pre>
+                <div v-if="requestSnapshotBodyJsonLines !== null" class="json-viewer code-view">
+                  <div v-for="line in requestSnapshotBodyJsonLines" :key="line.id" class="json-line" :style="{ paddingLeft: `${line.depth * 16}px` }">
+                    <span v-if="line.type === 'open'" class="json-toggle" @click="toggleSchemaCollapse(requestSnapshotJsonCollapsed, line.path)" />
+                    <span v-else-if="line.type === 'collapsed'" class="json-toggle is-collapsed" @click="toggleSchemaCollapse(requestSnapshotJsonCollapsed, line.path)" />
+                    <span v-else class="json-toggle-ph" />
+                    <span v-if="line.key !== null && line.key !== undefined" class="json-key">"{{ line.key }}"<span class="json-colon">: </span></span>
+                    <template v-if="line.type === 'primitive'">
+                      <span class="json-value" :class="`json-${line.valueType}`">{{ line.displayValue }}</span>
+                    </template>
+                    <template v-else-if="line.type === 'open'">
+                      <span class="json-bracket">{{ line.bracket }}</span>
+                    </template>
+                    <template v-else-if="line.type === 'close'">
+                      <span class="json-bracket">{{ line.bracket }}</span>
+                    </template>
+                    <template v-else-if="line.type === 'collapsed'">
+                      <span class="json-bracket">{{ line.open }}</span><span class="json-collapsed-preview"> {{ line.count }} {{ line.open === '[' ? 'items' : 'keys' }} </span><span class="json-bracket">{{ line.close }}</span>
+                    </template>
+                    <template v-else-if="line.type === 'empty-object'">
+                      <span class="json-bracket">{}</span>
+                    </template>
+                    <template v-else-if="line.type === 'empty-array'">
+                      <span class="json-bracket">[]</span>
+                    </template>
+                    <span v-if="line.hasComma" class="json-comma">,</span>
+                  </div>
+                </div>
+                <pre v-else class="code-view">{{ formatSnapshotBody(requestSnapshot.body) }}</pre>
                 <div class="body-schema-resizer" title="拖拽调整注释区宽度" @pointerdown="startBodySchemaResize"></div>
                 <div class="schema-panel">
                   <div class="schema-panel-title-row">
                     <div class="schema-panel-title">请求 Body</div>
-                    <span v-if="requestBodyDocRows.length" class="schema-field-count">{{ requestBodyDocRows.length }} 字段</span>
+                    <span v-if="requestBodyAllRows.length" class="schema-field-count">{{ requestBodyAllRows.length }} 字段</span>
                   </div>
-                  <div v-if="requestBodyDocRows.length" class="schema-field-table">
+                  <div v-if="requestBodyAllRows.length" class="schema-field-table">
                     <div class="schema-field-table-head">
                       <span>字段</span>
                       <span>类型</span>
@@ -283,7 +345,9 @@
                     </div>
                     <div v-for="row in requestBodyDocRows" :key="row.path" class="schema-field-row">
                       <div class="schema-field-name" :style="{ paddingLeft: `${row.depth * 12}px` }">
-                        <code :title="row.path">{{ row.path }}</code>
+                        <span v-if="row.hasChildren" class="schema-toggle" :class="{ 'is-collapsed': requestBodyCollapsed[row.path] }" @click="toggleSchemaCollapse(requestBodyCollapsed, row.path)" />
+                        <span v-else class="schema-toggle-placeholder" />
+                        <code :title="row.path">{{ row.name }}</code>
                         <span v-if="row.required" class="schema-required">*</span>
                       </div>
                       <span class="schema-type-chip">{{ row.type }}</span>
@@ -298,18 +362,44 @@
         </el-tab-pane>
 
         <el-tab-pane label="响应" name="response">
-          <div class="section-grid">
-            <div class="section-block full">
-              <h3>Body</h3>
+          <el-tabs v-model="responseDetailTab" class="response-detail-tabs response-detail-tabs--subtle">
+            <el-tab-pane label="Body" name="body">
               <div class="body-schema-layout" :style="bodySchemaLayoutStyle">
-                <pre class="code-view">{{ formatSnapshotBody(responseSnapshot.body) }}</pre>
+                <div v-if="responseBodyJsonLines !== null" class="json-viewer code-view">
+                  <div v-for="line in responseBodyJsonLines" :key="line.id" class="json-line" :style="{ paddingLeft: `${line.depth * 16}px` }">
+                    <span v-if="line.type === 'open'" class="json-toggle" @click="toggleSchemaCollapse(responseJsonCollapsed, line.path)" />
+                    <span v-else-if="line.type === 'collapsed'" class="json-toggle is-collapsed" @click="toggleSchemaCollapse(responseJsonCollapsed, line.path)" />
+                    <span v-else class="json-toggle-ph" />
+                    <span v-if="line.key !== null && line.key !== undefined" class="json-key">"{{ line.key }}"<span class="json-colon">: </span></span>
+                    <template v-if="line.type === 'primitive'">
+                      <span class="json-value" :class="`json-${line.valueType}`">{{ line.displayValue }}</span>
+                    </template>
+                    <template v-else-if="line.type === 'open'">
+                      <span class="json-bracket">{{ line.bracket }}</span>
+                    </template>
+                    <template v-else-if="line.type === 'close'">
+                      <span class="json-bracket">{{ line.bracket }}</span>
+                    </template>
+                    <template v-else-if="line.type === 'collapsed'">
+                      <span class="json-bracket">{{ line.open }}</span><span class="json-collapsed-preview"> {{ line.count }} {{ line.open === '[' ? 'items' : 'keys' }} </span><span class="json-bracket">{{ line.close }}</span>
+                    </template>
+                    <template v-else-if="line.type === 'empty-object'">
+                      <span class="json-bracket">{}</span>
+                    </template>
+                    <template v-else-if="line.type === 'empty-array'">
+                      <span class="json-bracket">[]</span>
+                    </template>
+                    <span v-if="line.hasComma" class="json-comma">,</span>
+                  </div>
+                </div>
+                <pre v-else class="code-view">{{ formatSnapshotBody(responseSnapshot.body) }}</pre>
                 <div class="body-schema-resizer" title="拖拽调整注释区宽度" @pointerdown="startBodySchemaResize"></div>
                 <div class="schema-panel">
                   <div class="schema-panel-title-row">
                     <div class="schema-panel-title">响应 Body</div>
-                    <span v-if="responseBodyDocRows.length" class="schema-field-count">{{ responseBodyDocRows.length }} 字段</span>
+                    <span v-if="responseBodyAllRows.length" class="schema-field-count">{{ responseBodyAllRows.length }} 字段</span>
                   </div>
-                  <div v-if="responseBodyDocRows.length" class="schema-field-table">
+                  <div v-if="responseBodyAllRows.length" class="schema-field-table">
                     <div class="schema-field-table-head">
                       <span>字段</span>
                       <span>类型</span>
@@ -317,8 +407,9 @@
                     </div>
                     <div v-for="row in responseBodyDocRows" :key="row.path" class="schema-field-row">
                       <div class="schema-field-name" :style="{ paddingLeft: `${row.depth * 12}px` }">
-                        <code :title="row.path">{{ row.path }}</code>
-                        <span v-if="row.required" class="schema-required">*</span>
+                        <span v-if="row.hasChildren" class="schema-toggle" :class="{ 'is-collapsed': responseBodyCollapsed[row.path] }" @click="toggleSchemaCollapse(responseBodyCollapsed, row.path)" />
+                        <span v-else class="schema-toggle-placeholder" />
+                        <code :title="row.path">{{ row.name }}</code>
                       </div>
                       <span class="schema-type-chip">{{ row.type }}</span>
                       <span class="schema-field-meaning" :title="row.meaning">{{ row.meaning || '-' }}</span>
@@ -327,21 +418,17 @@
                   <el-empty v-else description="暂无字段说明" :image-size="42" />
                 </div>
               </div>
-            </div>
-            <div class="section-block full">
-              <el-tabs v-model="responseDetailTab" class="response-detail-tabs" type="card">
-                <el-tab-pane label="响应头" name="headers">
-                  <el-table :data="headersToRows(responseSnapshot.headers)" border>
-                    <el-table-column prop="key" label="名称" />
-                    <el-table-column prop="value" label="值" />
-                  </el-table>
-                </el-tab-pane>
-                <el-tab-pane label="实际请求" name="curl">
-                  <pre class="code-view code-view--curl">{{ requestCurlCommand }}</pre>
-                </el-tab-pane>
-              </el-tabs>
-            </div>
-          </div>
+            </el-tab-pane>
+            <el-tab-pane label="响应头" name="headers">
+              <el-table :data="headersToRows(responseSnapshot.headers)" border>
+                <el-table-column prop="key" label="名称" />
+                <el-table-column prop="value" label="值" />
+              </el-table>
+            </el-tab-pane>
+            <el-tab-pane label="实际请求" name="curl">
+              <pre class="code-view code-view--curl">{{ requestCurlCommand }}</pre>
+            </el-tab-pane>
+          </el-tabs>
         </el-tab-pane>
 
         <el-tab-pane label="断言" name="assertions">
@@ -374,23 +461,6 @@
           <el-empty v-if="!assertions.length" description="暂无断言结果" :image-size="48" />
         </el-tab-pane>
       </el-tabs>
-    </el-card>
-    <el-card v-else class="result-card response-empty-card">
-      <div class="result-title">
-        <div>
-          <h3>响应结果</h3>
-          <p>点击发送后展示本次请求、响应和断言结果。</p>
-        </div>
-        <div class="result-metrics">
-          <span class="metric-chip is-idle">
-            <el-icon>
-              <Clock />
-            </el-icon>
-            <span>未运行</span>
-          </span>
-        </div>
-      </div>
-      <el-empty description="暂无响应结果" />
     </el-card>
 
     <el-dialog v-model="envDialog" class="env-config-dialog" title="编辑环境" width="860px" align-center>
@@ -474,6 +544,14 @@
       </template>
     </el-dialog>
 
+    <AIGenerateDialog
+      v-model="aiParamsDialogVisible"
+      action="generate_params"
+      :context="aiParamsContext"
+      @apply="onAIParamsApply"
+      @generation-settled="aiParamsLoading = false"
+    />
+
   </div>
 </template>
 
@@ -493,6 +571,7 @@ import {
 } from '../../api'
 import { buildCurlFromRequestSnapshot } from '../../utils/curl'
 import AssertionEditor from '../../components/AssertionEditor.vue'
+import AIGenerateDialog from '../../components/AIGenerateDialog.vue'
 
 const ASSERTION_TYPE_LABELS = {
   status_code: '状态码',
@@ -582,7 +661,7 @@ function storeEnvironmentId(projectId, serviceId, environmentId) {
 
 export default {
   name: 'CaseRun',
-  components: { AssertionEditor },
+  components: { AssertionEditor, AIGenerateDialog },
   props: {
     caseId: {
       type: String,
@@ -615,7 +694,7 @@ export default {
       runName: '',
       activeTab: 'params',
       resultTab: 'response',
-      responseDetailTab: 'headers',
+      responseDetailTab: 'body',
       methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
       request: { method: 'GET', path: '', headers: {}, query: {}, body: null },
       pathRows: [],
@@ -631,7 +710,15 @@ export default {
       savingAssertions: false,
       assertionsSaved: false,
       bodySchemaPanelWidth: readStoredBodySchemaPanelWidth(),
-      bodySchemaResizeState: null
+      bodySchemaResizeState: null,
+      requestBodyCollapsed: {},
+      requestBodyViewMode: 'edit',
+      requestBodyJsonCollapsed: {},
+      aiParamsDialogVisible: false,
+      aiParamsLoading: false,
+      responseBodyCollapsed: {},
+      responseJsonCollapsed: {},
+      requestSnapshotJsonCollapsed: {}
     }
   },
   computed: {
@@ -672,6 +759,37 @@ export default {
     requestCurlCommand() {
       return buildCurlFromRequestSnapshot(this.requestSnapshot)
     },
+    aiParamsContext() {
+      const current = this.normalizeRequest(this.request)
+      let bodyDraft = null
+      if (this.bodyText && this.bodyText.trim()) {
+        try {
+          bodyDraft = JSON.parse(this.bodyText)
+        } catch (_) {
+          bodyDraft = this.bodyText
+        }
+      }
+      return {
+        method: current.method,
+        path: current.path,
+        endpoint: this.endpoint
+          ? {
+              summary: this.endpoint.summary,
+              description: this.endpoint.description,
+              parameters: this.endpoint.parameters,
+              requestSchema: this.endpoint.requestSchema,
+              responses: this.endpoint.responses
+            }
+          : null,
+        currentRequest: {
+          path: current.path,
+          query: current.query,
+          headers: current.headers,
+          variables: current.variables,
+          body: bodyDraft
+        }
+      }
+    },
     requestSchema() {
       return this.normalizeRequest(this.endpoint?.requestSchema)
     },
@@ -684,11 +802,48 @@ export default {
     responseBodySchema() {
       return this.responseSchema?.body || null
     },
-    requestBodyDocRows() {
+    requestBodyAllRows() {
       return this.schemaDocRows(this.requestBodySchema)
     },
-    responseBodyDocRows() {
+    responseBodyAllRows() {
       return this.schemaDocRows(this.responseBodySchema)
+    },
+    requestBodyEditorJsonLines() {
+      if (this.requestBodyViewMode !== 'preview') return null
+      try {
+        const parsed = JSON.parse(this.bodyText)
+        const lines = []
+        this.collectJsonLines(parsed, null, '$', 0, true, this.requestBodyJsonCollapsed, lines)
+        return lines
+      } catch { return null }
+    },
+    responseBodyParsed() {
+      const body = this.responseSnapshot.body
+      if (body == null || body === '') return undefined
+      try { return typeof body === 'string' ? JSON.parse(body) : body } catch { return undefined }
+    },
+    requestSnapshotBodyParsed() {
+      const body = this.requestSnapshot.body
+      if (body == null || body === '') return undefined
+      try { return typeof body === 'string' ? JSON.parse(body) : body } catch { return undefined }
+    },
+    responseBodyJsonLines() {
+      if (this.responseBodyParsed === undefined) return null
+      const lines = []
+      this.collectJsonLines(this.responseBodyParsed, null, '$', 0, true, this.responseJsonCollapsed, lines)
+      return lines
+    },
+    requestSnapshotBodyJsonLines() {
+      if (this.requestSnapshotBodyParsed === undefined) return null
+      const lines = []
+      this.collectJsonLines(this.requestSnapshotBodyParsed, null, '$', 0, true, this.requestSnapshotJsonCollapsed, lines)
+      return lines
+    },
+    requestBodyDocRows() {
+      return this.filterSchemaRows(this.requestBodyAllRows, this.requestBodyCollapsed)
+    },
+    responseBodyDocRows() {
+      return this.filterSchemaRows(this.responseBodyAllRows, this.responseBodyCollapsed)
     },
     bodySchemaLayoutStyle() {
       return Number.isFinite(this.bodySchemaPanelWidth)
@@ -719,6 +874,9 @@ export default {
       this.pathRows = this.objectToRows(forPath)
       this.variableRows = this.objectToRows(forRest)
       this.request.variables = { ...forPath, ...forRest }
+    },
+    aiParamsDialogVisible(val) {
+      if (!val) this.aiParamsLoading = false
     }
   },
   methods: {
@@ -776,6 +934,54 @@ export default {
       document.body.style.userSelect = ''
       storeBodySchemaPanelWidth(this.bodySchemaPanelWidth)
       this.bodySchemaResizeState = null
+    },
+    toggleSchemaCollapse(collapsedObj, path) {
+      if (collapsedObj[path]) {
+        delete collapsedObj[path]
+      } else {
+        collapsedObj[path] = true
+      }
+    },
+    collectJsonLines(value, keyName, path, depth, isLast, collapsed, lines) {
+      if (value === null || typeof value !== 'object') {
+        lines.push({
+          id: path,
+          type: 'primitive',
+          depth,
+          key: keyName,
+          displayValue: this.formatJsonPrimitive(value),
+          valueType: value === null ? 'null' : typeof value,
+          hasComma: !isLast
+        })
+        return
+      }
+      const isArray = Array.isArray(value)
+      const keys = isArray ? null : Object.keys(value)
+      const count = isArray ? value.length : keys.length
+      if (count === 0) {
+        lines.push({ id: path, type: isArray ? 'empty-array' : 'empty-object', depth, key: keyName, hasComma: !isLast })
+        return
+      }
+      if (collapsed[path]) {
+        lines.push({ id: path, type: 'collapsed', depth, key: keyName, open: isArray ? '[' : '{', close: isArray ? ']' : '}', count, path, hasComma: !isLast })
+        return
+      }
+      lines.push({ id: `${path}:o`, type: 'open', depth, key: keyName, bracket: isArray ? '[' : '{', path })
+      if (isArray) {
+        value.forEach((item, i) => {
+          this.collectJsonLines(item, null, `${path}[${i}]`, depth + 1, i === value.length - 1, collapsed, lines)
+        })
+      } else {
+        keys.forEach((k, i) => {
+          this.collectJsonLines(value[k], k, `${path}.${k}`, depth + 1, i === keys.length - 1, collapsed, lines)
+        })
+      }
+      lines.push({ id: `${path}:c`, type: 'close', depth, bracket: isArray ? ']' : '}', hasComma: !isLast })
+    },
+    formatJsonPrimitive(value) {
+      if (value === null) return 'null'
+      if (typeof value === 'string') return JSON.stringify(value)
+      return String(value)
     },
     async loadData() {
       this.loading = true
@@ -907,6 +1113,79 @@ export default {
       } finally {
         this.generating = false
       }
+    },
+    openAIParamsDialog() {
+      this.aiParamsLoading = true
+      this.aiParamsDialogVisible = true
+    },
+    onAIParamsApply(payload) {
+      const generated = payload?.parsed
+      if (!generated || typeof generated !== 'object' || Array.isArray(generated)) {
+        this.$message.warning('AI 未返回结构化参数，请查看原文')
+        return
+      }
+      const aiHeaders = (generated.headers && typeof generated.headers === 'object' && !Array.isArray(generated.headers))
+        ? generated.headers : {}
+      const aiQuery = (generated.query && typeof generated.query === 'object' && !Array.isArray(generated.query))
+        ? generated.query : {}
+      const aiPath = (generated.path && typeof generated.path === 'object' && !Array.isArray(generated.path))
+        ? generated.path : (generated.pathvar || generated.pathVars || {})
+      const aiBody = Object.prototype.hasOwnProperty.call(generated, 'body') ? generated.body : null
+
+      const currentQuery = this.rowsToValueMap(this.queryRows)
+      const currentQueryEnabled = this.rowsToEnabledMap(this.queryRows)
+      const currentQueryRequired = this.rowsToRequiredMap(this.queryRows)
+      const currentHeaders = this.rowsToValueMap(this.headerRows)
+      const currentPath = this.rowsToValueMap(this.pathRows)
+      const currentVars = this.rowsToValueMap(this.variableRows)
+      const current = this.normalizeRequest(this.request)
+
+      const mergedHeaders = { ...currentHeaders }
+      for (const [k, v] of Object.entries(aiHeaders)) {
+        mergedHeaders[k] = typeof v === 'string' ? v : JSON.stringify(v)
+      }
+
+      const mergedQuery = { ...currentQuery }
+      const mergedQueryEnabled = { ...currentQueryEnabled }
+      const mergedQueryRequired = { ...currentQueryRequired }
+      for (const [k, v] of Object.entries(aiQuery)) {
+        mergedQuery[k] = typeof v === 'string' ? v : JSON.stringify(v)
+        mergedQueryEnabled[k] = true
+        if (!Object.prototype.hasOwnProperty.call(mergedQueryRequired, k)) mergedQueryRequired[k] = false
+      }
+
+      const mergedVariables = { ...currentVars, ...currentPath }
+      for (const [k, v] of Object.entries(aiPath)) {
+        mergedVariables[k] = typeof v === 'string' ? v : JSON.stringify(v)
+      }
+
+      let bodyDraft = current.body
+      if (this.bodyText && this.bodyText.trim()) {
+        try {
+          bodyDraft = JSON.parse(this.bodyText)
+        } catch (_) {
+          bodyDraft = this.bodyText
+        }
+      }
+      const nextBody = aiBody !== null && aiBody !== undefined ? aiBody : bodyDraft
+      const request = {
+        method: current.method,
+        path: this.normalizePathVariables(current.path),
+        headers: mergedHeaders,
+        query: mergedQuery,
+        queryEnabled: mergedQueryEnabled,
+        queryRequired: mergedQueryRequired,
+        variables: mergedVariables,
+        body: nextBody
+      }
+      if (current.security !== undefined) {
+        request.security = this.cloneSample(current.security)
+      }
+      if (request.body != null && !request.headers['Content-Type']) {
+        request.headers['Content-Type'] = 'application/json'
+      }
+      this.applyRequest(request)
+      this.$message.success('已应用 AI 生成的参数')
     },
     openEditEnvironment() {
       if (!this.currentEnvironment) return
@@ -1186,36 +1465,90 @@ export default {
       const root = this.normalizeSchemaNode(schema)
       if (!Object.keys(root).length) return []
       const rows = []
-      this.collectSchemaDocRows(root, '$', 0, false, rows)
-      return rows.length > 1 ? rows.filter((row) => row.path !== '$') : rows
+      this.collectSchemaDocRows(root, '$', '$', null, 0, false, rows)
+      if (rows.length <= 1) return rows
+      return rows
+        .filter((row) => row.path !== '$')
+        .map((row) => ({ ...row, parentPath: row.parentPath === '$' ? null : row.parentPath }))
     },
-    collectSchemaDocRows(schema, path, depth, required, rows) {
+    filterSchemaRows(rows, collapsed) {
+      if (!Object.keys(collapsed).length) return rows
+      const byPath = {}
+      rows.forEach((r) => { byPath[r.path] = r })
+      return rows.filter((row) => {
+        let p = row.parentPath
+        while (p !== null && p !== undefined) {
+          if (collapsed[p]) return false
+          p = byPath[p]?.parentPath ?? null
+        }
+        return true
+      })
+    },
+    collectSchemaDocRows(schema, path, name, parentPath, depth, required, rows) {
       const node = this.normalizeSchemaNode(schema)
+      const type = this.schemaType(node)
+
+      let hasChildren = false
+      if (type === 'object') {
+        const props = this.normalizeObject(node.properties)
+        if (Object.keys(props).length > 0 || (node.additionalProperties && typeof node.additionalProperties === 'object')) {
+          hasChildren = true
+        }
+      } else if (type === 'array' && node.items && typeof node.items === 'object') {
+        const itemsNode = this.normalizeSchemaNode(node.items)
+        const itemsType = this.schemaType(itemsNode)
+        if (itemsType === 'object' && Object.keys(this.normalizeObject(itemsNode.properties)).length > 0) {
+          hasChildren = true
+        }
+      }
+
       rows.push({
         path,
+        name,
+        parentPath,
         depth,
         required,
+        hasChildren,
         type: this.schemaTypeLabel(node),
         meaning: this.schemaFieldMeaning(node)
       })
 
-      const type = this.schemaType(node)
       if (type === 'object') {
         const requiredFields = new Set(Array.isArray(node.required) ? node.required : [])
         for (const [key, property] of Object.entries(this.normalizeObject(node.properties))) {
           this.collectSchemaDocRows(
             property,
             path === '$' ? key : `${path}.${key}`,
+            key,
+            path,
             depth + 1,
             requiredFields.has(key),
             rows
           )
         }
         if (node.additionalProperties && typeof node.additionalProperties === 'object') {
-          this.collectSchemaDocRows(node.additionalProperties, `${path}.{key}`, depth + 1, false, rows)
+          this.collectSchemaDocRows(node.additionalProperties, `${path}.{key}`, '{key}', path, depth + 1, false, rows)
         }
       } else if (type === 'array' && node.items && typeof node.items === 'object') {
-        this.collectSchemaDocRows(node.items, `${path}[]`, depth + 1, false, rows)
+        const itemsNode = this.normalizeSchemaNode(node.items)
+        const itemsType = this.schemaType(itemsNode)
+        if (itemsType === 'object') {
+          const requiredFields = new Set(Array.isArray(itemsNode.required) ? itemsNode.required : [])
+          for (const [key, property] of Object.entries(this.normalizeObject(itemsNode.properties))) {
+            this.collectSchemaDocRows(
+              property,
+              `${path}[].${key}`,
+              key,
+              path,
+              depth + 1,
+              requiredFields.has(key),
+              rows
+            )
+          }
+          if (itemsNode.additionalProperties && typeof itemsNode.additionalProperties === 'object') {
+            this.collectSchemaDocRows(itemsNode.additionalProperties, `${path}[].{key}`, '{key}', path, depth + 1, false, rows)
+          }
+        }
       }
     },
     normalizeSchemaNode(schema) {
@@ -1266,6 +1599,11 @@ export default {
       const type = this.schemaType(node)
       const format = typeof node.format === 'string' ? node.format.trim() : ''
       if (!type && Array.isArray(node.enum) && node.enum.length > 0) return 'enum'
+      if (type === 'array' && node.items && typeof node.items === 'object') {
+        const itemsNode = this.normalizeSchemaNode(node.items)
+        const itemsType = this.schemaType(itemsNode)
+        if (itemsType) return `array[${itemsType}]`
+      }
       return format ? `${type || 'value'}:${format}` : (type || 'value')
     },
     schemaType(schema) {
@@ -1704,6 +2042,34 @@ export default {
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+.body-view-toggle {
+  display: flex;
+  gap: 0;
+  border: 1px solid var(--app-border-color);
+  border-radius: 6px;
+  overflow: hidden;
+  margin-left: auto;
+}
+
+.body-view-toggle span {
+  padding: 2px 10px;
+  font-size: 12px;
+  color: var(--app-secondary-text);
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s, color 0.15s;
+}
+
+.body-view-toggle span:first-child {
+  border-right: 1px solid var(--app-border-color);
+}
+
+.body-view-toggle span.active {
+  background: var(--el-color-primary-light-9);
+  color: var(--el-color-primary);
+  font-weight: 600;
 }
 
 .request-card {
@@ -2147,6 +2513,117 @@ export default {
   min-width: 0;
 }
 
+.json-viewer {
+  overflow: auto;
+  padding: 10px 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12.5px;
+  line-height: 1.7;
+}
+
+.json-line {
+  display: flex;
+  align-items: baseline;
+  gap: 0;
+  white-space: pre;
+  padding-right: 10px;
+}
+
+.json-toggle,
+.json-toggle-ph {
+  flex: 0 0 14px;
+  width: 14px;
+  height: 14px;
+  position: relative;
+  top: 1px;
+}
+
+.json-toggle {
+  cursor: pointer;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.json-toggle:hover {
+  background: var(--el-fill-color-light);
+}
+
+.json-toggle::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  border: 3.5px solid transparent;
+  border-top: 4.5px solid #94a3b8;
+  border-bottom: 0;
+  transform: translate(-50%, -20%);
+  transition: transform 0.12s;
+}
+
+.json-toggle.is-collapsed::before {
+  transform: translate(-50%, -50%) rotate(-90deg);
+}
+
+.json-key {
+  color: #1e40af;
+}
+
+.json-colon {
+  color: var(--el-text-color-regular);
+}
+
+.json-bracket {
+  color: var(--el-text-color-regular);
+}
+
+.json-comma {
+  color: var(--el-text-color-regular);
+}
+
+.json-string { color: #16a34a; }
+.json-number { color: #c2410c; }
+.json-boolean { color: #7c3aed; }
+.json-null { color: #94a3b8; }
+
+.json-collapsed-preview {
+  color: #94a3b8;
+  font-style: italic;
+}
+
+.schema-toggle,
+.schema-toggle-placeholder {
+  flex: 0 0 14px;
+  width: 14px;
+  height: 14px;
+}
+
+.schema-toggle {
+  position: relative;
+  cursor: pointer;
+  border-radius: 3px;
+  transition: background 0.15s;
+}
+
+.schema-toggle:hover {
+  background: var(--el-fill-color-light);
+}
+
+.schema-toggle::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  border: 4px solid transparent;
+  border-top: 5px solid var(--app-secondary-text);
+  border-bottom: 0;
+  transform: translate(-50%, -30%);
+  transition: transform 0.15s;
+}
+
+.schema-toggle.is-collapsed::before {
+  transform: translate(-50%, -50%) rotate(-90deg);
+}
+
 .schema-field-name code {
   overflow: hidden;
   color: var(--el-text-color-primary);
@@ -2202,6 +2679,31 @@ export default {
 
 .response-detail-tabs :deep(.el-tabs__header) {
   margin-bottom: 12px;
+}
+
+.response-detail-tabs--subtle :deep(.el-tabs__header) {
+  margin-bottom: 8px;
+}
+
+.response-detail-tabs--subtle :deep(.el-tabs__nav-wrap::after) {
+  height: 1px;
+  background: var(--app-border-color);
+}
+
+.response-detail-tabs--subtle :deep(.el-tabs__item) {
+  height: 30px;
+  padding: 0 10px;
+  color: var(--app-secondary-text);
+  font-size: 12px;
+  line-height: 30px;
+}
+
+.response-detail-tabs--subtle :deep(.el-tabs__item.is-active) {
+  color: var(--el-color-primary);
+}
+
+.response-detail-tabs--subtle :deep(.el-tabs__active-bar) {
+  height: 2px;
 }
 
 .code-view--curl {

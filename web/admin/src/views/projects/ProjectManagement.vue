@@ -19,6 +19,12 @@
           <el-tab-pane label="业务数据源" name="dataSources" lazy>
             <DataSourceList :key="projectPanelKey" embedded />
           </el-tab-pane>
+          <el-tab-pane label="AI 提供商" name="aiProviders" lazy>
+            <AIProviderList :key="projectPanelKey" embedded />
+          </el-tab-pane>
+          <el-tab-pane label="Prompt 管理" name="prompts" lazy>
+            <ProjectPromptList :key="projectPanelKey" embedded />
+          </el-tab-pane>
         </el-tabs>
       </el-main>
     </el-container>
@@ -29,6 +35,8 @@
 import ProjectListPanel from './ProjectListPanel.vue'
 import ServiceEnvironment from './ServiceEnvironment.vue'
 import DataSourceList from '../data/DataSourceList.vue'
+import AIProviderList from '../platform/AIProviderList.vue'
+import ProjectPromptList from './ProjectPromptList.vue'
 import { projectState } from '../../utils/currentProject'
 
 export default {
@@ -37,6 +45,8 @@ export default {
     ProjectListPanel,
     ServiceEnvironment,
     DataSourceList,
+    AIProviderList,
+    ProjectPromptList,
   },
   data() {
     return {
@@ -61,6 +71,8 @@ export default {
     normalizeTab(raw) {
       const t = typeof raw === 'string' ? raw : ''
       if (t === 'dataSources') return 'dataSources'
+      if (t === 'aiProviders') return 'aiProviders'
+      if (t === 'prompts') return 'prompts'
       return 'services'
     },
     syncTabFromRoute() {

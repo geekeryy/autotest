@@ -58,7 +58,13 @@ export const menuRoutes = [
     path: '/platform',
     redirect: '/script-library',
     meta: { title: '平台资源' },
-    children: [{ path: '/script-library', component: ScriptLibraryList, meta: { title: '脚本库', permission: 'cases:read' } }]
+    children: [
+      { path: '/script-library', component: ScriptLibraryList, meta: { title: '脚本库', permission: 'cases:read' } }
+    ]
+  },
+  {
+    path: '/ai-providers',
+    redirect: () => ({ path: '/projects', query: { tab: 'aiProviders' } })
   },
   {
     path: '/system',

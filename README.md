@@ -82,6 +82,15 @@ npm run build
 
 除 `GET /healthz` 和 `POST /api/v1/auth/login` 外，`/api/v1` 下管理接口都需要 Bearer Token。Migration 文件位于 `migrations/`，可用 goose 或 psql 执行。
 
-## TODO
-- 支持本地 ollama 生成接口请求参数（待实现）
+## AI 提供商
+
+- 「平台资源 / AI 提供商」按项目维护 DeepSeek、Xiaomi、OpenAI、Anthropic、Kimi、Ollama 等大模型配置（API Key 仅以脱敏形式返回）。
+- 运行控制台「生成参数」旁、断言编辑器以及场景脚本步骤区均提供「AI 生成」入口，支持基于 OpenAPI/响应快照生成请求参数、断言脚本与测试用例数据。
+- 接口：
+  - `GET /api/v1/ai-provider-types`
+  - `GET/POST /api/v1/projects/{projectID}/ai-providers`
+  - `PUT/DELETE /api/v1/projects/{projectID}/ai-providers/{providerID}`
+  - `POST /api/v1/projects/{projectID}/ai-providers/{providerID}/test`
+  - `POST /api/v1/projects/{projectID}/ai/chat`
+- Ollama 走 OpenAI 兼容端点（默认 `http://localhost:11434/v1`），无需 API Key。
 

@@ -71,6 +71,8 @@ type UpsertStepInput struct {
 	Enabled         *bool           `json:"enabled"`
 	Config          json.RawMessage `json:"config"`
 	RequestOverride json.RawMessage `json:"requestOverride"`
+	// If set, after this step is saved, append its step_seq to the parent control step's config.
+	AttachUnderParent *AttachUnderParentInput `json:"attachUnderParent,omitempty"`
 }
 
 type ListFilter struct {

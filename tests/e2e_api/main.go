@@ -638,8 +638,8 @@ func buildSwagger(baseURL string) ([]byte, error) {
 	doc := map[string]any{
 		"swagger": "2.0",
 		"info": map[string]string{
-			"title":       "Autotest E2E Demo API",
-			"description": "A local target API service for importing into the automation test platform.",
+			"title":       "自动化测试平台 E2E 示例 API",
+			"description": "供自动化测试平台导入与执行的本地被测服务。",
 			"version":     "1.0.0",
 		},
 		"host":        host,
@@ -655,13 +655,13 @@ func buildSwagger(baseURL string) ([]byte, error) {
 				"type":        "apiKey",
 				"name":        "Authorization",
 				"in":          "header",
-				"description": "Use the value returned by /api/v1/auth/login as: Bearer <token>",
+				"description": "使用 /api/v1/auth/login 返回的 token，格式：Bearer <token>",
 			},
 			"AdminBearerAuth": map[string]any{
 				"type":        "apiKey",
 				"name":        "Authorization",
 				"in":          "header",
-				"description": "Use the value returned by /api/v1/admin/auth/login as: Bearer <token>",
+				"description": "使用 /api/v1/admin/auth/login 返回的 token，格式：Bearer <token>",
 			},
 		},
 	}
@@ -670,12 +670,12 @@ func buildSwagger(baseURL string) ([]byte, error) {
 
 func swaggerTags() []map[string]string {
 	return []map[string]string{
-		{"name": "health", "description": "Service health checks"},
-		{"name": "auth", "description": "User JWT authentication"},
-		{"name": "users", "description": "User read-only operations (list, detail, personal info)"},
-		{"name": "admin-auth", "description": "Admin JWT authentication"},
-		{"name": "admin-users", "description": "Admin user management (full CRUD)"},
-		{"name": "admin", "description": "Admin statistics and audit logs"},
+		{"name": "health", "description": "服务健康检查"},
+		{"name": "auth", "description": "用户 JWT 认证"},
+		{"name": "users", "description": "用户只读操作（列表、详情、当前用户信息）"},
+		{"name": "admin-auth", "description": "管理员 JWT 认证"},
+		{"name": "admin-users", "description": "管理员用户管理（完整 CRUD）"},
+		{"name": "admin", "description": "管理员统计与审计日志"},
 	}
 }
 
@@ -686,9 +686,9 @@ func swaggerPaths() map[string]any {
 			"get": map[string]any{
 				"tags":        []string{"health"},
 				"operationId": "health",
-				"summary":     "Health check",
+				"summary":     "健康检查",
 				"responses": map[string]any{
-					"200": response("service is healthy", ref("#/definitions/HealthResponse")),
+					"200": response("服务正常", ref("#/definitions/HealthResponse")),
 				},
 			},
 		},
@@ -697,14 +697,14 @@ func swaggerPaths() map[string]any {
 			"post": map[string]any{
 				"tags":        []string{"auth"},
 				"operationId": "login",
-				"summary":     "Login and get JWT",
+				"summary":     "用户登录获取 JWT",
 				"parameters": []map[string]any{
-					bodyParam("credentials", "Login credentials", ref("#/definitions/LoginRequest")),
+					bodyParam("credentials", "登录凭据", ref("#/definitions/LoginRequest")),
 				},
 				"responses": map[string]any{
-					"200": response("login response", ref("#/definitions/LoginResponse")),
-					"400": response("invalid request", ref("#/definitions/ErrorResponse")),
-					"401": response("unauthorized", ref("#/definitions/ErrorResponse")),
+					"200": response("登录成功，返回 token 与用户信息", ref("#/definitions/LoginResponse")),
+					"400": response("请求参数错误", ref("#/definitions/ErrorResponse")),
+					"401": response("用户名或密码错误", ref("#/definitions/ErrorResponse")),
 				},
 			},
 		},
@@ -713,11 +713,11 @@ func swaggerPaths() map[string]any {
 			"get": map[string]any{
 				"tags":        []string{"users"},
 				"operationId": "getMe",
-				"summary":     "Get current authenticated user",
+				"summary":     "获取当前登录用户信息",
 				"security":    jwtSecurity(),
 				"responses": map[string]any{
-					"200": response("current user", ref("#/definitions/AuthUser")),
-					"401": response("unauthorized", ref("#/definitions/ErrorResponse")),
+					"200": response("当前登录用户", ref("#/definitions/AuthUser")),
+					"401": response("未授权，token 无效或已过期", ref("#/definitions/ErrorResponse")),
 				},
 			},
 		},
@@ -725,7 +725,7 @@ func swaggerPaths() map[string]any {
 			"get": map[string]any{
 				"tags":        []string{"users"},
 				"operationId": "listUsers",
-				"summary":     "List users",
+				"summary":     "获取用户列表",
 				"security":    jwtSecurity(),
 				"parameters": []map[string]any{
 					{
@@ -733,15 +733,15 @@ func swaggerPaths() map[string]any {
 						"in":          "query",
 						"required":    false,
 						"type":        "string",
-						"description": "Optional role filter",
+						"description": "按角色筛选，留空返回全部",
 					},
 				},
 				"responses": map[string]any{
-					"200": response("users", map[string]any{
+					"200": response("用户列表", map[string]any{
 						"type":  "array",
 						"items": ref("#/definitions/User"),
 					}),
-					"401": response("unauthorized", ref("#/definitions/ErrorResponse")),
+					"401": response("未授权，token 无效或已过期", ref("#/definitions/ErrorResponse")),
 				},
 			},
 		},
@@ -749,13 +749,13 @@ func swaggerPaths() map[string]any {
 			"get": map[string]any{
 				"tags":        []string{"users"},
 				"operationId": "getUser",
-				"summary":     "Get user by ID",
+				"summary":     "根据 ID 获取用户详情",
 				"security":    jwtSecurity(),
 				"parameters":  []map[string]any{pathIDParam()},
 				"responses": map[string]any{
-					"200": response("user", ref("#/definitions/User")),
-					"401": response("unauthorized", ref("#/definitions/ErrorResponse")),
-					"404": response("not found", ref("#/definitions/ErrorResponse")),
+					"200": response("用户详情", ref("#/definitions/User")),
+					"401": response("未授权，token 无效或已过期", ref("#/definitions/ErrorResponse")),
+					"404": response("用户不存在", ref("#/definitions/ErrorResponse")),
 				},
 			},
 		},
@@ -764,14 +764,14 @@ func swaggerPaths() map[string]any {
 			"post": map[string]any{
 				"tags":        []string{"admin-auth"},
 				"operationId": "adminLogin",
-				"summary":     "Login and get admin JWT",
+				"summary":     "管理员登录获取 JWT",
 				"parameters": []map[string]any{
-					bodyParam("credentials", "Admin login credentials", ref("#/definitions/AdminLoginRequest")),
+					bodyParam("credentials", "管理员登录凭据", ref("#/definitions/AdminLoginRequest")),
 				},
 				"responses": map[string]any{
-					"200": response("login response", ref("#/definitions/LoginResponse")),
-					"400": response("invalid request", ref("#/definitions/ErrorResponse")),
-					"401": response("unauthorized", ref("#/definitions/ErrorResponse")),
+					"200": response("登录成功，返回 token 与管理员信息", ref("#/definitions/LoginResponse")),
+					"400": response("请求参数错误", ref("#/definitions/ErrorResponse")),
+					"401": response("用户名或密码错误", ref("#/definitions/ErrorResponse")),
 				},
 			},
 		},
@@ -780,7 +780,7 @@ func swaggerPaths() map[string]any {
 			"get": map[string]any{
 				"tags":        []string{"admin-users"},
 				"operationId": "adminListUsers",
-				"summary":     "List users (admin)",
+				"summary":     "管理员获取用户列表",
 				"security":    adminJWTSecurity(),
 				"parameters": []map[string]any{
 					{
@@ -788,26 +788,26 @@ func swaggerPaths() map[string]any {
 						"in":          "query",
 						"required":    false,
 						"type":        "string",
-						"description": "Optional role filter",
+						"description": "按角色筛选，留空返回全部",
 					},
 				},
 				"responses": map[string]any{
-					"200": response("users with total count", ref("#/definitions/AdminUserListResponse")),
-					"401": response("unauthorized", ref("#/definitions/ErrorResponse")),
+					"200": response("用户列表及总数", ref("#/definitions/AdminUserListResponse")),
+					"401": response("未授权，token 无效或已过期", ref("#/definitions/ErrorResponse")),
 				},
 			},
 			"post": map[string]any{
 				"tags":        []string{"admin-users"},
 				"operationId": "adminCreateUser",
-				"summary":     "Create user (admin)",
+				"summary":     "管理员新建用户",
 				"security":    adminJWTSecurity(),
 				"parameters": []map[string]any{
-					bodyParam("user", "User payload", ref("#/definitions/CreateUserRequest")),
+					bodyParam("user", "新建用户请求体", ref("#/definitions/CreateUserRequest")),
 				},
 				"responses": map[string]any{
-					"201": response("created user", ref("#/definitions/User")),
-					"400": response("validation error", ref("#/definitions/ErrorResponse")),
-					"401": response("unauthorized", ref("#/definitions/ErrorResponse")),
+					"201": response("新建成功，返回用户详情", ref("#/definitions/User")),
+					"400": response("参数校验失败", ref("#/definitions/ErrorResponse")),
+					"401": response("未授权，token 无效或已过期", ref("#/definitions/ErrorResponse")),
 				},
 			},
 		},
@@ -815,41 +815,41 @@ func swaggerPaths() map[string]any {
 			"get": map[string]any{
 				"tags":        []string{"admin-users"},
 				"operationId": "adminGetUser",
-				"summary":     "Get user by ID (admin)",
+				"summary":     "管理员根据 ID 获取用户详情",
 				"security":    adminJWTSecurity(),
 				"parameters":  []map[string]any{pathIDParam()},
 				"responses": map[string]any{
-					"200": response("user", ref("#/definitions/User")),
-					"401": response("unauthorized", ref("#/definitions/ErrorResponse")),
-					"404": response("not found", ref("#/definitions/ErrorResponse")),
+					"200": response("用户详情", ref("#/definitions/User")),
+					"401": response("未授权，token 无效或已过期", ref("#/definitions/ErrorResponse")),
+					"404": response("用户不存在", ref("#/definitions/ErrorResponse")),
 				},
 			},
 			"put": map[string]any{
 				"tags":        []string{"admin-users"},
 				"operationId": "adminUpdateUser",
-				"summary":     "Update user (admin)",
+				"summary":     "管理员更新用户信息",
 				"security":    adminJWTSecurity(),
 				"parameters": []map[string]any{
 					pathIDParam(),
-					bodyParam("user", "User fields to update", ref("#/definitions/UpdateUserRequest")),
+					bodyParam("user", "待更新的用户字段", ref("#/definitions/UpdateUserRequest")),
 				},
 				"responses": map[string]any{
-					"200": response("updated user", ref("#/definitions/User")),
-					"400": response("validation error", ref("#/definitions/ErrorResponse")),
-					"401": response("unauthorized", ref("#/definitions/ErrorResponse")),
-					"404": response("not found", ref("#/definitions/ErrorResponse")),
+					"200": response("更新成功，返回最新用户详情", ref("#/definitions/User")),
+					"400": response("参数校验失败", ref("#/definitions/ErrorResponse")),
+					"401": response("未授权，token 无效或已过期", ref("#/definitions/ErrorResponse")),
+					"404": response("用户不存在", ref("#/definitions/ErrorResponse")),
 				},
 			},
 			"delete": map[string]any{
 				"tags":        []string{"admin-users"},
 				"operationId": "adminDeleteUser",
-				"summary":     "Delete user (admin)",
+				"summary":     "管理员删除用户",
 				"security":    adminJWTSecurity(),
 				"parameters":  []map[string]any{pathIDParam()},
 				"responses": map[string]any{
-					"204": map[string]string{"description": "deleted"},
-					"401": response("unauthorized", ref("#/definitions/ErrorResponse")),
-					"404": response("not found", ref("#/definitions/ErrorResponse")),
+					"204": map[string]string{"description": "删除成功"},
+					"401": response("未授权，token 无效或已过期", ref("#/definitions/ErrorResponse")),
+					"404": response("用户不存在", ref("#/definitions/ErrorResponse")),
 				},
 			},
 		},
@@ -858,11 +858,11 @@ func swaggerPaths() map[string]any {
 			"get": map[string]any{
 				"tags":        []string{"admin"},
 				"operationId": "adminStats",
-				"summary":     "Get platform statistics (admin)",
+				"summary":     "获取平台统计数据",
 				"security":    adminJWTSecurity(),
 				"responses": map[string]any{
-					"200": response("stats", ref("#/definitions/AdminStats")),
-					"401": response("unauthorized", ref("#/definitions/ErrorResponse")),
+					"200": response("平台统计数据", ref("#/definitions/AdminStats")),
+					"401": response("未授权，token 无效或已过期", ref("#/definitions/ErrorResponse")),
 				},
 			},
 		},
@@ -870,14 +870,14 @@ func swaggerPaths() map[string]any {
 			"get": map[string]any{
 				"tags":        []string{"admin"},
 				"operationId": "adminAuditLogs",
-				"summary":     "List audit logs (admin)",
+				"summary":     "获取审计日志列表",
 				"security":    adminJWTSecurity(),
 				"responses": map[string]any{
-					"200": response("audit logs", map[string]any{
+					"200": response("审计日志列表", map[string]any{
 						"type":  "array",
 						"items": ref("#/definitions/AuditLog"),
 					}),
-					"401": response("unauthorized", ref("#/definitions/ErrorResponse")),
+					"401": response("未授权，token 无效或已过期", ref("#/definitions/ErrorResponse")),
 				},
 			},
 		},
@@ -887,68 +887,69 @@ func swaggerPaths() map[string]any {
 func swaggerDefinitions() map[string]any {
 	return map[string]any{
 		"AuthUser": objectSchema([]string{"id", "username", "role"}, map[string]any{
-			"id":       stringSchema("e2e-admin"),
-			"username": stringSchema("admin"),
-			"role":     stringSchema("admin"),
+			"id":       stringSchemaWithDesc("e2e-admin", "用户唯一标识"),
+			"username": stringSchemaWithDesc("admin", "登录用户名"),
+			"role":     stringSchemaWithDesc("admin", "角色，如 admin、tester"),
 		}),
 		"HealthResponse": objectSchema(nil, map[string]any{
-			"status": stringSchema("ok"),
+			"status": stringSchemaWithDesc("ok", "服务状态，正常时为 ok"),
 		}),
 		"LoginRequest": objectSchema([]string{"username", "password"}, map[string]any{
-			"username": stringSchema("admin"),
-			"password": stringSchema("admin123"),
+			"username": stringSchemaWithDesc("admin", "登录用户名"),
+			"password": stringSchemaWithDesc("admin123", "登录密码"),
 		}),
 		"AdminLoginRequest": objectSchema([]string{"username", "password"}, map[string]any{
-			"username": stringSchema("admin-root"),
-			"password": stringSchema("admin123"),
+			"username": stringSchemaWithDesc("admin-root", "管理员登录用户名"),
+			"password": stringSchemaWithDesc("admin123", "管理员登录密码"),
 		}),
 		"LoginResponse": objectSchema([]string{"token", "user"}, map[string]any{
-			"token": stringSchema("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."),
+			"token": stringSchemaWithDesc("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...", "JWT Bearer Token，请求时放入 Authorization 头"),
 			"user":  ref("#/definitions/AuthUser"),
 		}),
 		"AdminStats": objectSchema([]string{"totalUsers", "activeUsers", "adminUsers", "generatedAt"}, map[string]any{
-			"totalUsers":  integerSchema(2),
-			"activeUsers": integerSchema(2),
-			"adminUsers":  integerSchema(1),
-			"generatedAt": dateTimeSchema(),
+			"totalUsers":  integerSchemaWithDesc(2, "用户总数"),
+			"activeUsers": integerSchemaWithDesc(2, "活跃用户数"),
+			"adminUsers":  integerSchemaWithDesc(1, "管理员用户数"),
+			"generatedAt": dateTimeSchemaWithDesc("统计数据生成时间"),
 		}),
 		"AdminUserListResponse": objectSchema([]string{"total", "users"}, map[string]any{
-			"total": integerSchema(2),
+			"total": integerSchemaWithDesc(2, "符合条件的用户总数"),
 			"users": map[string]any{
-				"type":  "array",
-				"items": ref("#/definitions/User"),
+				"type":        "array",
+				"items":       ref("#/definitions/User"),
+				"description": "用户列表",
 			},
 		}),
 		"AuditLog": objectSchema([]string{"id", "actor", "action", "resource", "createdAt"}, map[string]any{
-			"id":        stringSchema("audit-1"),
-			"actor":     stringSchema("admin-root"),
-			"action":    stringSchema("run.suite"),
-			"resource":  stringSchema("suite:regression"),
-			"createdAt": dateTimeSchema(),
+			"id":        stringSchemaWithDesc("audit-1", "审计日志唯一标识"),
+			"actor":     stringSchemaWithDesc("admin-root", "操作人用户名"),
+			"action":    stringSchemaWithDesc("run.suite", "操作类型，如 import.swagger、run.suite、report.created"),
+			"resource":  stringSchemaWithDesc("suite:regression", "操作对象，格式为 类型:名称"),
+			"createdAt": dateTimeSchemaWithDesc("操作时间"),
 		}),
 		"User": objectSchema([]string{"id", "name", "email", "role", "active", "createdAt", "updatedAt"}, map[string]any{
-			"id":        stringSchema("1"),
-			"name":      stringSchema("Alice"),
-			"email":     stringSchema("alice@example.test"),
-			"role":      stringSchema("tester"),
-			"active":    map[string]any{"type": "boolean", "example": true},
-			"createdAt": dateTimeSchema(),
-			"updatedAt": dateTimeSchema(),
+			"id":        stringSchemaWithDesc("1", "用户唯一标识（UUID）"),
+			"name":      stringSchemaWithDesc("Alice", "用户姓名"),
+			"email":     stringSchemaWithDesc("alice@example.test", "用户邮箱"),
+			"role":      stringSchemaWithDesc("tester", "用户角色，如 admin、tester"),
+			"active":    map[string]any{"type": "boolean", "example": true, "description": "是否启用"},
+			"createdAt": dateTimeSchemaWithDesc("创建时间"),
+			"updatedAt": dateTimeSchemaWithDesc("最后更新时间"),
 		}),
 		"CreateUserRequest": objectSchema([]string{"name", "email"}, map[string]any{
-			"name":   stringSchema("Charlie"),
-			"email":  stringSchema("charlie@example.test"),
-			"role":   stringSchema("tester"),
-			"active": map[string]any{"type": "boolean", "example": true},
+			"name":   stringSchemaWithDesc("Charlie", "用户姓名，必填"),
+			"email":  stringSchemaWithDesc("charlie@example.test", "用户邮箱，必填，须包含 @"),
+			"role":   stringSchemaWithDesc("tester", "用户角色，留空默认为 tester"),
+			"active": map[string]any{"type": "boolean", "example": true, "description": "是否启用，留空默认为 true"},
 		}),
 		"UpdateUserRequest": objectSchema(nil, map[string]any{
-			"name":   stringSchema("Charlie Updated"),
-			"email":  stringSchema("charlie.updated@example.test"),
-			"role":   stringSchema("admin"),
-			"active": map[string]any{"type": "boolean", "example": true},
+			"name":   stringSchemaWithDesc("Charlie Updated", "用户姓名，留空则不更新"),
+			"email":  stringSchemaWithDesc("charlie.updated@example.test", "用户邮箱，留空则不更新"),
+			"role":   stringSchemaWithDesc("admin", "用户角色，留空则不更新"),
+			"active": map[string]any{"type": "boolean", "example": true, "description": "是否启用，留空则不更新"},
 		}),
 		"ErrorResponse": objectSchema([]string{"error"}, map[string]any{
-			"error": stringSchema("user not found"),
+			"error": stringSchemaWithDesc("user not found", "错误描述信息"),
 		}),
 	}
 }
@@ -992,7 +993,7 @@ func pathIDParam() map[string]any {
 		"in":          "path",
 		"required":    true,
 		"type":        "string",
-		"description": "User ID",
+		"description": "用户 ID（UUID）",
 	}
 }
 
@@ -1014,10 +1015,26 @@ func stringSchema(example string) map[string]any {
 	}
 }
 
+func stringSchemaWithDesc(example, description string) map[string]any {
+	return map[string]any{
+		"type":        "string",
+		"example":     example,
+		"description": description,
+	}
+}
+
 func integerSchema(example int) map[string]any {
 	return map[string]any{
 		"type":    "integer",
 		"example": example,
+	}
+}
+
+func integerSchemaWithDesc(example int, description string) map[string]any {
+	return map[string]any{
+		"type":        "integer",
+		"example":     example,
+		"description": description,
 	}
 }
 
@@ -1026,6 +1043,15 @@ func dateTimeSchema() map[string]any {
 		"type":    "string",
 		"format":  "date-time",
 		"example": "2026-01-01T00:00:00Z",
+	}
+}
+
+func dateTimeSchemaWithDesc(description string) map[string]any {
+	return map[string]any{
+		"type":        "string",
+		"format":      "date-time",
+		"example":     "2026-01-01T00:00:00Z",
+		"description": description,
 	}
 }
 

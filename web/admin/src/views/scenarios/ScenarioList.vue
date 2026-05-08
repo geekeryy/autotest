@@ -108,7 +108,7 @@
 
           <section class="step-dialog-main scenario-step-console">
             <template v-if="isStepFormActive">
-              <el-card class="scenario-request-card request-card" shadow="never">
+              <el-card class="request-card">
                 <div class="scenario-step-title-row">
                   <el-select
                     v-model="stepForm.stepType"
@@ -162,7 +162,7 @@
                 </div>
 
                 <template v-if="stepForm.stepType === 'api' && stepForm.testCaseId">
-                  <div class="request-line scenario-request-meta-line">
+                  <div class="request-line">
                     <el-select v-model="stepForm.requestMethod" class="method-select" @change="onRequestMethodChange">
                       <el-option v-for="m in httpMethods" :key="m" :label="m" :value="m" />
                     </el-select>
@@ -173,91 +173,221 @@
                       @change="() => syncPathParamRows()"
                     />
                     <div class="send-actions">
+                      <el-button :loading="generatingStepParams" @click="generateStepParams">生成参数</el-button>
                       <el-button
+                        :loading="aiStepParamsLoading"
+                        :disabled="aiStepParamsLoading"
+                        @click="openStepAIParamsDialog"
+                      >AI 生成</el-button>
+                      <el-tooltip
+                        content="将当前请求参数保存到该场景步骤（数据库持久化），不会改写接口管理中原始用例"
+                        placement="top"
+                      >
+                        <el-button :loading="savingStep" @click="saveStepFromPanel">保存参数</el-button>
+                      </el-tooltip>
+                      <el-button
+                        class="send-button"
+                        type="primary"
                         :loading="runningStep"
                         :disabled="!runEnvId || !stepForm.testCaseId"
                         @click="runStepRequest"
-                      >发送</el-button>
-                      <el-button type="primary" class="send-button" :loading="savingStep" @click="saveStepFromPanel">
-                        保存参数
+                      >
+                        发送
                       </el-button>
                     </div>
                   </div>
 
-                  <el-tabs v-model="stepForm.requestTab" class="request-tabs request-param-tabs">
+                  <el-tabs v-model="stepForm.requestTab" class="request-tabs">
                       <el-tab-pane label="Params" name="params">
                         <div class="params-section">
                           <div class="params-section-title">Path Vars</div>
-                          <el-table :data="stepForm.pathParamRows" border class="kv-table" size="small">
+                          <el-table :data="stepForm.pathParamRows" border class="kv-table">
                             <el-table-column width="70" label="启用">
                               <template #default="{ row }"><el-checkbox v-model="row.enabled" /></template>
                             </el-table-column>
-                            <el-table-column label="参数名" min-width="160">
+                            <el-table-column label="参数名" min-width="180">
                               <template #default="{ row }"><el-input v-model="row.key" placeholder="路径变量名" /></template>
                             </el-table-column>
-                            <el-table-column label="参数值" min-width="220">
+                            <el-table-column label="参数值" min-width="260">
                               <template #default="{ row }"><el-input v-model="row.value" placeholder="支持 {{变量名}}" /></template>
                             </el-table-column>
-                            <el-table-column width="80" label="操作">
+                            <el-table-column label="字段注释" min-width="220">
+                              <template #default="{ row }">
+                                <span class="param-comment">{{ parameterCommentForStep(row, 'path') }}</span>
+                              </template>
+                            </el-table-column>
+                            <el-table-column width="90" label="操作">
                               <template #default="{ $index }">
                                 <el-button link type="danger" @click="removeRow(stepForm.pathParamRows, $index)">删除</el-button>
                               </template>
                             </el-table-column>
                           </el-table>
-                          <el-button class="add-row" link type="primary" @click="addRow(stepForm.pathParamRows)">+ 新增一行</el-button>
+                          <el-button class="add-row" @click="addRow(stepForm.pathParamRows)">新增一行</el-button>
                         </div>
                         <div class="params-section">
                           <div class="params-section-title">Query</div>
-                          <el-table :data="stepForm.queryRows" border class="kv-table" size="small">
+                          <el-table :data="stepForm.queryRows" border class="kv-table">
                             <el-table-column width="70" label="启用">
                               <template #default="{ row }"><el-checkbox v-model="row.enabled" /></template>
                             </el-table-column>
-                            <el-table-column label="参数名" min-width="160">
+                            <el-table-column label="参数名" min-width="180">
                               <template #default="{ row }"><el-input v-model="row.key" placeholder="参数名" /></template>
                             </el-table-column>
-                            <el-table-column label="参数值" min-width="220">
-                              <template #default="{ row }"><el-input v-model="row.value" placeholder="支持 {{变量名}}" /></template>
+                            <el-table-column label="参数值" min-width="260">
+                              <template #default="{ row }">
+                                <div class="query-value-cell">
+                                  <el-input v-model="row.value" placeholder="参数值 / {{变量}}" />
+                                  <span v-if="row.required" class="required-star" aria-label="必填">*</span>
+                                </div>
+                              </template>
                             </el-table-column>
-                            <el-table-column width="80" label="操作">
+                            <el-table-column label="字段注释" min-width="220">
+                              <template #default="{ row }">
+                                <span class="param-comment">{{ parameterCommentForStep(row, 'query') }}</span>
+                              </template>
+                            </el-table-column>
+                            <el-table-column width="90" label="操作">
                               <template #default="{ $index }">
                                 <el-button link type="danger" @click="removeRow(stepForm.queryRows, $index)">删除</el-button>
                               </template>
                             </el-table-column>
                           </el-table>
-                          <el-button class="add-row" link type="primary" @click="addRow(stepForm.queryRows)">+ 新增一行</el-button>
+                          <el-button class="add-row" @click="addRow(stepForm.queryRows)">新增一行</el-button>
                         </div>
                       </el-tab-pane>
                       <el-tab-pane label="Headers" name="headers">
-                        <el-table :data="stepForm.headerRows" border class="kv-table" size="small">
+                        <el-table :data="stepForm.headerRows" border class="kv-table">
                           <el-table-column width="70" label="启用">
                             <template #default="{ row }"><el-checkbox v-model="row.enabled" /></template>
                           </el-table-column>
-                          <el-table-column label="Header" min-width="160">
+                          <el-table-column label="Header" min-width="180">
                             <template #default="{ row }"><el-input v-model="row.key" placeholder="Header" /></template>
                           </el-table-column>
-                          <el-table-column label="Value" min-width="220">
+                          <el-table-column label="Value" min-width="260">
                             <template #default="{ row }"><el-input v-model="row.value" placeholder="支持 {{变量名}}" /></template>
                           </el-table-column>
-                          <el-table-column width="80" label="操作">
+                          <el-table-column label="字段注释" min-width="220">
+                            <template #default="{ row }">
+                              <span class="param-comment">{{ parameterCommentForStep(row, 'header') }}</span>
+                            </template>
+                          </el-table-column>
+                          <el-table-column width="90" label="操作">
                             <template #default="{ $index }">
                               <el-button link type="danger" @click="removeRow(stepForm.headerRows, $index)">删除</el-button>
                             </template>
                           </el-table-column>
                         </el-table>
-                        <el-button class="add-row" link type="primary" @click="addRow(stepForm.headerRows)">+ 新增一行</el-button>
+                        <el-button class="add-row" @click="addRow(stepForm.headerRows)">新增一行</el-button>
                       </el-tab-pane>
                       <el-tab-pane label="Body" name="body">
                         <div class="body-toolbar">
                           <span>JSON Body</span>
+                          <div class="body-view-toggle">
+                            <span
+                              :class="{ active: stepRequestBodyViewMode === 'edit' }"
+                              @click="stepRequestBodyViewMode = 'edit'"
+                            >编辑</span>
+                            <span
+                              :class="{ active: stepRequestBodyViewMode === 'preview' }"
+                              @click="stepRequestBodyViewMode = 'preview'"
+                            >预览</span>
+                          </div>
                         </div>
-                        <el-input
-                          v-model="stepForm.bodyText"
-                          class="body-editor"
-                          type="textarea"
-                          :autosize="{ minRows: 6, maxRows: 18 }"
-                          placeholder='{"token":"{{token}}"}'
-                          @blur="formatStepBody"
-                        />
+                        <div class="body-schema-layout" :style="scenarioStepBodySchemaLayoutStyle">
+                          <div
+                            v-if="stepRequestBodyViewMode === 'preview' && scenarioStepBodyEditorJsonLines !== null"
+                            class="json-viewer code-view scenario-body-code-pane"
+                          >
+                            <div
+                              v-for="line in scenarioStepBodyEditorJsonLines"
+                              :key="line.id"
+                              class="json-line"
+                              :style="{ paddingLeft: `${line.depth * 16}px` }"
+                            >
+                              <span
+                                v-if="line.type === 'open'"
+                                class="json-toggle"
+                                @click="toggleSchemaCollapse(stepRequestBodyJsonCollapsed, line.path)"
+                              />
+                              <span
+                                v-else-if="line.type === 'collapsed'"
+                                class="json-toggle is-collapsed"
+                                @click="toggleSchemaCollapse(stepRequestBodyJsonCollapsed, line.path)"
+                              />
+                              <span v-else class="json-toggle-ph" />
+                              <span
+                                v-if="line.key !== null && line.key !== undefined"
+                                class="json-key"
+                              >"{{ line.key }}"<span class="json-colon">: </span></span>
+                              <template v-if="line.type === 'primitive'">
+                                <span class="json-value" :class="`json-${line.valueType}`">{{ line.displayValue }}</span>
+                              </template>
+                              <template v-else-if="line.type === 'open'">
+                                <span class="json-bracket">{{ line.bracket }}</span>
+                              </template>
+                              <template v-else-if="line.type === 'close'">
+                                <span class="json-bracket">{{ line.bracket }}</span>
+                              </template>
+                              <template v-else-if="line.type === 'collapsed'">
+                                <span class="json-bracket">{{ line.open }}</span><span class="json-collapsed-preview"> {{ line.count }} {{ line.open === '[' ? 'items' : 'keys' }} </span><span class="json-bracket">{{ line.close }}</span>
+                              </template>
+                              <template v-else-if="line.type === 'empty-object'">
+                                <span class="json-bracket">{}</span>
+                              </template>
+                              <template v-else-if="line.type === 'empty-array'">
+                                <span class="json-bracket">[]</span>
+                              </template>
+                              <span v-if="line.hasComma" class="json-comma">,</span>
+                            </div>
+                          </div>
+                          <pre
+                            v-else-if="stepRequestBodyViewMode === 'preview'"
+                            class="code-view scenario-body-code-pane"
+                          >{{ stepForm.bodyText }}</pre>
+                          <div
+                            v-show="stepRequestBodyViewMode === 'edit'"
+                            ref="stepBodyEditor"
+                            class="code-editor scenario-body-code-pane"
+                            contenteditable="true"
+                            spellcheck="false"
+                            @input="stepForm.bodyText = $event.target.innerText"
+                            @blur="formatStepBody"
+                          />
+                          <div
+                            class="body-schema-resizer"
+                            title="拖拽调整注释区宽度"
+                            @pointerdown="startStepBodySchemaResize"
+                          />
+                          <div class="schema-panel">
+                            <div class="schema-panel-title-row">
+                              <div class="schema-panel-title">请求 Body</div>
+                              <span v-if="scenarioStepRequestBodyAllRows.length" class="schema-field-count">{{ scenarioStepRequestBodyAllRows.length }} 字段</span>
+                            </div>
+                            <div v-if="scenarioStepRequestBodyAllRows.length" class="schema-field-table">
+                              <div class="schema-field-table-head">
+                                <span>字段</span>
+                                <span>类型</span>
+                                <span>说明</span>
+                              </div>
+                              <div v-for="row in scenarioStepRequestBodyDocRows" :key="row.path" class="schema-field-row">
+                                <div class="schema-field-name" :style="{ paddingLeft: `${row.depth * 12}px` }">
+                                  <span
+                                    v-if="row.hasChildren"
+                                    class="schema-toggle"
+                                    :class="{ 'is-collapsed': stepRequestBodyCollapsed[row.path] }"
+                                    @click="toggleSchemaCollapse(stepRequestBodyCollapsed, row.path)"
+                                  />
+                                  <span v-else class="schema-toggle-placeholder" />
+                                  <code :title="row.path">{{ row.name }}</code>
+                                  <span v-if="row.required" class="schema-required">*</span>
+                                </div>
+                                <span class="schema-type-chip">{{ row.type }}</span>
+                                <span class="schema-field-meaning" :title="row.meaning">{{ row.meaning || '-' }}</span>
+                              </div>
+                            </div>
+                            <el-empty v-else description="暂无字段说明" :image-size="42" />
+                          </div>
+                        </div>
                       </el-tab-pane>
                       <el-tab-pane label="断言" name="assertions">
                         <div class="step-assertion-tip">
@@ -318,7 +448,15 @@
                       <div class="scenario-script-field">
                         <div class="scenario-script-toolbar">
                           <ScriptLibraryPicker variant="scenario" @append="appendScenarioScriptTemplate" />
-                          <span class="scenario-script-toolbar-hint">从脚本库插入模板，追加到编辑区后可改占位参数</span>
+                          <el-button
+                            size="small"
+                            type="primary"
+                            plain
+                            :loading="aiScenarioScriptLoading"
+                            :disabled="aiScenarioScriptLoading"
+                            @click="openScenarioScriptAI"
+                          >AI 生成</el-button>
+                          <span class="scenario-script-toolbar-hint">从脚本库插入模板或调用 AI 生成；追加到编辑区后可改占位参数</span>
                         </div>
                         <el-input
                           v-model="stepForm.scriptSource"
@@ -348,8 +486,8 @@
                   <el-form :model="stepForm" class="scenario-step-extra-form" label-width="112px" size="small">
                     <el-form-item label="循环模式">
                       <el-radio-group v-model="stepForm.forMode">
-                        <el-radio-button label="count">按次数</el-radio-button>
-                        <el-radio-button label="array">遍历数组</el-radio-button>
+                        <el-radio-button value="count">按次数</el-radio-button>
+                        <el-radio-button value="array">遍历数组</el-radio-button>
                       </el-radio-group>
                     </el-form-item>
                     <el-form-item v-if="stepForm.forMode === 'count'" label="循环次数" required>
@@ -442,7 +580,299 @@
                 </template>
               </el-card>
 
-              <div v-if="stepRunOutput" class="step-debug-result">
+              <el-card
+                v-if="stepRunOutput && stepForm.stepType === 'api'"
+                class="result-card scenario-step-result-card"
+              >
+                <div v-if="stepRunOutput" class="result-title scenario-step-result-head">
+                  <div>
+                    <h3>运行结果</h3>
+                    <p>Run ID: {{ stepDebugRunRecord?.id || '-' }}</p>
+                  </div>
+                  <div class="result-metrics">
+                    <span class="metric-chip" :class="stepDebugMetricClass(stepDebugRunRecord?.status)">
+                      <el-icon>
+                        <component :is="stepDebugStatusIconName(stepDebugRunRecord?.status)" />
+                      </el-icon>
+                      <span>运行 {{ stepDebugStatusLabel(stepDebugRunRecord?.status) }}</span>
+                    </span>
+                    <span class="metric-chip" :class="stepDebugMetricClass(stepRunResult?.status)">
+                      <el-icon>
+                        <component :is="stepDebugStatusIconName(stepRunResult?.status)" />
+                      </el-icon>
+                      <span>结果 {{ stepDebugStatusLabel(stepRunResult?.status) }}</span>
+                    </span>
+                    <span class="metric-chip" :class="durationChipClass(stepRunResult?.durationMillis)">
+                      <el-icon><Timer /></el-icon>
+                      <span>{{ formatDuration(stepRunResult?.durationMillis) }}</span>
+                    </span>
+                    <div class="response-overview-tags" aria-label="响应概览">
+                      <el-tag
+                        :type="stepDebugResponseStatusTagType(stepDebugResponseSnapshot?.statusCode)"
+                        effect="plain"
+                        size="small"
+                      >{{ stepDebugResponseSnapshot?.statusCode ?? '-' }}</el-tag>
+                      <el-tag
+                        v-if="stepRunResult?.error"
+                        effect="plain"
+                        type="danger"
+                        size="small"
+                        class="response-msg-tag"
+                      >
+                        <span class="response-msg-tag-text">{{ stepRunResult.error }}</span>
+                      </el-tag>
+                    </div>
+                  </div>
+                </div>
+                <el-tabs v-model="stepRunResultTab" class="step-debug-result-tabs scenario-step-result-tabs">
+                  <el-tab-pane label="请求" name="request">
+                    <div class="section-grid">
+                      <div class="section-block full">
+                        <h3>URL</h3>
+                        <div class="url-line">
+                          <el-tag>{{ stepDebugRequestSnapshot.method || '-' }}</el-tag>
+                          <span>{{ stepDebugRequestSnapshot.url || '-' }}</span>
+                        </div>
+                      </div>
+                      <div class="section-block">
+                        <h3>Params</h3>
+                        <el-table :data="stepDebugRequestQueryRows" border>
+                          <el-table-column prop="key" label="名称" />
+                          <el-table-column prop="value" label="值" />
+                          <el-table-column label="字段注释" min-width="220">
+                            <template #default="{ row }">
+                              <span class="param-comment">{{ parameterCommentForStep(row, 'query') }}</span>
+                            </template>
+                          </el-table-column>
+                        </el-table>
+                      </div>
+                      <div class="section-block">
+                        <h3>Headers</h3>
+                        <el-table :data="headersToRows(stepDebugRequestSnapshot.headers)" border>
+                          <el-table-column prop="key" label="名称" />
+                          <el-table-column prop="value" label="值" />
+                          <el-table-column label="字段注释" min-width="220">
+                            <template #default="{ row }">
+                              <span class="param-comment">{{ parameterCommentForStep(row, 'header') }}</span>
+                            </template>
+                          </el-table-column>
+                        </el-table>
+                      </div>
+                      <div class="section-block full">
+                        <h3>Body</h3>
+                        <div class="body-schema-layout" :style="scenarioStepBodySchemaLayoutStyle">
+                          <div
+                            v-if="stepDebugRequestSnapshotBodyJsonLines !== null"
+                            class="json-viewer code-view scenario-body-code-pane"
+                          >
+                            <div
+                              v-for="line in stepDebugRequestSnapshotBodyJsonLines"
+                              :key="line.id"
+                              class="json-line"
+                              :style="{ paddingLeft: `${line.depth * 16}px` }"
+                            >
+                              <span
+                                v-if="line.type === 'open'"
+                                class="json-toggle"
+                                @click="toggleSchemaCollapse(stepDebugRequestSnapshotJsonCollapsed, line.path)"
+                              />
+                              <span
+                                v-else-if="line.type === 'collapsed'"
+                                class="json-toggle is-collapsed"
+                                @click="toggleSchemaCollapse(stepDebugRequestSnapshotJsonCollapsed, line.path)"
+                              />
+                              <span v-else class="json-toggle-ph" />
+                              <span
+                                v-if="line.key !== null && line.key !== undefined"
+                                class="json-key"
+                              >"{{ line.key }}"<span class="json-colon">: </span></span>
+                              <template v-if="line.type === 'primitive'">
+                                <span class="json-value" :class="`json-${line.valueType}`">{{ line.displayValue }}</span>
+                              </template>
+                              <template v-else-if="line.type === 'open'">
+                                <span class="json-bracket">{{ line.bracket }}</span>
+                              </template>
+                              <template v-else-if="line.type === 'close'">
+                                <span class="json-bracket">{{ line.bracket }}</span>
+                              </template>
+                              <template v-else-if="line.type === 'collapsed'">
+                                <span class="json-bracket">{{ line.open }}</span><span class="json-collapsed-preview"> {{ line.count }} {{ line.open === '[' ? 'items' : 'keys' }} </span><span class="json-bracket">{{ line.close }}</span>
+                              </template>
+                              <template v-else-if="line.type === 'empty-object'">
+                                <span class="json-bracket">{}</span>
+                              </template>
+                              <template v-else-if="line.type === 'empty-array'">
+                                <span class="json-bracket">[]</span>
+                              </template>
+                              <span v-if="line.hasComma" class="json-comma">,</span>
+                            </div>
+                          </div>
+                          <pre
+                            v-else
+                            class="code-view scenario-body-code-pane scenario-body-code-pane--muted"
+                          >{{ formatSnapshotBody(stepDebugRequestSnapshot.body) }}</pre>
+                          <div class="schema-panel-placeholder" aria-hidden="true" />
+                          <div class="schema-panel">
+                            <div class="schema-panel-title-row">
+                              <div class="schema-panel-title">请求 Body</div>
+                              <span v-if="scenarioStepRequestBodyAllRows.length" class="schema-field-count">{{ scenarioStepRequestBodyAllRows.length }} 字段</span>
+                            </div>
+                            <div v-if="scenarioStepRequestBodyAllRows.length" class="schema-field-table">
+                              <div class="schema-field-table-head">
+                                <span>字段</span>
+                                <span>类型</span>
+                                <span>说明</span>
+                              </div>
+                              <div v-for="row in scenarioStepRequestBodyDocRows" :key="'reqsnap-' + row.path" class="schema-field-row">
+                                <div class="schema-field-name" :style="{ paddingLeft: `${row.depth * 12}px` }">
+                                  <span
+                                    v-if="row.hasChildren"
+                                    class="schema-toggle"
+                                    :class="{ 'is-collapsed': stepRequestBodyCollapsed[row.path] }"
+                                    @click="toggleSchemaCollapse(stepRequestBodyCollapsed, row.path)"
+                                  />
+                                  <span v-else class="schema-toggle-placeholder" />
+                                  <code :title="row.path">{{ row.name }}</code>
+                                  <span v-if="row.required" class="schema-required">*</span>
+                                </div>
+                                <span class="schema-type-chip">{{ row.type }}</span>
+                                <span class="schema-field-meaning" :title="row.meaning">{{ row.meaning || '-' }}</span>
+                              </div>
+                            </div>
+                            <el-empty v-else description="暂无字段说明" :image-size="42" />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </el-tab-pane>
+
+                  <el-tab-pane label="响应" name="response">
+                    <el-tabs v-model="stepRunResponseDetailTab" class="response-detail-tabs response-detail-tabs--subtle">
+                      <el-tab-pane label="Body" name="body">
+                        <div class="body-schema-layout" :style="scenarioStepBodySchemaLayoutStyle">
+                          <div
+                            v-if="stepDebugResponseBodyJsonLines !== null"
+                            class="json-viewer code-view scenario-body-code-pane"
+                          >
+                            <div
+                              v-for="line in stepDebugResponseBodyJsonLines"
+                              :key="line.id"
+                              class="json-line"
+                              :style="{ paddingLeft: `${line.depth * 16}px` }"
+                            >
+                              <span
+                                v-if="line.type === 'open'"
+                                class="json-toggle"
+                                @click="toggleSchemaCollapse(stepDebugResponseJsonCollapsed, line.path)"
+                              />
+                              <span
+                                v-else-if="line.type === 'collapsed'"
+                                class="json-toggle is-collapsed"
+                                @click="toggleSchemaCollapse(stepDebugResponseJsonCollapsed, line.path)"
+                              />
+                              <span v-else class="json-toggle-ph" />
+                              <span
+                                v-if="line.key !== null && line.key !== undefined"
+                                class="json-key"
+                              >"{{ line.key }}"<span class="json-colon">: </span></span>
+                              <template v-if="line.type === 'primitive'">
+                                <span class="json-value" :class="`json-${line.valueType}`">{{ line.displayValue }}</span>
+                              </template>
+                              <template v-else-if="line.type === 'open'">
+                                <span class="json-bracket">{{ line.bracket }}</span>
+                              </template>
+                              <template v-else-if="line.type === 'close'">
+                                <span class="json-bracket">{{ line.bracket }}</span>
+                              </template>
+                              <template v-else-if="line.type === 'collapsed'">
+                                <span class="json-bracket">{{ line.open }}</span><span class="json-collapsed-preview"> {{ line.count }} {{ line.open === '[' ? 'items' : 'keys' }} </span><span class="json-bracket">{{ line.close }}</span>
+                              </template>
+                              <template v-else-if="line.type === 'empty-object'">
+                                <span class="json-bracket">{}</span>
+                              </template>
+                              <template v-else-if="line.type === 'empty-array'">
+                                <span class="json-bracket">[]</span>
+                              </template>
+                              <span v-if="line.hasComma" class="json-comma">,</span>
+                            </div>
+                          </div>
+                          <pre
+                            v-else
+                            class="code-view scenario-body-code-pane scenario-body-code-pane--muted"
+                          >{{ formatSnapshotBody(stepDebugResponseSnapshot.body) }}</pre>
+                          <div class="schema-panel-placeholder" aria-hidden="true" />
+                          <div class="schema-panel">
+                            <div class="schema-panel-title-row">
+                              <div class="schema-panel-title">响应 Body</div>
+                              <span v-if="stepDebugResponseBodyAllRows.length" class="schema-field-count">{{ stepDebugResponseBodyAllRows.length }} 字段</span>
+                            </div>
+                            <div v-if="stepDebugResponseBodyAllRows.length" class="schema-field-table">
+                              <div class="schema-field-table-head">
+                                <span>字段</span>
+                                <span>类型</span>
+                                <span>说明</span>
+                              </div>
+                              <div v-for="row in stepDebugResponseBodyDocRows" :key="'ressnap-' + row.path" class="schema-field-row">
+                                <div class="schema-field-name" :style="{ paddingLeft: `${row.depth * 12}px` }">
+                                  <span
+                                    v-if="row.hasChildren"
+                                    class="schema-toggle"
+                                    :class="{ 'is-collapsed': stepDebugResponseBodyCollapsed[row.path] }"
+                                    @click="toggleSchemaCollapse(stepDebugResponseBodyCollapsed, row.path)"
+                                  />
+                                  <span v-else class="schema-toggle-placeholder" />
+                                  <code :title="row.path">{{ row.name }}</code>
+                                </div>
+                                <span class="schema-type-chip">{{ row.type }}</span>
+                                <span class="schema-field-meaning" :title="row.meaning">{{ row.meaning || '-' }}</span>
+                              </div>
+                            </div>
+                            <el-empty v-else description="暂无字段说明" :image-size="42" />
+                          </div>
+                        </div>
+                      </el-tab-pane>
+                      <el-tab-pane label="响应头" name="headers">
+                        <el-table :data="headersToRows(stepRunHttpResponse ? stepRunHttpResponse.headers : stepDebugResponseSnapshot.headers)" border>
+                          <el-table-column prop="key" label="名称" />
+                          <el-table-column prop="value" label="值" />
+                        </el-table>
+                      </el-tab-pane>
+                      <el-tab-pane label="实际请求" name="curl">
+                        <pre class="code-view code-view--curl scenario-step-curl">{{ stepDebugCurlCommand }}</pre>
+                      </el-tab-pane>
+                    </el-tabs>
+                  </el-tab-pane>
+
+                  <el-tab-pane label="断言" name="assertions">
+                    <el-table :data="stepDebugAssertions" border>
+                      <el-table-column label="类型" width="120">
+                        <template #default="{ row }">
+                          <el-tag size="small" :type="assertionTypeColor(row.type)" effect="plain">
+                            {{ assertionTypeLabel(row.type) }}
+                          </el-tag>
+                        </template>
+                      </el-table-column>
+                      <el-table-column label="名称 / 路径" min-width="180">
+                        <template #default="{ row }">
+                          <span v-if="row.name" class="assertion-name">{{ row.name }}</span>
+                          <code v-else class="assertion-path">{{ row.path || row.headerName || '' }}</code>
+                        </template>
+                      </el-table-column>
+                      <el-table-column label="状态" width="90">
+                        <template #default="{ row }">
+                          <el-tag :type="row.passed ? 'success' : 'danger'" size="small">
+                            {{ row.passed ? '通过' : '失败' }}
+                          </el-tag>
+                        </template>
+                      </el-table-column>
+                      <el-table-column prop="message" label="详情" min-width="220" />
+                    </el-table>
+                    <el-empty v-if="!stepDebugAssertions.length" description="暂无断言结果" :image-size="48" />
+                  </el-tab-pane>
+                </el-tabs>
+              </el-card>
+
+              <div v-else-if="stepRunOutput && stepForm.stepType !== 'api'" class="step-debug-result step-debug-result--legacy">
                 <div class="result-header">
                   <span>发送结果：</span>
                   <el-tag :type="stepRunOutput.run?.status === 'passed' ? 'success' : 'danger'" size="small">
@@ -451,62 +881,7 @@
                   <span v-if="stepRunResult?.durationMillis" class="duration">{{ stepRunResult.durationMillis }}ms</span>
                 </div>
                 <div v-if="stepRunResult?.error" class="error-text">{{ stepRunResult.error }}</div>
-                <el-tabs v-model="stepRunResultTab" class="step-debug-tabs">
-                  <el-tab-pane label="响应" name="response">
-                    <div v-if="stepRunHttpResponse" class="response-http-panel">
-                      <div class="response-http-meta">
-                        <el-tag
-                          :type="responseSnapshotStatusType(stepRunResult?.responseSnapshot)"
-                          size="small"
-                        >{{ stepRunHttpResponse.statusCode }}</el-tag>
-                      </div>
-                      <el-tabs v-model="stepRunResponseDetailTab" class="response-body-headers-tabs" type="card">
-                        <el-tab-pane label="Body" name="body">
-                          <pre class="snapshot-pre snapshot-pre--response-body">{{
-                            formatSnapshotBody(stepRunHttpResponse.body)
-                          }}</pre>
-                        </el-tab-pane>
-                        <el-tab-pane label="响应头" name="headers">
-                          <el-table :data="headersToRows(stepRunHttpResponse.headers)" border size="small">
-                            <el-table-column prop="key" label="名称" min-width="160" />
-                            <el-table-column prop="value" label="值" min-width="220" />
-                          </el-table>
-                        </el-tab-pane>
-                      </el-tabs>
-                    </div>
-                    <pre v-else class="snapshot-pre">{{ formatSnapshot(stepRunResult?.responseSnapshot) }}</pre>
-                  </el-tab-pane>
-                  <el-tab-pane label="请求" name="request">
-                    <pre class="snapshot-pre">{{ formatSnapshot(stepRunResult?.requestSnapshot) }}</pre>
-                  </el-tab-pane>
-                  <el-tab-pane
-                    v-if="stepRunResult?.assertions?.length"
-                    label="断言"
-                    name="assertions"
-                  >
-                    <el-table :data="stepRunResult.assertions" border size="small">
-                      <el-table-column label="类型" width="100">
-                        <template #default="{ row }">
-                          <el-tag size="small" effect="plain">{{ assertionTypeLabel(row.type) }}</el-tag>
-                        </template>
-                      </el-table-column>
-                      <el-table-column label="名称" min-width="120">
-                        <template #default="{ row }">
-                          <span v-if="row.name">{{ row.name }}</span>
-                          <code v-else class="assertion-path">{{ row.path || row.headerName || '' }}</code>
-                        </template>
-                      </el-table-column>
-                      <el-table-column label="状态" width="80">
-                        <template #default="{ row }">
-                          <el-tag :type="row.passed ? 'success' : 'danger'" size="small">
-                            {{ row.passed ? '通过' : '失败' }}
-                          </el-tag>
-                        </template>
-                      </el-table-column>
-                      <el-table-column prop="message" label="详情" min-width="180" />
-                    </el-table>
-                  </el-tab-pane>
-                </el-tabs>
+                <pre class="snapshot-pre">{{ formatSnapshot(stepRunResult?.responseSnapshot || stepRunOutput) }}</pre>
               </div>
             </template>
             <el-empty v-else description="请点击左侧步骤或新增步骤" />
@@ -649,6 +1024,23 @@
         <el-button type="primary" @click="submitScenario">保存</el-button>
       </template>
     </el-dialog>
+
+    <AIGenerateDialog
+      v-model="aiScenarioScriptDialogVisible"
+      action="generate_assertion"
+      title="AI 生成场景脚本"
+      :context="aiScenarioScriptContext"
+      @apply="onScenarioScriptAIApply"
+      @generation-settled="aiScenarioScriptLoading = false"
+    />
+
+    <AIGenerateDialog
+      v-model="aiStepParamsDialogVisible"
+      action="generate_params"
+      :context="scenarioStepAiParamsContext"
+      @apply="onScenarioStepAIParamsApply"
+      @generation-settled="aiStepParamsLoading = false"
+    />
   </div>
 </template>
 
@@ -668,9 +1060,11 @@ import {
   createScenario,
   deleteScenario,
   deleteScenarioStep,
+  generateCaseParams,
   getDataSourceSchema,
   listDataSources,
   listCases,
+  listEndpoints,
   listScenarioSteps,
   listScenarios,
   listServiceEnvironments,
@@ -681,10 +1075,12 @@ import {
   updateScenario,
   upsertScenarioStep
 } from '../../api'
+import { buildCurlFromRequestSnapshot } from '../../utils/curl'
 import { loadGlobalProjects, projectState } from '../../utils/currentProject'
 import SqlEditor from '../../components/SqlEditor.vue'
 import AssertionEditor from '../../components/AssertionEditor.vue'
 import ScriptLibraryPicker from '../../components/ScriptLibraryPicker.vue'
+import AIGenerateDialog from '../../components/AIGenerateDialog.vue'
 import ScenarioStepTreeNode from './ScenarioStepTreeNode.vue'
 
 const ASSERTION_TYPE_LABELS = {
@@ -694,6 +1090,44 @@ const ASSERTION_TYPE_LABELS = {
   body_contains: 'Body',
   response_time: '响应时间',
   script: 'JS 脚本'
+}
+
+const ASSERTION_TYPE_COLORS = {
+  status_code: 'primary',
+  jsonpath: 'success',
+  header: 'warning',
+  body_contains: '',
+  response_time: 'info',
+  script: 'danger'
+}
+
+const BODY_SCHEMA_WIDTH_SCENARIO_KEY = 'autotest.scenario.bodySchemaPanelWidth'
+const BODY_SCHEMA_PANEL_MIN_WIDTH = 260
+const BODY_SCHEMA_PANEL_MAX_WIDTH = 760
+const BODY_SCHEMA_EDITOR_MIN_WIDTH = 320
+
+function clampNumber(value, min, max) {
+  return Math.min(Math.max(value, min), max)
+}
+
+function readStoredScenarioBodySchemaPanelWidth() {
+  try {
+    const value = Number(localStorage.getItem(BODY_SCHEMA_WIDTH_SCENARIO_KEY))
+    if (Number.isFinite(value) && value > 0) {
+      return clampNumber(value, BODY_SCHEMA_PANEL_MIN_WIDTH, BODY_SCHEMA_PANEL_MAX_WIDTH)
+    }
+  } catch {
+    /* ignore */
+  }
+  return BODY_SCHEMA_PANEL_MIN_WIDTH
+}
+
+function storeScenarioBodySchemaPanelWidth(width) {
+  try {
+    localStorage.setItem(BODY_SCHEMA_WIDTH_SCENARIO_KEY, String(Math.round(width)))
+  } catch {
+    /* ignore */
+  }
 }
 
 const STEP_SIDEBAR_WIDTH_STORAGE_KEY = 'autotest.scenarioStepSidebarWidth'
@@ -715,13 +1149,16 @@ export default {
     ScenarioStepTreeNode,
     SqlEditor,
     AssertionEditor,
-    ScriptLibraryPicker
+    ScriptLibraryPicker,
+    AIGenerateDialog
   },
 
   data() {
     return {
       services: [],
       serviceId: '',
+      /** 当前服务接口定义（字段注释 / Body Schema） */
+      serviceEndpoints: [],
       scenarios: [],
       selectedScenario: null,
       steps: [],
@@ -733,6 +1170,9 @@ export default {
       running: false,
       runningStep: false,
       savingStep: false,
+      generatingStepParams: false,
+      aiStepParamsDialogVisible: false,
+      aiStepParamsLoading: false,
       lastRunOutput: null,
       stepRunOutput: null,
       stepRunResultTab: 'response',
@@ -746,6 +1186,19 @@ export default {
       stepSidebarWidthPx: STEP_SIDEBAR_DEFAULT,
       _stepSidebarResize: null,
 
+      aiScenarioScriptDialogVisible: false,
+      aiScenarioScriptLoading: false,
+      /** Body 页与运行控制台一致的 编辑/预览 切换 */
+      stepRequestBodyViewMode: 'edit',
+      stepBodySchemaPanelWidth: readStoredScenarioBodySchemaPanelWidth(),
+      stepBodySchemaResizeState: null,
+      stepRequestBodyCollapsed: {},
+      stepRequestBodyJsonCollapsed: {},
+      /** 单步调试结果：折叠树 */
+      stepDebugRequestSnapshotJsonCollapsed: {},
+      stepDebugResponseBodyCollapsed: {},
+      stepDebugResponseJsonCollapsed: {},
+
       // Scenario dialog
       scenarioDialogVisible: false,
       editingScenario: null,
@@ -753,7 +1206,8 @@ export default {
 
       editingStep: null,
       editingStepName: false,
-      pendingControlAttach: null,
+      /** 左侧控制流「+」新增子步骤时，随首次保存 POST 体一并提交 attachUnderParent；有 id 的已保存步骤在编辑时会被清空 */
+      controlFlowChildAttach: null,
       sortableInstance: null,
       stepTypes: [
         { label: 'API', value: 'api' },
@@ -850,6 +1304,174 @@ export default {
         width: `${w}px`,
         flex: `0 0 ${w}px`
       }
+    },
+    scenarioStepResolvedEndpoint() {
+      if (this.stepForm.stepType !== 'api' || !this.stepForm.testCaseId) return null
+      const tc = this.findCase(this.stepForm.testCaseId)
+      if (!tc) return null
+      return this.findEndpoint(this.serviceEndpoints, tc)
+    },
+    scenarioStepRequestSchema() {
+      return this.normalizeRequest(this.scenarioStepResolvedEndpoint?.requestSchema)
+    },
+    scenarioStepResponseSchema() {
+      return this.normalizeRequest(this.scenarioStepResolvedEndpoint?.responseSchema)
+    },
+    scenarioStepRequestBodySchema() {
+      return this.scenarioStepRequestSchema?.body || null
+    },
+    scenarioStepRequestBodyAllRows() {
+      return this.schemaDocRows(this.scenarioStepRequestBodySchema)
+    },
+    scenarioStepRequestBodyDocRows() {
+      return this.filterSchemaRows(this.scenarioStepRequestBodyAllRows, this.stepRequestBodyCollapsed)
+    },
+    scenarioStepBodySchemaLayoutStyle() {
+      return Number.isFinite(this.stepBodySchemaPanelWidth) && this.stepBodySchemaPanelWidth > 0
+        ? { '--body-schema-panel-width': `${this.stepBodySchemaPanelWidth}px` }
+        : {}
+    },
+    scenarioStepBodyEditorJsonLines() {
+      if (this.stepRequestBodyViewMode !== 'preview') return null
+      const raw = (this.stepForm.bodyText || '').trim()
+      if (!raw) return null
+      try {
+        const parsed = JSON.parse(raw)
+        const lines = []
+        this.collectJsonLines(parsed, null, '$', 0, true, this.stepRequestBodyJsonCollapsed, lines)
+        return lines
+      } catch {
+        return null
+      }
+    },
+    stepDebugRunRecord() {
+      return this.stepRunOutput?.run || null
+    },
+    stepDebugRequestSnapshot() {
+      return this.stepRunResult?.requestSnapshot || {}
+    },
+    stepDebugResponseSnapshot() {
+      const o = this.parseSnapshotObject(this.stepRunResult?.responseSnapshot)
+      return o && typeof o === 'object' && !Array.isArray(o) ? o : {}
+    },
+    stepDebugRequestQueryRows() {
+      const url = this.stepDebugRequestSnapshot?.url
+      if (!url) return []
+      try {
+        const parsed = new URL(url, window.location.origin)
+        return Array.from(parsed.searchParams.entries()).map(([key, value]) => ({ key, value }))
+      } catch {
+        return []
+      }
+    },
+    stepDebugAssertions() {
+      return Array.isArray(this.stepRunResult?.assertions) ? this.stepRunResult.assertions : []
+    },
+    stepDebugCurlCommand() {
+      return buildCurlFromRequestSnapshot(this.stepDebugRequestSnapshot)
+    },
+    stepDebugResponseBodyParsed() {
+      const body = this.stepDebugResponseSnapshot?.body
+      if (body == null || body === '') return undefined
+      try {
+        return typeof body === 'string' ? JSON.parse(body) : body
+      } catch {
+        return undefined
+      }
+    },
+    stepDebugResponseBodyJsonLines() {
+      if (this.stepDebugResponseBodyParsed === undefined) return null
+      const lines = []
+      this.collectJsonLines(this.stepDebugResponseBodyParsed, null, '$', 0, true, this.stepDebugResponseJsonCollapsed, lines)
+      return lines
+    },
+    stepDebugResponseBodySchema() {
+      return this.scenarioStepResponseSchema?.body || null
+    },
+    stepDebugResponseBodyAllRows() {
+      return this.schemaDocRows(this.stepDebugResponseBodySchema)
+    },
+    stepDebugResponseBodyDocRows() {
+      return this.filterSchemaRows(this.stepDebugResponseBodyAllRows, this.stepDebugResponseBodyCollapsed)
+    },
+    stepDebugRequestSnapshotBodyParsed() {
+      const body = this.stepDebugRequestSnapshot?.body
+      if (body == null || body === '') return undefined
+      try {
+        return typeof body === 'string' ? JSON.parse(body) : body
+      } catch {
+        return undefined
+      }
+    },
+    stepDebugRequestSnapshotBodyJsonLines() {
+      if (this.stepDebugRequestSnapshotBodyParsed === undefined) return null
+      const lines = []
+      this.collectJsonLines(
+        this.stepDebugRequestSnapshotBodyParsed,
+        null,
+        '$',
+        0,
+        true,
+        this.stepDebugRequestSnapshotJsonCollapsed,
+        lines
+      )
+      return lines
+    },
+    aiScenarioScriptContext() {
+      return {
+        scenarioName: this.selectedScenario?.name || '',
+        scenarioDescription: this.selectedScenario?.description || '',
+        currentStepName: this.stepForm?.name || '',
+        currentStepSeq: this.stepForm?.stepSeq || null,
+        existingScript: this.stepForm?.scriptSource || '',
+        relatedSteps: this.panelSteps.map((s) => ({
+          stepSeq: s.stepSeq,
+          stepOrder: s.stepOrder,
+          stepType: s.stepType,
+          name: s.name
+        }))
+      }
+    },
+    scenarioStepAiParamsContext() {
+      const tc = this.findCase(this.stepForm.testCaseId)
+      if (!tc || this.stepForm.stepType !== 'api') {
+        return {
+          method: '',
+          path: '',
+          endpoint: null,
+          currentRequest: { path: '', query: {}, headers: {}, variables: {}, body: null }
+        }
+      }
+      let bodyDraft = null
+      if ((this.stepForm.bodyText || '').trim()) {
+        try {
+          bodyDraft = JSON.parse(this.stepForm.bodyText)
+        } catch {
+          bodyDraft = this.stepForm.bodyText
+        }
+      }
+      const pathVars = this.rowsToObject(this.stepForm.pathParamRows)
+      const ep = this.scenarioStepResolvedEndpoint
+      return {
+        method: this.stepForm.requestMethod || tc.method,
+        path: this.stepForm.requestPath || tc.path,
+        endpoint: ep
+          ? {
+              summary: ep.summary,
+              description: ep.description,
+              parameters: ep.parameters,
+              requestSchema: ep.requestSchema,
+              responses: ep.responses
+            }
+          : null,
+        currentRequest: {
+          path: this.stepForm.requestPath || tc.path,
+          query: this.rowsToObject(this.stepForm.queryRows),
+          headers: this.rowsToObject(this.stepForm.headerRows),
+          variables: pathVars,
+          body: bodyDraft
+        }
+      }
     }
   },
 
@@ -868,6 +1490,15 @@ export default {
     },
     lastRunOutput(val) {
       if (val) this.scenarioRunResultActiveNames = ['panel']
+    },
+    aiScenarioScriptDialogVisible(val) {
+      if (!val) this.aiScenarioScriptLoading = false
+    },
+    aiStepParamsDialogVisible(val) {
+      if (!val) this.aiStepParamsLoading = false
+    },
+    stepRequestBodyViewMode(mode) {
+      if (mode === 'edit') this.$nextTick(() => this.syncStepBodyEditorInner())
     }
   },
 
@@ -895,6 +1526,7 @@ export default {
 
   beforeUnmount() {
     this.detachStepSidebarResizeListeners()
+    this.stopStepBodySchemaResize()
     if (this.sortableInstance) {
       this.sortableInstance.destroy()
       this.sortableInstance = null
@@ -1129,7 +1761,8 @@ export default {
         animation: 150,
         filter:
           '.control-frame-border-add, .step-sidebar-add, .step-seq-badge, .step-delete-icon, .el-checkbox, .el-checkbox__input',
-        preventOnFilter: true,
+        // true 会在 filter 匹配元素上 preventDefault，导致循环体/分支框底「+」无法触发 click
+        preventOnFilter: false,
         onEnd: this.onStepSortEnd
       })
     },
@@ -1208,15 +1841,18 @@ export default {
       this.selectedScenario = null
       this.steps = []
       this.dataSources = []
+      this.serviceEndpoints = []
       if (!this.projectId || !this.serviceId) return
       const params = { projectId: this.projectId, serviceId: this.serviceId }
-      const [scenarios, cases, envs] = await Promise.all([
+      const [scenarios, cases, envs, endpointsRaw] = await Promise.all([
         listScenarios(params),
         listCases(params),
-        listServiceEnvironments(this.projectId, this.serviceId)
+        listServiceEnvironments(this.projectId, this.serviceId),
+        listEndpoints(this.projectId, this.serviceId)
       ])
       this.scenarios = scenarios
       this.cases = cases
+      this.serviceEndpoints = Array.isArray(endpointsRaw) ? endpointsRaw : []
       this.environments = envs
       if (envs.length) this.runEnvId = envs[0].id
       await this.loadDataSources()
@@ -1344,10 +1980,16 @@ export default {
     startNewStepDraft(attach = null) {
       this.editingStep = null
       this.editingStepName = false
-      this.pendingControlAttach = attach
+      this.controlFlowChildAttach = attach || null
       this.stepRunOutput = null
       this.stepRunResultTab = 'response'
       this.stepRunResponseDetailTab = 'body'
+      this.stepRequestBodyViewMode = 'edit'
+      this.stepRequestBodyCollapsed = {}
+      this.stepRequestBodyJsonCollapsed = {}
+      this.stepDebugRequestSnapshotJsonCollapsed = {}
+      this.stepDebugResponseBodyCollapsed = {}
+      this.stepDebugResponseJsonCollapsed = {}
       this.stepForm = this.emptyStepForm(this.nextStepOrder())
     },
 
@@ -1368,14 +2010,22 @@ export default {
     editStep(step) {
       this.editingStep = step
       this.editingStepName = false
-      this.pendingControlAttach = null
+      if (step?.id) {
+        this.controlFlowChildAttach = null
+      }
       this.stepRunOutput = null
       this.stepRunResultTab = 'response'
       this.stepRunResponseDetailTab = 'body'
+      this.stepRequestBodyViewMode = 'edit'
+      this.stepRequestBodyCollapsed = {}
+      this.stepRequestBodyJsonCollapsed = {}
+      this.stepDebugRequestSnapshotJsonCollapsed = {}
+      this.stepDebugResponseBodyCollapsed = {}
+      this.stepDebugResponseJsonCollapsed = {}
       this.stepForm = this.emptyStepForm(step.stepOrder)
       this.stepForm.name = step.name || ''
       this.stepForm.stepType = step.stepType || 'api'
-      this.stepForm.stepSeq = step.stepSeq || null
+      this.stepForm.stepSeq = step.stepSeq != null && step.stepSeq !== '' ? step.stepSeq : null
       this.stepForm.testCaseId = step.testCaseId
       this.stepForm.enabled = step.enabled
       this.applyStepConfigEditor(step.config || {})
@@ -1428,6 +2078,7 @@ export default {
       this.editingStepName = false
       this.stepRunOutput = null
       this.stepRunResponseDetailTab = 'body'
+      this.stepRequestBodyViewMode = 'edit'
     },
 
     startEditStepName() {
@@ -1466,6 +2117,7 @@ export default {
       this.stepRunOutput = null
       this.stepRunResultTab = 'response'
       this.stepRunResponseDetailTab = 'body'
+      this.stepRequestBodyViewMode = 'edit'
       this.stepForm.name = ''
       this.applyStepRequestEditor(this.stepForm.testCaseId, {})
     },
@@ -1485,15 +2137,16 @@ export default {
         this.stepForm.headerRows = []
         this.stepForm.bodyText = ''
         this.stepForm.requestSecurity = undefined
+        this.setStepBodyText('')
         return
       }
 
       const request = this.resolveStepRequest(tc, rawOverride)
       this.stepForm.requestMethod = String(request.method || tc.method || 'GET').toUpperCase()
       this.stepForm.requestPath = this.normalizePathVariables(request.path)
-      this.stepForm.queryRows = this.objectToRows(request.query)
-      this.stepForm.headerRows = this.objectToRows(request.headers)
-      this.stepForm.bodyText = request.body == null ? '' : this.formatJSON(request.body)
+      this.stepForm.queryRows = this.buildStepQueryRows(tc, this.normalizeObject(request.query))
+      this.stepForm.headerRows = this.buildStepHeaderRows(tc, this.normalizeObject(request.headers))
+      this.setStepBodyText(request.body == null ? '' : this.formatJSON(request.body))
       this.stepForm.requestSecurity = request.security
       this.syncPathParamRows()
       this.stepForm.requestTab = this.defaultStepRequestTab()
@@ -1564,25 +2217,26 @@ export default {
     formatStepBody() {
       if (!this.stepForm.bodyText.trim()) return
       try {
-        this.stepForm.bodyText = this.formatJSON(JSON.parse(this.stepForm.bodyText))
+        this.setStepBodyText(this.formatJSON(JSON.parse(this.stepForm.bodyText)))
       } catch (error) {
         this.$message.error(`Body 不是合法 JSON：${error.message}`)
       }
     },
 
     addRow(rows) {
-      rows.push({ enabled: true, key: '', value: '' })
+      rows.push({ enabled: true, key: '', value: '', required: false })
     },
 
     removeRow(rows, index) {
       rows.splice(index, 1)
     },
 
-    objectToRows(value) {
+    objectToRows(value, enabledMap, requiredMap) {
       return Object.entries(value || {}).map(([key, item]) => ({
-        enabled: true,
+        enabled: enabledMap ? enabledMap[key] !== false : true,
         key,
-        value: String(item)
+        value: String(item),
+        required: requiredMap ? requiredMap[key] === true : false
       }))
     },
 
@@ -1648,6 +2302,522 @@ export default {
       return JSON.parse(JSON.stringify(value))
     },
 
+    findEndpoint(endpoints, row) {
+      return (endpoints || []).find((endpoint) => endpoint.id === row.endpointId) ||
+        (endpoints || []).find((endpoint) => endpoint.method === row.method && endpoint.path === row.path) ||
+        null
+    },
+
+    buildStepQueryRows(tc, flatQueryOverride) {
+      const ep = this.findEndpoint(this.serviceEndpoints, tc)
+      const sg = this.requestFromSchema(ep?.requestSchema)
+      const saved = this.normalizeRequest(tc.request || {})
+      const savedQueryEnabled = this.normalizeObject(saved.queryEnabled || {})
+      const savedQueryRequired = this.normalizeObject(saved.queryRequired || {})
+      const mergedQuery = { ...this.normalizeObject(sg.query), ...this.normalizeObject(flatQueryOverride) }
+      const queryRequired = {}
+      const queryEnabled = {}
+      for (const key of Object.keys(mergedQuery)) {
+        if (Object.prototype.hasOwnProperty.call(savedQueryRequired, key)) {
+          queryRequired[key] = savedQueryRequired[key] === true
+        } else {
+          queryRequired[key] = sg.queryRequiredMap[key] === true
+        }
+        queryEnabled[key] =
+          sg.queryRequired.has(key) ||
+          savedQueryEnabled[key] === true ||
+          Object.prototype.hasOwnProperty.call(this.normalizeObject(flatQueryOverride), key)
+      }
+      return this.objectToRows(mergedQuery, queryEnabled, queryRequired)
+    },
+
+    buildStepHeaderRows(tc, hdrOverride) {
+      const ep = this.findEndpoint(this.serviceEndpoints, tc)
+      const sg = this.requestFromSchema(ep?.requestSchema)
+      const merged = { ...this.normalizeObject(sg.headers), ...this.normalizeObject(hdrOverride) }
+      return this.objectToRows(merged)
+    },
+
+    requestFromSchema(rawSchema) {
+      const schema = this.normalizeRequest(rawSchema)
+      const request = {
+        headers: {},
+        query: {},
+        queryRequired: new Set(),
+        queryRequiredMap: {},
+        variables: {},
+        body: undefined,
+        hasBody: false,
+        security: undefined
+      }
+      const parameters = Array.isArray(schema.parameters) ? schema.parameters : []
+      for (const param of parameters) {
+        if (!param || !param.name) continue
+        const value = this.stringifySample(this.sampleFromSchema(param.schema))
+        if (param.in === 'query') {
+          const required = param.required === true
+          request.query[param.name] = required ? value : ''
+          request.queryRequiredMap[param.name] = required
+          if (required) request.queryRequired.add(param.name)
+        } else if (param.in === 'header') {
+          request.headers[param.name] = value
+        } else if (param.in === 'path') {
+          request.variables[param.name] = value || '1'
+        }
+      }
+      if (schema.body && typeof schema.body === 'object') {
+        request.body = this.sampleFromSchema(schema.body)
+        request.hasBody = true
+        request.headers['Content-Type'] = 'application/json'
+      }
+      if (Object.prototype.hasOwnProperty.call(schema, 'security')) {
+        request.security = this.cloneSample(schema.security)
+      }
+      return request
+    },
+
+    parameterCommentForStep(row, location) {
+      const name = row?.key
+      if (!name) return '-'
+      const parameters = Array.isArray(this.scenarioStepRequestSchema?.parameters)
+        ? this.scenarioStepRequestSchema.parameters
+        : []
+      const param = parameters.find((item) => item?.name === name && item?.in === location)
+      if (!param) return '-'
+      const description = typeof param.description === 'string' ? param.description.trim() : ''
+      if (description) return description
+      return this.schemaFieldMeaning(param.schema)
+    },
+
+    schemaDocRows(schema) {
+      if (!schema || typeof schema !== 'object' || Array.isArray(schema)) return []
+      const root = this.normalizeSchemaNode(schema)
+      if (!Object.keys(root).length) return []
+      const rows = []
+      this.collectSchemaDocRows(root, '$', '$', null, 0, false, rows)
+      if (rows.length <= 1) return rows
+      return rows
+        .filter((row) => row.path !== '$')
+        .map((row) => ({ ...row, parentPath: row.parentPath === '$' ? null : row.parentPath }))
+    },
+
+    filterSchemaRows(rows, collapsed) {
+      if (!Object.keys(collapsed).length) return rows
+      const byPath = {}
+      rows.forEach((r) => {
+        byPath[r.path] = r
+      })
+      return rows.filter((row) => {
+        let p = row.parentPath
+        while (p !== null && p !== undefined) {
+          if (collapsed[p]) return false
+          p = byPath[p]?.parentPath ?? null
+        }
+        return true
+      })
+    },
+
+    collectSchemaDocRows(schema, path, name, parentPath, depth, required, rows) {
+      const node = this.normalizeSchemaNode(schema)
+      const type = this.schemaType(node)
+
+      let hasChildren = false
+      if (type === 'object') {
+        const props = this.normalizeObject(node.properties)
+        if (
+          Object.keys(props).length > 0 ||
+          (node.additionalProperties && typeof node.additionalProperties === 'object')
+        ) {
+          hasChildren = true
+        }
+      } else if (type === 'array' && node.items && typeof node.items === 'object') {
+        const itemsNode = this.normalizeSchemaNode(node.items)
+        const itemsType = this.schemaType(itemsNode)
+        if (itemsType === 'object' && Object.keys(this.normalizeObject(itemsNode.properties)).length > 0) {
+          hasChildren = true
+        }
+      }
+
+      rows.push({
+        path,
+        name,
+        parentPath,
+        depth,
+        required,
+        hasChildren,
+        type: this.schemaTypeLabel(node),
+        meaning: this.schemaFieldMeaning(node)
+      })
+
+      if (type === 'object') {
+        const requiredFields = new Set(Array.isArray(node.required) ? node.required : [])
+        for (const [key, property] of Object.entries(this.normalizeObject(node.properties))) {
+          this.collectSchemaDocRows(
+            property,
+            path === '$' ? key : `${path}.${key}`,
+            key,
+            path,
+            depth + 1,
+            requiredFields.has(key),
+            rows
+          )
+        }
+        if (node.additionalProperties && typeof node.additionalProperties === 'object') {
+          this.collectSchemaDocRows(
+            node.additionalProperties,
+            `${path}.{key}`,
+            '{key}',
+            path,
+            depth + 1,
+            false,
+            rows
+          )
+        }
+      } else if (type === 'array' && node.items && typeof node.items === 'object') {
+        const itemsNode = this.normalizeSchemaNode(node.items)
+        const itemsType = this.schemaType(itemsNode)
+        if (itemsType === 'object') {
+          const requiredFields = new Set(Array.isArray(itemsNode.required) ? itemsNode.required : [])
+          for (const [key, property] of Object.entries(this.normalizeObject(itemsNode.properties))) {
+            this.collectSchemaDocRows(
+              property,
+              `${path}[].${key}`,
+              key,
+              path,
+              depth + 1,
+              requiredFields.has(key),
+              rows
+            )
+          }
+          if (itemsNode.additionalProperties && typeof itemsNode.additionalProperties === 'object') {
+            this.collectSchemaDocRows(
+              itemsNode.additionalProperties,
+              `${path}[].{key}`,
+              '{key}',
+              path,
+              depth + 1,
+              false,
+              rows
+            )
+          }
+        }
+      }
+    },
+
+    normalizeSchemaNode(schema) {
+      if (!schema || typeof schema !== 'object' || Array.isArray(schema)) return {}
+      let out = { ...schema }
+
+      if (Array.isArray(schema.allOf) && schema.allOf.length > 0) {
+        const composed = schema.allOf.reduce((merged, item) => {
+          return this.mergeSchemaNodes(merged, this.normalizeSchemaNode(item))
+        }, {})
+        out = this.mergeSchemaNodes(composed, { ...schema, allOf: undefined })
+      }
+
+      const alternatives =
+        Array.isArray(out.oneOf) && out.oneOf.length > 0
+          ? out.oneOf
+          : (Array.isArray(out.anyOf) && out.anyOf.length > 0 ? out.anyOf : null)
+      if (alternatives && !out.properties && !out.items) {
+        out = this.mergeSchemaNodes(this.normalizeSchemaNode(alternatives[0]), out)
+      }
+
+      return out
+    },
+
+    mergeSchemaNodes(base, override) {
+      const merged = { ...base, ...override }
+      if (base.properties || override.properties) {
+        merged.properties = {
+          ...this.normalizeObject(base.properties),
+          ...this.normalizeObject(override.properties)
+        }
+      }
+      const required = [
+        ...(Array.isArray(base.required) ? base.required : []),
+        ...(Array.isArray(override.required) ? override.required : [])
+      ]
+      if (required.length > 0) merged.required = Array.from(new Set(required))
+      return merged
+    },
+
+    schemaFieldMeaning(schema) {
+      const node = this.normalizeSchemaNode(schema)
+      const description = typeof node.description === 'string' ? node.description.trim() : ''
+      if (description) return description
+      const title = typeof node.title === 'string' ? node.title.trim() : ''
+      if (title) return title
+      return ''
+    },
+
+    schemaTypeLabel(schema) {
+      const node = this.normalizeSchemaNode(schema)
+      const type = this.schemaType(node)
+      const format = typeof node.format === 'string' ? node.format.trim() : ''
+      if (!type && Array.isArray(node.enum) && node.enum.length > 0) return 'enum'
+      if (type === 'array' && node.items && typeof node.items === 'object') {
+        const itemsNode = this.normalizeSchemaNode(node.items)
+        const itemsType = this.schemaType(itemsNode)
+        if (itemsType) return `array[${itemsType}]`
+      }
+      return format ? `${type || 'value'}:${format}` : (type || 'value')
+    },
+
+    schemaType(schema) {
+      if (!schema || typeof schema !== 'object') return ''
+      if (Array.isArray(schema.type) && schema.type.length > 0) return schema.type.join('|')
+      if (typeof schema.type === 'string' && schema.type) return schema.type
+      if (schema.properties) return 'object'
+      if (schema.items) return 'array'
+      if (Array.isArray(schema.enum) && schema.enum.length > 0) return 'enum'
+      return ''
+    },
+
+    sampleFromSchema(schema) {
+      if (!schema || typeof schema !== 'object') return {}
+      if (Object.prototype.hasOwnProperty.call(schema, 'example')) return this.cloneSample(schema.example)
+      if (Object.prototype.hasOwnProperty.call(schema, 'default')) return this.cloneSample(schema.default)
+      if (Array.isArray(schema.enum) && schema.enum.length > 0) return this.cloneSample(schema.enum[0])
+      if (Array.isArray(schema.allOf) && schema.allOf.length > 0) {
+        return schema.allOf.reduce((out, item) => {
+          const sample = this.sampleFromSchema(item)
+          return sample && typeof sample === 'object' && !Array.isArray(sample) ? { ...out, ...sample } : out
+        }, {})
+      }
+      if (Array.isArray(schema.oneOf) && schema.oneOf.length > 0) return this.sampleFromSchema(schema.oneOf[0])
+      if (Array.isArray(schema.anyOf) && schema.anyOf.length > 0) return this.sampleFromSchema(schema.anyOf[0])
+
+      const schemaType = Array.isArray(schema.type) ? schema.type[0] : schema.type
+      if (schemaType === 'object' || (!schemaType && schema.properties)) {
+        return Object.entries(schema.properties || {}).reduce((out, [key, property]) => {
+          out[key] = this.sampleFromSchema(property)
+          return out
+        }, {})
+      }
+      if (schemaType === 'array') return [this.sampleFromSchema(schema.items)]
+      if (schemaType === 'integer') return 1
+      if (schemaType === 'number') return 1.0
+      if (schemaType === 'boolean') return true
+      if (schemaType === 'string') {
+        if (schema.format === 'date-time') return '2026-01-01T00:00:00Z'
+        if (schema.format === 'date') return '2026-01-01'
+        return 'string'
+      }
+      return {}
+    },
+
+    stringifySample(value) {
+      if (value == null) return ''
+      if (typeof value === 'string') return value
+      if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+      return JSON.stringify(value)
+    },
+
+    toggleSchemaCollapse(collapsedObj, path) {
+      if (collapsedObj[path]) {
+        delete collapsedObj[path]
+      } else {
+        collapsedObj[path] = true
+      }
+    },
+
+    collectJsonLines(value, keyName, path, depth, isLast, collapsed, lines) {
+      if (value === null || typeof value !== 'object') {
+        lines.push({
+          id: path,
+          type: 'primitive',
+          depth,
+          key: keyName,
+          displayValue: this.formatJsonPrimitive(value),
+          valueType: value === null ? 'null' : typeof value,
+          hasComma: !isLast
+        })
+        return
+      }
+      const isArray = Array.isArray(value)
+      const keys = isArray ? null : Object.keys(value)
+      const count = isArray ? value.length : keys.length
+      if (count === 0) {
+        lines.push({
+          id: path,
+          type: isArray ? 'empty-array' : 'empty-object',
+          depth,
+          key: keyName,
+          hasComma: !isLast
+        })
+        return
+      }
+      if (collapsed[path]) {
+        lines.push({
+          id: path,
+          type: 'collapsed',
+          depth,
+          key: keyName,
+          open: isArray ? '[' : '{',
+          close: isArray ? ']' : '}',
+          count,
+          path,
+          hasComma: !isLast
+        })
+        return
+      }
+      lines.push({
+        id: `${path}:o`,
+        type: 'open',
+        depth,
+        key: keyName,
+        bracket: isArray ? '[' : '{',
+        path
+      })
+      if (isArray) {
+        value.forEach((item, i) => {
+          this.collectJsonLines(
+            item,
+            null,
+            `${path}[${i}]`,
+            depth + 1,
+            i === value.length - 1,
+            collapsed,
+            lines
+          )
+        })
+      } else {
+        keys.forEach((k, i) => {
+          this.collectJsonLines(
+            value[k],
+            k,
+            `${path}.${k}`,
+            depth + 1,
+            i === keys.length - 1,
+            collapsed,
+            lines
+          )
+        })
+      }
+      lines.push({
+        id: `${path}:c`,
+        type: 'close',
+        depth,
+        bracket: isArray ? ']' : '}',
+        hasComma: !isLast
+      })
+    },
+
+    formatJsonPrimitive(value) {
+      if (value === null) return 'null'
+      if (typeof value === 'string') return JSON.stringify(value)
+      return String(value)
+    },
+
+    startStepBodySchemaResize(event) {
+      if (event.button !== undefined && event.button !== 0) return
+      const layout = event.currentTarget?.closest?.('.body-schema-layout')
+      if (!layout) return
+      const rect = layout.getBoundingClientRect()
+      this.stepBodySchemaResizeState = {
+        right: rect.right,
+        maxWidth: Math.max(
+          BODY_SCHEMA_PANEL_MIN_WIDTH,
+          Math.min(BODY_SCHEMA_PANEL_MAX_WIDTH, rect.width - BODY_SCHEMA_EDITOR_MIN_WIDTH)
+        )
+      }
+      document.addEventListener('pointermove', this.onStepBodySchemaResize)
+      document.addEventListener('pointerup', this.stopStepBodySchemaResize)
+      document.addEventListener('pointercancel', this.stopStepBodySchemaResize)
+      document.body.style.cursor = 'col-resize'
+      document.body.style.userSelect = 'none'
+      event.currentTarget.setPointerCapture?.(event.pointerId)
+      event.preventDefault()
+      this.onStepBodySchemaResize(event)
+    },
+
+    onStepBodySchemaResize(event) {
+      if (!this.stepBodySchemaResizeState) return
+      const nextWidth = this.stepBodySchemaResizeState.right - event.clientX
+      this.stepBodySchemaPanelWidth = clampNumber(
+        nextWidth,
+        BODY_SCHEMA_PANEL_MIN_WIDTH,
+        this.stepBodySchemaResizeState.maxWidth
+      )
+    },
+
+    stopStepBodySchemaResize() {
+      if (!this.stepBodySchemaResizeState) return
+      document.removeEventListener('pointermove', this.onStepBodySchemaResize)
+      document.removeEventListener('pointerup', this.stopStepBodySchemaResize)
+      document.removeEventListener('pointercancel', this.stopStepBodySchemaResize)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      storeScenarioBodySchemaPanelWidth(this.stepBodySchemaPanelWidth)
+      this.stepBodySchemaResizeState = null
+    },
+
+    setStepBodyText(text) {
+      this.stepForm.bodyText = text
+      this.$nextTick(() => {
+        const el = this.$refs.stepBodyEditor
+        if (el && el.innerText !== text) el.innerText = text || ''
+      })
+    },
+
+    syncStepBodyEditorInner() {
+      const el = this.$refs.stepBodyEditor
+      if (!el) return
+      const t = this.stepForm.bodyText ?? ''
+      if (el.innerText !== t) el.innerText = t
+    },
+
+    /** 与 CaseRun「运行控制台」中单步结果的指标 / 断言展示一致 */
+    stepDebugMetricClass(status) {
+      if (status === 'passed') return 'is-success'
+      if (status === 'failed' || status === 'error') return 'is-danger'
+      if (status) return 'is-warning'
+      return 'is-idle'
+    },
+
+    stepDebugStatusIconName(status) {
+      if (status === 'passed') return 'CircleCheck'
+      if (status === 'failed' || status === 'error') return 'CircleClose'
+      if (status) return 'Warning'
+      return 'Clock'
+    },
+
+    stepDebugStatusLabel(status) {
+      const labels = {
+        running: '运行中',
+        passed: '通过',
+        failed: '失败',
+        error: '错误',
+        pending: '等待中'
+      }
+      return labels[status] || status || '-'
+    },
+
+    formatDuration(ms) {
+      if (ms == null) return '-'
+      const value = Number(ms || 0)
+      if (value < 1000) return `${value} ms`
+      return `${(value / 1000).toFixed(2)} s`
+    },
+
+    durationChipClass(ms) {
+      if (ms == null) return 'is-duration'
+      return Number(ms) < 100 ? 'is-duration-fast' : 'is-duration'
+    },
+
+    assertionTypeColor(type) {
+      return ASSERTION_TYPE_COLORS[type] || ''
+    },
+
+    stepDebugResponseStatusTagType(code) {
+      const c = Number(code)
+      if (!Number.isFinite(c)) return 'info'
+      if (c >= 200 && c < 300) return 'success'
+      if (c >= 400) return 'danger'
+      return 'warning'
+    },
+
     parseJSONText(text, fallback, label) {
       const raw = String(text || '').trim()
       if (!raw) return fallback
@@ -1661,6 +2831,153 @@ export default {
     appendScenarioScriptTemplate(code) {
       const cur = this.stepForm.scriptSource || ''
       this.stepForm.scriptSource = cur.trim() ? `${cur.trim()}\n\n${code}` : code
+    },
+
+    openScenarioScriptAI() {
+      this.aiScenarioScriptLoading = true
+      this.aiScenarioScriptDialogVisible = true
+    },
+    async generateStepParams() {
+      if (!this.stepForm.testCaseId) {
+        this.$message.warning('请先选择接口')
+        return
+      }
+      const tc = this.findCase(this.stepForm.testCaseId)
+      if (!tc) return
+      this.generatingStepParams = true
+      try {
+        const generated = await generateCaseParams(this.stepForm.testCaseId)
+        const pathTpl = this.normalizePathVariables(this.stepForm.requestPath || tc.path)
+        this.stepForm.requestPath = pathTpl
+        const curPath = this.rowsToObject(this.stepForm.pathParamRows)
+        const genPath = this.normalizeObject(generated.path)
+        const mergedPathVars = { ...curPath, ...genPath }
+        const defaults = this.pathVariables(pathTpl)
+        const pathRows = []
+        for (const key of Object.keys(defaults)) {
+          pathRows.push({
+            enabled: true,
+            key,
+            value: Object.prototype.hasOwnProperty.call(mergedPathVars, key)
+              ? String(mergedPathVars[key])
+              : defaults[key]
+          })
+        }
+        this.stepForm.pathParamRows = pathRows
+
+        const curQuery = this.rowsToObject(this.stepForm.queryRows)
+        const mergedQuery = { ...curQuery, ...this.normalizeObject(generated.query) }
+        this.stepForm.queryRows = this.buildStepQueryRows(tc, mergedQuery)
+
+        const curHeaders = this.rowsToObject(this.stepForm.headerRows)
+        const mergedHeaders = { ...curHeaders, ...this.normalizeObject(generated.headers) }
+        this.stepForm.headerRows = this.buildStepHeaderRows(tc, mergedHeaders)
+
+        if (generated.body != null) {
+          this.setStepBodyText(this.formatJSON(generated.body))
+        }
+        this.$message.success('已重新生成参数')
+      } catch {
+        /* 错误由请求拦截器提示 */
+      } finally {
+        this.generatingStepParams = false
+      }
+    },
+    openStepAIParamsDialog() {
+      if (!this.stepForm.testCaseId) {
+        this.$message.warning('请先选择接口')
+        return
+      }
+      this.aiStepParamsLoading = true
+      this.aiStepParamsDialogVisible = true
+    },
+    onScenarioStepAIParamsApply(payload) {
+      const generated = payload?.parsed
+      if (!generated || typeof generated !== 'object' || Array.isArray(generated)) {
+        this.$message.warning('AI 未返回结构化参数，请查看原文')
+        return
+      }
+      const tc = this.findCase(this.stepForm.testCaseId)
+      if (!tc) return
+      const aiHeaders =
+        generated.headers && typeof generated.headers === 'object' && !Array.isArray(generated.headers)
+          ? generated.headers
+          : {}
+      const aiQuery =
+        generated.query && typeof generated.query === 'object' && !Array.isArray(generated.query)
+          ? generated.query
+          : {}
+      const aiPath =
+        generated.path && typeof generated.path === 'object' && !Array.isArray(generated.path)
+          ? generated.path
+          : generated.pathvar || generated.pathVars || {}
+      const aiBody = Object.prototype.hasOwnProperty.call(generated, 'body') ? generated.body : null
+
+      const currentQuery = this.rowsToObject(this.stepForm.queryRows)
+      const currentHeaders = this.rowsToObject(this.stepForm.headerRows)
+      const currentPathVars = this.rowsToObject(this.stepForm.pathParamRows)
+
+      const mergedHeaders = { ...currentHeaders }
+      for (const [k, v] of Object.entries(aiHeaders)) {
+        mergedHeaders[k] = typeof v === 'string' ? v : JSON.stringify(v)
+      }
+
+      const mergedQuery = { ...currentQuery }
+      for (const [k, v] of Object.entries(aiQuery)) {
+        mergedQuery[k] = typeof v === 'string' ? v : JSON.stringify(v)
+      }
+
+      const mergedPathVars = { ...currentPathVars }
+      for (const [k, v] of Object.entries(aiPath || {})) {
+        mergedPathVars[k] = typeof v === 'string' ? v : JSON.stringify(v)
+      }
+
+      const pathTpl = this.normalizePathVariables(this.stepForm.requestPath || tc.path)
+      this.stepForm.requestPath = pathTpl
+      const defaults = this.pathVariables(pathTpl)
+      const pathRows = []
+      for (const key of Object.keys(defaults)) {
+        pathRows.push({
+          enabled: true,
+          key,
+          value: Object.prototype.hasOwnProperty.call(mergedPathVars, key)
+            ? String(mergedPathVars[key])
+            : defaults[key]
+        })
+      }
+      this.stepForm.pathParamRows = pathRows
+
+      this.stepForm.headerRows = this.buildStepHeaderRows(tc, mergedHeaders)
+      this.stepForm.queryRows = this.buildStepQueryRows(tc, mergedQuery)
+
+      let bodyDraft = null
+      if ((this.stepForm.bodyText || '').trim()) {
+        try {
+          bodyDraft = JSON.parse(this.stepForm.bodyText)
+        } catch {
+          bodyDraft = this.stepForm.bodyText
+        }
+      }
+      const nextBody = aiBody !== null && aiBody !== undefined ? aiBody : bodyDraft
+      if (nextBody == null || nextBody === '') {
+        this.setStepBodyText('')
+      } else if (typeof nextBody === 'string') {
+        this.setStepBodyText(nextBody)
+      } else {
+        this.setStepBodyText(this.formatJSON(nextBody))
+      }
+
+      if (nextBody != null && nextBody !== '' && !mergedHeaders['Content-Type']) {
+        mergedHeaders['Content-Type'] = 'application/json'
+        this.stepForm.headerRows = this.buildStepHeaderRows(tc, mergedHeaders)
+      }
+
+      this.$message.success('已应用 AI 生成的参数')
+    },
+    onScenarioScriptAIApply(payload) {
+      const code = (payload?.text || '').trim()
+      if (!code) return
+      this.appendScenarioScriptTemplate(code)
     },
 
     buildAPIStepConfig() {
@@ -1694,7 +3011,17 @@ export default {
     },
 
     buildForStepConfig() {
-      const bodyStepSeqs = this.normalizeStepSeqSelection(this.stepForm.forBodyStepSeqs)
+      // 子步骤在左侧「+」保存后会写回父级 config，但右侧 For 表单可能仍是打开时的旧数据；合并已持久化的 bodyStepSeqs，避免保存父步骤时清空循环体引用。
+      const formSeqs = this.normalizeStepSeqSelection(this.stepForm.forBodyStepSeqs)
+      let mergedSeqs = formSeqs
+      if (this.editingStep?.id) {
+        const row = this.steps.find((s) => s.id === this.editingStep.id)
+        if (row && row.stepType === 'for') {
+          const persisted = this.normalizeStepSeqSelection(this.parseMaybeJSON(row.config).bodyStepSeqs)
+          mergedSeqs = this.normalizeStepSeqSelection([...persisted, ...formSeqs])
+        }
+      }
+      const bodyStepSeqs = mergedSeqs
       const cfg = {
         mode: this.stepForm.forMode || 'count',
         itemVar: (this.stepForm.forItemVar || 'item').trim(),
@@ -1717,12 +3044,25 @@ export default {
     },
 
     buildConditionStepConfig() {
-      const branches = (this.stepForm.conditionBranches || []).map((b) => ({
-        left: (b.left || '').trim(),
-        operator: b.operator || 'equals',
-        right: b.right || '',
-        stepSeqs: this.normalizeStepSeqSelection(b.stepSeqs)
-      }))
+      let persistedNorm = null
+      if (this.editingStep?.id) {
+        const row = this.steps.find((s) => s.id === this.editingStep.id)
+        if (row && row.stepType === 'condition') {
+          persistedNorm = this.normalizeConditionConfig(this.parseMaybeJSON(row.config))
+        }
+      }
+      const branches = (this.stepForm.conditionBranches || []).map((b, i) => {
+        const formSeqs = this.normalizeStepSeqSelection(b.stepSeqs)
+        const diskSeqs = persistedNorm?.branches?.[i]
+          ? this.normalizeStepSeqSelection(persistedNorm.branches[i].stepSeqs)
+          : []
+        return {
+          left: (b.left || '').trim(),
+          operator: b.operator || 'equals',
+          right: (b.right || '').trim(),
+          stepSeqs: this.normalizeStepSeqSelection([...diskSeqs, ...formSeqs])
+        }
+      })
       if (!branches.length) {
         throw new Error('至少保留一个条件分支')
       }
@@ -1731,9 +3071,11 @@ export default {
           throw new Error(`分支 ${i + 1} 的条件左值不能为空`)
         }
       }
+      const elseForm = this.normalizeStepSeqSelection(this.stepForm.conditionElseStepSeqs)
+      const elseDisk = persistedNorm ? this.normalizeStepSeqSelection(persistedNorm.elseStepSeqs) : []
       return {
         branches,
-        elseStepSeqs: this.normalizeStepSeqSelection(this.stepForm.conditionElseStepSeqs)
+        elseStepSeqs: this.normalizeStepSeqSelection([...elseDisk, ...elseForm])
       }
     },
 
@@ -1744,11 +3086,29 @@ export default {
         .filter((n) => Number.isFinite(n) && n > 0 && !seen.has(n) && seen.add(n))
     },
 
+    buildAttachUnderParentPayload() {
+      if (!this.controlFlowChildAttach) return undefined
+      // 已落库的步骤再次保存时不要重复挂到父级；新草稿 editingStep 为 null
+      if (this.editingStep?.id) return undefined
+      const a = this.controlFlowChildAttach
+      const out = { parentStepId: a.parentId }
+      if (a.branch === 'body') {
+        out.forLoopBody = true
+      } else if (a.branch === 'else') {
+        out.conditionElse = true
+      } else if (typeof a.branch === 'number') {
+        out.conditionBranchIndex = a.branch
+      } else {
+        return undefined
+      }
+      return out
+    },
+
     buildStepPayload() {
       if (this.stepForm.stepType === 'api' && !this.stepForm.testCaseId) {
         throw new Error('请选择接口')
       }
-      return {
+      const payload = {
         testCaseId: this.stepForm.stepType === 'api' ? this.stepForm.testCaseId : undefined,
         stepOrder: this.stepForm.stepOrder,
         stepType: this.stepForm.stepType,
@@ -1766,6 +3126,9 @@ export default {
                   : this.buildAPIStepConfig(),
         requestOverride: this.stepForm.stepType === 'api' ? this.buildStepRequestOverride() : {}
       }
+      const attach = this.buildAttachUnderParentPayload()
+      if (attach) payload.attachUnderParent = attach
+      return payload
     },
 
     async submitStep() {
@@ -1777,19 +3140,48 @@ export default {
         return null
       }
 
+      const pendingAttachMeta = this.controlFlowChildAttach
+      const hadPayloadAttach = Boolean(payload.attachUnderParent)
       this.savingStep = true
       try {
         const saved = await upsertScenarioStep(this.selectedScenario.id, payload.stepOrder, payload)
-        const idx = this.steps.findIndex((s) => s.stepOrder === saved.stepOrder)
-        if (idx !== -1) {
-          this.steps.splice(idx, 1, saved)
-        } else {
-          this.steps.push(saved)
-          this.steps.sort((a, b) => a.stepOrder - b.stepOrder)
+
+        if (pendingAttachMeta && !hadPayloadAttach) {
+          try {
+            await this.attachChildToControlParent(saved, pendingAttachMeta)
+          } catch {
+            this.$message.warning(
+              '子步骤已保存，但未能写入父级 For/条件 配置（请刷新页面后重试，或检查接口版本是否已更新）'
+            )
+          }
         }
-        this.editingStep = saved
-        if (this.pendingControlAttach) {
-          await this.attachSavedStepToControl(saved)
+
+        this.controlFlowChildAttach = null
+
+        if (hadPayloadAttach || pendingAttachMeta) {
+          try {
+            this.steps = await listScenarioSteps(this.selectedScenario.id)
+            const cur = this.steps.find((s) => s.id === saved.id)
+            if (cur) this.editStep(cur)
+            else this.editingStep = saved
+          } catch {
+            const idx = this.steps.findIndex((s) => s.stepOrder === saved.stepOrder)
+            if (idx !== -1) this.steps.splice(idx, 1, saved)
+            else {
+              this.steps.push(saved)
+              this.steps.sort((a, b) => a.stepOrder - b.stepOrder)
+            }
+            this.editingStep = saved
+          }
+        } else {
+          const idx = this.steps.findIndex((s) => s.stepOrder === saved.stepOrder)
+          if (idx !== -1) {
+            this.steps.splice(idx, 1, saved)
+          } else {
+            this.steps.push(saved)
+            this.steps.sort((a, b) => a.stepOrder - b.stepOrder)
+          }
+          this.editingStep = saved
         }
         this.$message.success('步骤参数已保存')
         return saved
@@ -1802,37 +3194,36 @@ export default {
       return this.submitStep()
     },
 
-    async attachSavedStepToControl(savedStep) {
-      const attach = this.pendingControlAttach
-      if (!attach || !savedStep?.stepSeq) return
+    /**
+     * 当 attachUnderParent 未随 PUT 一并提交时（例如旧版 API），第二次请求更新父级 config。
+     */
+    async attachChildToControlParent(savedStep, attach) {
+      if (!attach || savedStep == null) return
+      const childSeq = Number(savedStep.stepSeq)
+      if (!Number.isFinite(childSeq) || childSeq <= 0) return
 
-      const parent = this.steps.find((s) => s.id === attach.parentId)
-      if (!parent) {
-        this.pendingControlAttach = null
-        this.$message.warning('父级控制步骤不存在，请手动选择子步骤')
-        return
-      }
+      const parent = this.steps.find((s) => String(s.id) === String(attach.parentId))
+      if (!parent) return
 
       const cfg = this.parseMaybeJSON(parent.config)
       if (parent.stepType === 'for' && attach.branch === 'body') {
         cfg.bodyStepSeqs = this.normalizeStepSeqSelection([
           ...(cfg.bodyStepSeqs || []),
-          savedStep.stepSeq
+          childSeq
         ])
       } else if (parent.stepType === 'condition') {
         const norm = this.normalizeConditionConfig(cfg)
         if (attach.branch === 'else') {
           norm.elseStepSeqs = this.normalizeStepSeqSelection([
             ...norm.elseStepSeqs,
-            savedStep.stepSeq
+            childSeq
           ])
         } else if (typeof attach.branch === 'number' && norm.branches[attach.branch]) {
           norm.branches[attach.branch].stepSeqs = this.normalizeStepSeqSelection([
             ...norm.branches[attach.branch].stepSeqs,
-            savedStep.stepSeq
+            childSeq
           ])
         } else {
-          this.pendingControlAttach = null
           return
         }
         cfg.branches = norm.branches
@@ -1842,7 +3233,6 @@ export default {
         delete cfg.right
         delete cfg.thenStepSeqs
       } else {
-        this.pendingControlAttach = null
         return
       }
 
@@ -1855,9 +3245,8 @@ export default {
         config: cfg,
         requestOverride: parent.requestOverride || {}
       })
-      const idx = this.steps.findIndex((s) => s.id === updatedParent.id)
-      if (idx !== -1) this.steps.splice(idx, 1, updatedParent)
-      this.pendingControlAttach = null
+      const pidx = this.steps.findIndex((s) => s.id === updatedParent.id)
+      if (pidx !== -1) this.steps.splice(pidx, 1, updatedParent)
     },
 
     async runStepRequest() {
@@ -2023,8 +3412,8 @@ export default {
     },
     stepTypeTagType(stepType) {
       if (stepType === 'database') return 'warning'
-      if (stepType === 'script') return 'primary'
-      if (stepType === 'for') return 'info'
+      if (stepType === 'script') return 'info'
+      if (stepType === 'for') return 'primary'
       if (stepType === 'condition') return 'warning'
       return 'success'
     },
@@ -2518,15 +3907,13 @@ export default {
   background: #f3f6fb;
 }
 
-.scenario-request-card {
+.request-card {
   overflow: hidden;
   border-radius: 12px;
-  border: 1px solid color-mix(in srgb, var(--app-border-color, var(--el-border-color)) 70%, #64748b);
-  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.05);
   background: #ffffff;
 }
 
-.scenario-request-card :deep(.el-card__body) {
+.request-card :deep(.el-card__body) {
   padding: 0;
 }
 
@@ -2589,10 +3976,6 @@ export default {
 
 .scenario-api-select-full {
   width: 100%;
-}
-
-.scenario-request-meta-line {
-  flex-wrap: wrap;
 }
 
 .scenario-request-hint {
@@ -2668,6 +4051,524 @@ export default {
   border-bottom: 1px solid var(--app-border-color, var(--el-border-color));
   background: #f8fafc;
   flex-wrap: wrap;
+}
+
+.body-view-toggle {
+  display: flex;
+  gap: 0;
+  border: 1px solid var(--app-border-color, var(--el-border-color));
+  border-radius: 6px;
+  overflow: hidden;
+  margin-left: auto;
+}
+
+.body-view-toggle span {
+  padding: 2px 10px;
+  font-size: 12px;
+  color: var(--app-secondary-text, var(--el-text-color-secondary));
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s, color 0.15s;
+}
+
+.body-view-toggle span:first-child {
+  border-right: 1px solid var(--app-border-color, var(--el-border-color));
+}
+
+.body-view-toggle span.active {
+  background: var(--el-color-primary-light-9);
+  color: var(--el-color-primary);
+  font-weight: 600;
+}
+
+.code-view {
+  min-height: 260px;
+  max-height: 520px;
+  overflow: auto;
+  padding: 14px;
+  border: 1px solid var(--app-border-color, var(--el-border-color));
+  border-radius: 10px;
+  background: var(--app-code-bg, var(--el-fill-color-light));
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: var(--app-font-size-small, 12px);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  margin: 0;
+}
+
+.code-editor,
+.scenario-body-code-pane {
+  min-height: 260px;
+  max-height: 520px;
+}
+
+.code-editor {
+  overflow: auto;
+  padding: 14px;
+  border: 1px solid var(--app-border-color, var(--el-border-color));
+  border-radius: 10px;
+  background: var(--app-code-bg, var(--el-fill-color-light));
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: var(--app-font-size-small, 12px);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  outline: none;
+}
+
+.scenario-body-code-pane--muted {
+  opacity: 0.96;
+}
+
+.body-schema-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 8px minmax(260px, var(--body-schema-panel-width, 1fr));
+  gap: 8px;
+  align-items: stretch;
+}
+
+.body-schema-layout > .code-editor,
+.body-schema-layout > .json-viewer.code-view {
+  min-width: 0;
+}
+
+.schema-panel-placeholder {
+  width: 8px;
+  min-height: 260px;
+}
+
+.body-schema-resizer {
+  position: relative;
+  width: 8px;
+  min-height: 100%;
+  border-radius: 999px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.body-schema-resizer::before {
+  content: '';
+  position: absolute;
+  top: 10px;
+  bottom: 10px;
+  left: 3px;
+  width: 2px;
+  border-radius: 999px;
+  background: var(--app-border-color, var(--el-border-color));
+  transition:
+    background 0.12s ease,
+    width 0.12s ease,
+    left 0.12s ease;
+}
+
+.body-schema-resizer:hover::before {
+  left: 2px;
+  width: 4px;
+  background: var(--el-color-primary-light-5, #a0cfff);
+}
+
+.schema-panel {
+  min-height: 260px;
+  max-height: 520px;
+  overflow: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--app-border-color, var(--el-border-color));
+  border-radius: 10px;
+  background: var(--app-card-bg, #ffffff);
+}
+
+.schema-panel-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.schema-panel-title {
+  color: var(--el-text-color-primary);
+  font-size: var(--app-font-size-small, 13px);
+  font-weight: 700;
+}
+
+.schema-field-count {
+  flex: 0 0 auto;
+  color: var(--app-secondary-text, var(--el-text-color-secondary));
+  font-size: 12px;
+}
+
+.schema-field-table {
+  border: 1px solid var(--app-border-color, var(--el-border-color));
+  border-radius: 8px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.schema-field-table-head,
+.schema-field-row {
+  display: grid;
+  grid-template-columns: minmax(112px, 1.25fr) minmax(72px, 0.65fr) minmax(120px, 1.2fr);
+  align-items: center;
+  column-gap: 8px;
+}
+
+.schema-field-table-head {
+  min-height: 32px;
+  padding: 0 10px;
+  background: #f8fafc;
+  color: var(--app-secondary-text, var(--el-text-color-secondary));
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.schema-field-row {
+  min-height: 34px;
+  padding: 6px 10px;
+  border-top: 1px solid var(--app-border-color, var(--el-border-color));
+}
+
+.schema-field-name {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+}
+
+.json-viewer {
+  overflow: auto;
+  padding: 10px 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12.5px;
+  line-height: 1.7;
+}
+
+.json-line {
+  display: flex;
+  align-items: baseline;
+  gap: 0;
+  white-space: pre;
+  padding-right: 10px;
+}
+
+.json-toggle,
+.json-toggle-ph {
+  flex: 0 0 14px;
+  width: 14px;
+  height: 14px;
+  position: relative;
+  top: 1px;
+}
+
+.json-toggle {
+  cursor: pointer;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.json-toggle:hover {
+  background: var(--el-fill-color-light);
+}
+
+.json-toggle::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  border: 3.5px solid transparent;
+  border-top: 4.5px solid #94a3b8;
+  border-bottom: 0;
+  transform: translate(-50%, -20%);
+  transition: transform 0.12s;
+}
+
+.json-toggle.is-collapsed::before {
+  transform: translate(-50%, -50%) rotate(-90deg);
+}
+
+.json-key {
+  color: #1e40af;
+}
+
+.json-colon,
+.json-bracket,
+.json-comma {
+  color: var(--el-text-color-regular);
+}
+
+.json-string {
+  color: #16a34a;
+}
+
+.json-number {
+  color: #c2410c;
+}
+
+.json-boolean {
+  color: #7c3aed;
+}
+
+.json-null {
+  color: #94a3b8;
+}
+
+.json-collapsed-preview {
+  color: #94a3b8;
+  font-style: italic;
+}
+
+.schema-toggle,
+.schema-toggle-placeholder {
+  flex: 0 0 14px;
+  width: 14px;
+  height: 14px;
+}
+
+.schema-toggle {
+  position: relative;
+  cursor: pointer;
+  border-radius: 3px;
+  transition: background 0.15s;
+}
+
+.schema-toggle:hover {
+  background: var(--el-fill-color-light);
+}
+
+.schema-toggle::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  border: 4px solid transparent;
+  border-top: 5px solid var(--app-secondary-text, var(--el-text-color-secondary));
+  border-bottom: 0;
+  transform: translate(-50%, -30%);
+  transition: transform 0.15s;
+}
+
+.schema-toggle.is-collapsed::before {
+  transform: translate(-50%, -50%) rotate(-90deg);
+}
+
+.schema-field-name code {
+  overflow: hidden;
+  color: var(--el-text-color-primary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.schema-required {
+  flex: 0 0 auto;
+  color: var(--el-color-danger);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.schema-type-chip {
+  justify-self: start;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #64748b;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.schema-field-meaning {
+  overflow: hidden;
+  color: var(--app-secondary-text, var(--el-text-color-secondary));
+  font-size: var(--app-font-size-small, 13px);
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.query-value-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+
+.query-value-cell :deep(.el-input) {
+  flex: 1 1 auto;
+}
+
+.required-star {
+  flex: 0 0 auto;
+  color: var(--el-color-danger);
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.param-comment {
+  color: var(--app-secondary-text, var(--el-text-color-secondary));
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.result-card.scenario-step-result-card {
+  margin-top: 12px;
+  overflow: hidden;
+  border-radius: 12px;
+  background: #ffffff;
+}
+
+.scenario-step-result-card :deep(.el-card__body) {
+  padding: 16px;
+}
+
+.scenario-step-result-head.result-title {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+
+.scenario-step-result-head h3 {
+  margin: 0 0 6px;
+  font-size: var(--app-font-size-title, 16px);
+}
+
+.scenario-step-result-head p {
+  margin: 0;
+  color: var(--app-secondary-text, var(--el-text-color-secondary));
+}
+
+.result-metrics {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.metric-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 26px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: var(--app-font-size-small, 13px);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.metric-chip.is-idle {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.metric-chip.is-warning,
+.metric-chip.is-duration {
+  background: #fef3c7;
+  color: #d97706;
+}
+
+.metric-chip.is-success,
+.metric-chip.is-duration-fast {
+  background: #dcfce7;
+  color: #16a34a;
+}
+
+.metric-chip.is-danger {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+.response-overview-tags {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.response-msg-tag-text {
+  display: inline-block;
+  max-width: min(320px, 42vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+}
+
+.section-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.section-block.full {
+  grid-column: 1 / -1;
+}
+
+.section-block h3 {
+  margin: 0 0 10px;
+  font-size: var(--app-font-size-base, 14px);
+}
+
+.url-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 42px;
+  padding: 10px 12px;
+  border: 1px solid var(--app-border-color, var(--el-border-color));
+  border-radius: 10px;
+  background: var(--app-card-bg, #fafafa);
+  word-break: break-all;
+}
+
+.scenario-step-result-tabs :deep(.el-tabs__header) {
+  margin-bottom: 12px;
+}
+
+.response-detail-tabs {
+  width: 100%;
+}
+
+.response-detail-tabs--subtle :deep(.el-tabs__header) {
+  margin-bottom: 8px;
+}
+
+.response-detail-tabs--subtle :deep(.el-tabs__nav-wrap::after) {
+  height: 1px;
+  background: var(--app-border-color, var(--el-border-color));
+}
+
+.response-detail-tabs--subtle :deep(.el-tabs__item) {
+  height: 30px;
+  padding: 0 10px;
+  color: var(--app-secondary-text, var(--el-text-color-secondary));
+  font-size: 12px;
+  line-height: 30px;
+}
+
+.response-detail-tabs--subtle :deep(.el-tabs__item.is-active) {
+  color: var(--el-color-primary);
+}
+
+.response-detail-tabs--subtle :deep(.el-tabs__active-bar) {
+  height: 2px;
+}
+
+.code-view--curl,
+.scenario-step-curl {
+  min-height: 160px;
+}
+
+.assertion-name {
+  font-size: var(--app-font-size-small, 13px);
+  font-weight: 500;
 }
 
 .method-select {
@@ -2779,13 +4680,9 @@ export default {
 }
 
 .body-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
   justify-content: space-between;
   margin-bottom: 8px;
-  color: var(--el-text-color-secondary);
-  font-size: 12px;
+  color: var(--app-secondary-text, var(--el-text-color-secondary));
 }
 
 .body-editor {
@@ -2857,7 +4754,8 @@ export default {
 .scenario-workspace .step-dialog-sidebar .step-case-list {
   flex: 1;
   overflow-y: auto;
-  padding: 0 8px 10px;
+  /* 控制流框底「+」一半伸出框外，需多留底边距以免被滚动区域裁切导致点不到 */
+  padding: 0 8px 32px;
 }
 
 .scenario-workspace .step-dialog-sidebar .step-sortable-root {

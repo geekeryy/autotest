@@ -7,7 +7,9 @@ import (
 	"os"
 	"time"
 
+	"autotest/internal/aiprovider"
 	"autotest/internal/auth"
+	"autotest/internal/projectprompt"
 	testcase "autotest/internal/case"
 	"autotest/internal/generator"
 	"autotest/internal/httpx"
@@ -61,6 +63,10 @@ func main() {
 	mockServerRepo := mockserver.NewRepository(repo)
 	mockServerRuntime := mockserver.NewRuntime(mockServerRepo)
 	mockServerSvc := mockserver.NewService(mockServerRepo, mockServerRuntime)
+	aiProviderRepo := aiprovider.NewRepository(repo)
+	aiProviderSvc := aiprovider.NewService(aiProviderRepo)
+	projectPromptRepo := projectprompt.NewRepository(repo)
+	projectPromptSvc := projectprompt.NewService(projectPromptRepo)
 	caseRunner := runner.New(nil, nil, reportRepo)
 	runSvc := runner.NewService(caseSvc, projectSvc, reportRepo, caseRunner, paramSourceSvc)
 
@@ -90,6 +96,8 @@ func main() {
 		paramsource.NewHandler(paramSourceSvc).Register(r)
 		scriptlibrary.NewHandler(scriptLibrarySvc).Register(r)
 		mockserver.NewHandler(mockServerSvc, projectHandler).Register(r)
+		projectprompt.NewHandler(projectPromptSvc, projectHandler).Register(r)
+		aiprovider.NewHandler(aiProviderSvc, projectHandler, projectPromptSvc).Register(r)
 		runner.NewHandler(runSvc, scenarioRepo).Register(r)
 	})
 	r.Mount("/api/v1", api)

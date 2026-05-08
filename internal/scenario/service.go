@@ -55,6 +55,11 @@ func (s *Service) UpsertStep(ctx context.Context, scenarioID uuid.UUID, input Up
 	if input.StepType == "" {
 		input.StepType = StepTypeAPI
 	}
+	if input.AttachUnderParent != nil {
+		if err := validateAttachUnderParent(input.AttachUnderParent); err != nil {
+			return nil, err
+		}
+	}
 	switch input.StepType {
 	case StepTypeAPI:
 		if input.TestCaseID == uuid.Nil {
@@ -71,7 +76,19 @@ func (s *Service) UpsertStep(ctx context.Context, scenarioID uuid.UUID, input Up
 	default:
 		return nil, errors.New("stepType must be api, database, script, for or condition")
 	}
-	return s.repo.UpsertStep(ctx, scenarioID, input)
+	attach := input.AttachUnderParent
+	input.AttachUnderParent = nil
+
+	step, err := s.repo.UpsertStep(ctx, scenarioID, input)
+	if err != nil {
+		return nil, err
+	}
+	if attach != nil {
+		if err := s.attachStepUnderParent(ctx, scenarioID, step, *attach); err != nil {
+			return nil, err
+		}
+	}
+	return step, nil
 }
 
 func (s *Service) DeleteStep(ctx context.Context, stepID uuid.UUID) error {

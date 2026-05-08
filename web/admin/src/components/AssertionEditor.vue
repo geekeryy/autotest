@@ -114,6 +114,17 @@
         <template v-else-if="row.type === 'script'">
           <span class="script-hint">JavaScript (Postman 兼容 pm API)</span>
           <ScriptLibraryPicker variant="assertion" class="script-library-inline" @append="appendScriptSnippet(row, $event)" />
+          <el-button
+            size="small"
+            type="primary"
+            plain
+            class="script-library-inline"
+            :loading="aiBusyRow === row"
+            :disabled="!!aiBusyRow && aiBusyRow !== row"
+            @click="openAIGenerator(row)"
+          >
+            AI 生成
+          </el-button>
         </template>
 
         <el-button
@@ -148,11 +159,20 @@ pm.test('业务码为 0', () => {
     <el-button link type="primary" size="small" class="add-btn" @click="addRow">
       + 新增断言
     </el-button>
+
+    <AIGenerateDialog
+      v-model="aiDialogVisible"
+      action="generate_assertion"
+      :context="aiContext"
+      @apply="onAIApply"
+      @generation-settled="aiBusyRow = null"
+    />
   </div>
 </template>
 
 <script>
 import ScriptLibraryPicker from './ScriptLibraryPicker.vue'
+import AIGenerateDialog from './AIGenerateDialog.vue'
 
 const NO_EXPECTED_OPS = new Set([
   'exists', 'not_exists', 'is_null', 'is_not_null', 'is_empty', 'is_not_empty'
@@ -288,11 +308,15 @@ function specToRow(spec) {
 
 export default {
   name: 'AssertionEditor',
-  components: { ScriptLibraryPicker },
+  components: { ScriptLibraryPicker, AIGenerateDialog },
   props: {
     modelValue: {
       type: Array,
       default: () => []
+    },
+    aiResponseSnapshot: {
+      type: Object,
+      default: () => null
     }
   },
   emits: ['update:modelValue'],
@@ -302,10 +326,16 @@ export default {
       /** 避免 v-model 回写时整表替换 rows，否则 el-select 选完后弹层无法收起 */
       skipModelValueApply: false,
       headerOps: HEADER_OPS,
-      jsonpathOps: JSONPATH_OPS
+      jsonpathOps: JSONPATH_OPS,
+      aiDialogVisible: false,
+      aiTargetRow: null,
+      aiBusyRow: null
     }
   },
   watch: {
+    aiDialogVisible(val) {
+      if (!val) this.aiBusyRow = null
+    },
     modelValue: {
       immediate: true,
       handler(val) {
@@ -343,6 +373,26 @@ export default {
       const cur = row.script || ''
       const next = cur.trim() ? `${cur.trim()}\n\n${code}` : code
       row.script = next
+    },
+    openAIGenerator(row) {
+      this.aiTargetRow = row
+      this.aiBusyRow = row
+      this.aiDialogVisible = true
+    },
+    onAIApply(payload) {
+      const code = (payload?.text || '').trim()
+      if (!code || !this.aiTargetRow) return
+      this.appendScriptSnippet(this.aiTargetRow, code)
+      this.aiTargetRow = null
+    }
+  },
+  computed: {
+    aiContext() {
+      const snapshot = this.aiResponseSnapshot || null
+      return {
+        existingAssertions: this.rows,
+        responseSnapshot: snapshot
+      }
     }
   }
 }

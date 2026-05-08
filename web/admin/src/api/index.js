@@ -112,6 +112,29 @@ export const upsertScenarioStep = (scenarioId, stepOrder, data) =>
 export const deleteScenarioStep = (scenarioId, stepId) => request.delete(`/scenarios/${scenarioId}/steps/${stepId}`)
 export const runScenario = (scenarioId, data) => request.post(`/scenarios/${scenarioId}/run`, data)
 
+// AI providers (per-project) and AI invocation
+export const listAIProviderTypes = () => request.get('/ai-provider-types').then(asList)
+export const listAIProviders = (projectId) => request.get(`/projects/${projectId}/ai-providers`).then(asList)
+export const createAIProvider = (projectId, data) => request.post(`/projects/${projectId}/ai-providers`, data)
+export const updateAIProvider = (projectId, providerId, data) =>
+  request.put(`/projects/${projectId}/ai-providers/${providerId}`, data)
+export const deleteAIProvider = (projectId, providerId) =>
+  request.delete(`/projects/${projectId}/ai-providers/${providerId}`)
+export const testAIProvider = (projectId, providerId) =>
+  request.post(`/projects/${projectId}/ai-providers/${providerId}/test`, undefined, { timeout: 45000 })
+export const aiChat = (projectId, data) =>
+  request.post(`/projects/${projectId}/ai/chat`, data, { timeout: 120000 })
+
+// Project AI Prompts (per-project prompt config)
+export const listProjectAIPrompts = (projectId) =>
+  request.get(`/projects/${projectId}/ai-prompts`).then(asList)
+export const createProjectAIPrompt = (projectId, data) =>
+  request.post(`/projects/${projectId}/ai-prompts`, data)
+export const updateProjectAIPrompt = (projectId, promptId, data) =>
+  request.put(`/projects/${projectId}/ai-prompts/${promptId}`, data)
+export const deleteProjectAIPrompt = (projectId, promptId) =>
+  request.delete(`/projects/${projectId}/ai-prompts/${promptId}`)
+
 /** @param {string} projectId */
 export const listScriptLibraryTemplates = (projectId) =>
   request.get('/script-library-templates', { params: { projectId } }).then(asList)

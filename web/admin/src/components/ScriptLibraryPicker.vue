@@ -1,11 +1,12 @@
 <template>
   <div class="script-library-picker">
+    <!-- 勿用 v-model:visible：受控模式下 trigger=click 无效，点击按钮不会展开 -->
     <el-popover
-      v-model:visible="popoverOpen"
+      ref="popoverRef"
       placement="bottom-start"
       :width="420"
       trigger="click"
-      @update:visible="onPopoverVisible"
+      @show="fetchLibraryTemplates"
     >
       <template #reference>
         <el-button size="small" type="primary" plain>
@@ -38,7 +39,7 @@
           <el-empty v-else description="无匹配模板" :image-size="48" />
         </el-scrollbar>
         <div class="script-library-footer">
-          <router-link v-if="projectId" to="/script-library" class="script-library-manage-link" @click="popoverOpen = false">
+          <router-link v-if="projectId" to="/script-library" class="script-library-manage-link" @click="hidePopover">
             管理脚本模板
           </router-link>
           <template v-if="projectId">
@@ -70,7 +71,6 @@ export default {
   data() {
     return {
       query: '',
-      popoverOpen: false,
       libraryTemplates: [],
       libraryLoading: false,
       projectState
@@ -98,8 +98,8 @@ export default {
     }
   },
   methods: {
-    onPopoverVisible(visible) {
-      if (visible) this.fetchLibraryTemplates()
+    hidePopover() {
+      this.$refs.popoverRef?.hide?.()
     },
     async fetchLibraryTemplates() {
       const pid = this.projectId
@@ -120,6 +120,7 @@ export default {
       const code = item.code || ''
       if (!code) return
       this.$emit('append', code)
+      this.hidePopover()
     }
   }
 }
