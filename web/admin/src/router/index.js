@@ -6,11 +6,13 @@ import Dashboard from '../views/Dashboard.vue'
 import ProjectManagement from '../views/projects/ProjectManagement.vue'
 import SQLParameterSourceList from '../views/data/SQLParameterSourceList.vue'
 import MockServerList from '../views/data/MockServerList.vue'
+import TestDataTableList from '../views/data/TestDataTableList.vue'
 import SpecImport from '../views/spec/SpecImport.vue'
 import CaseList from '../views/cases/CaseList.vue'
 import CaseRunWorkspace from '../views/cases/CaseRunWorkspace.vue'
 import ScenarioList from '../views/scenarios/ScenarioList.vue'
 import ScriptLibraryList from '../views/scriptlib/ScriptLibraryList.vue'
+import TemplateReference from '../views/platform/TemplateReference.vue'
 import UserList from '../views/rbac/UserList.vue'
 import RoleList from '../views/rbac/RoleList.vue'
 import PermissionList from '../views/rbac/PermissionList.vue'
@@ -25,7 +27,8 @@ export const menuRoutes = [
     meta: { title: '测试数据', permission: 'projects:read' },
     children: [
       { path: '/sql-parameter-sources', component: SQLParameterSourceList, meta: { title: 'SQL 参数源', permission: 'projects:read' } },
-      { path: '/mock-servers', component: MockServerList, meta: { title: 'Mock Server', permission: 'projects:read' } }
+      { path: '/mock-servers', component: MockServerList, meta: { title: 'Mock Server', permission: 'projects:read' } },
+      { path: '/test-data-tables', component: TestDataTableList, meta: { title: '测试数据表', permission: 'projects:read' } }
     ]
   },
   {
@@ -59,7 +62,8 @@ export const menuRoutes = [
     redirect: '/script-library',
     meta: { title: '平台资源' },
     children: [
-      { path: '/script-library', component: ScriptLibraryList, meta: { title: '脚本库', permission: 'cases:read' } }
+      { path: '/script-library', component: ScriptLibraryList, meta: { title: '脚本库', permission: 'cases:read' } },
+      { path: '/template-reference', component: TemplateReference, meta: { title: '模板与变量参考' } }
     ]
   },
   {

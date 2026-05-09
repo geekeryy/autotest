@@ -86,14 +86,15 @@ func validateUpdate(in UpdateInput) error {
 	if strings.TrimSpace(in.Code) == "" {
 		return errors.New("code is required")
 	}
-	scopes := normalizeScopes(in.Scopes)
-	if len(scopes) == 0 {
+	// 当用户主动传入 scopes 时，必须至少包含一个有效作用域（assertion 或 scenario）；
+	// 留空才允许回退到默认值（兼容旧客户端不传该字段的场景）。
+	if len(in.Scopes) > 0 && len(filterValidScopes(in.Scopes)) == 0 {
 		return errors.New("scopes must include at least one of assertion, scenario")
 	}
 	return nil
 }
 
-func normalizeScopes(scopes []string) []string {
+func filterValidScopes(scopes []string) []string {
 	seen := map[string]struct{}{}
 	var out []string
 	for _, raw := range scopes {
@@ -106,6 +107,11 @@ func normalizeScopes(scopes []string) []string {
 			}
 		}
 	}
+	return out
+}
+
+func normalizeScopes(scopes []string) []string {
+	out := filterValidScopes(scopes)
 	if len(out) == 0 {
 		return []string{scopeAssertion, scopeScenario}
 	}

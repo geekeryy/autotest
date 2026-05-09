@@ -225,8 +225,9 @@
         </el-form-item>
         <el-form-item label="响应体">
           <div class="json-field">
-            <div class="json-toolbar">
+            <div class="json-toolbar json-toolbar-stack">
               <span>可引用请求参数，例如 &#123;&#123;request.pathvar.id&#125;&#125;、&#123;&#123;request.query.name&#125;&#125;、&#123;&#123;request.body.user.id&#125;&#125;。</span>
+              <span>支持运行时模拟数据标签 &#123;&#123;$mock.uuid&#125;&#125;、&#123;&#123;$mock.now&#125;&#125;、&#123;&#123;$mock.email&#125;&#125;、&#123;&#123;$mock.int(1,100)&#125;&#125;、&#123;&#123;$mock.pick(a,b,c)&#125;&#125; 等，每次请求实时生成新值。</span>
             </div>
             <el-input v-model="routeForm.responseBody" class="body-editor" type="textarea" :autosize="{ minRows: 8, maxRows: 18 }" @blur="formatRouteResponseBody" />
           </div>
@@ -1232,6 +1233,12 @@ export default {
   margin-bottom: 8px;
   color: var(--app-secondary-text);
   font-size: var(--app-font-size-small);
+}
+
+.json-toolbar-stack {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
 }
 
 .json-editor :deep(textarea),

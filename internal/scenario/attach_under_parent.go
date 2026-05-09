@@ -99,20 +99,26 @@ type normalizedCondition struct {
 }
 
 type conditionBranchNorm struct {
-	Left, Operator, Right string
-	StepSeqs                []int `json:"stepSeqs"`
+	Left     string `json:"left"`
+	Operator string `json:"operator"`
+	Right    string `json:"right"`
+	StepSeqs []int  `json:"stepSeqs"`
 }
 
 func parseConditionConfig(raw []byte) (*normalizedCondition, error) {
 	raw = normalizeJSONObj(raw)
 	var cfg struct {
 		Branches []struct {
-			Left, Operator, Right string
-			StepSeqs                []int `json:"stepSeqs"`
+			Left     string `json:"left"`
+			Operator string `json:"operator"`
+			Right    string `json:"right"`
+			StepSeqs []int  `json:"stepSeqs"`
 		} `json:"branches"`
-		ElseStepSeqs []int `json:"elseStepSeqs"`
-		Left, Operator, Right string
-		ThenStepSeqs []int `json:"thenStepSeqs"`
+		ElseStepSeqs []int  `json:"elseStepSeqs"`
+		Left         string `json:"left"`
+		Operator     string `json:"operator"`
+		Right        string `json:"right"`
+		ThenStepSeqs []int  `json:"thenStepSeqs"`
 	}
 	if err := json.Unmarshal(raw, &cfg); err != nil {
 		return nil, err
@@ -137,7 +143,7 @@ func parseConditionConfig(raw []byte) (*normalizedCondition, error) {
 func marshalConditionNorm(norm *normalizedCondition) ([]byte, error) {
 	type outT struct {
 		Branches     []conditionBranchNorm `json:"branches"`
-		ElseStepSeqs []int                `json:"elseStepSeqs"`
+		ElseStepSeqs []int                 `json:"elseStepSeqs"`
 	}
 	return json.Marshal(outT{
 		Branches:     norm.Branches,

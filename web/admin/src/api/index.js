@@ -155,3 +155,42 @@ export const setRolePermissions = (id, data) => request.put(`/roles/${id}/permis
 
 export const listPermissions = () => request.get('/permissions')
 export const createPermission = (data) => request.post('/permissions', data)
+
+export const listTestDataTables = (projectId) =>
+  request.get(`/projects/${projectId}/test-data-tables`).then(asList)
+export const getTestDataTable = (projectId, tableId) =>
+  request.get(`/projects/${projectId}/test-data-tables/${tableId}`)
+export const createTestDataTable = (projectId, data) =>
+  request.post(`/projects/${projectId}/test-data-tables`, data)
+export const updateTestDataTable = (projectId, tableId, data) =>
+  request.put(`/projects/${projectId}/test-data-tables/${tableId}`, data)
+export const deleteTestDataTable = (projectId, tableId) =>
+  request.delete(`/projects/${projectId}/test-data-tables/${tableId}`)
+export const listTestDataRows = (projectId, tableId) =>
+  request.get(`/projects/${projectId}/test-data-tables/${tableId}/rows`).then(asList)
+export const replaceTestDataRows = (projectId, tableId, rows) =>
+  request.put(`/projects/${projectId}/test-data-tables/${tableId}/rows`, { rows })
+/**
+ * 批量生成 N 行测试数据。AI 列由项目 Prompt 管理（generate_case_data）配置，
+ * 因此请求体不再接受 providerId。
+ * @param {string} projectId
+ * @param {string} tableId
+ * @param {{ rowCount: number, preserveManual?: boolean }} data
+ */
+export const generateTestDataRows = (projectId, tableId, data) =>
+  request.post(`/projects/${projectId}/test-data-tables/${tableId}/rows/generate`, {
+    rowCount: Number(data?.rowCount) || 1,
+    preserveManual: !!data?.preserveManual,
+  }, { timeout: 120000 })
+/**
+ * 按列重新生成单行单元格。AI 列同上由项目 Prompt 管理控制，请求体不再接受 providerId。
+ * @param {string} projectId
+ * @param {string} tableId
+ * @param {string} rowId
+ * @param {{ columnKeys: string[] }} data
+ */
+export const regenerateTestDataCells = (projectId, tableId, rowId, data) =>
+  request.post(`/projects/${projectId}/test-data-tables/${tableId}/rows/${rowId}/regenerate`, {
+    columnKeys: Array.isArray(data?.columnKeys) ? data.columnKeys.slice() : [],
+  }, { timeout: 120000 })
+export const listMockHelpers = () => request.get('/test-data/mock-helpers').then(asList)

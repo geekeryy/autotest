@@ -12,6 +12,7 @@ import (
 	"autotest/internal/project"
 	"autotest/internal/report"
 	"autotest/internal/scenario"
+	"autotest/internal/testdata"
 
 	"github.com/google/uuid"
 )
@@ -172,8 +173,9 @@ func (s *Service) executeAPIScenarioStep(
 	stepVars := copyVars(baseVars)
 	injectStepRefs(string(effectiveRequest), stepOutputs, stepVars)
 
-	// Collect and resolve SQL inline references.
+	// Collect and resolve SQL + test data inline references.
 	var inlineRefs []paramsource.InlineReference
+	var testDataRefs []testdata.InlineReference
 	var inlineScanErr error
 	if reqDef, decodeErr := decodeRequest(effectiveRequest); decodeErr == nil {
 		if reqDef.Method == "" {
@@ -183,14 +185,22 @@ func (s *Service) executeAPIScenarioStep(
 			reqDef.Path = tc.Path
 		}
 		inlineRefs, inlineScanErr = collectInlineSQLReferences(reqDef)
+		if inlineScanErr == nil {
+			testDataRefs, inlineScanErr = collectInlineTestDataReferences(reqDef)
+		}
 	}
 
 	variants := []caseRunVariant{{Variables: stepVars}}
 	var runErr error
 	if inlineScanErr != nil {
 		runErr = inlineScanErr
-	} else if len(inlineRefs) > 0 {
-		variants, runErr = s.applyInlineSQLReferences(ctx, tc, inlineRefs, variants)
+	} else {
+		if len(testDataRefs) > 0 {
+			variants, runErr = s.applyInlineTestDataReferences(ctx, tc.ProjectID, testDataRefs, variants)
+		}
+		if runErr == nil && len(inlineRefs) > 0 {
+			variants, runErr = s.applyInlineSQLReferences(ctx, tc, inlineRefs, variants)
+		}
 	}
 
 	if runErr != nil {

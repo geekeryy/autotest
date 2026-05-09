@@ -118,11 +118,11 @@ func (r *Repository) List(ctx context.Context, filter ListFilter) ([]TestCase, e
 	`
 	var args []any
 	where := []string{"tc.deleted_at is null", "tc.source != 'derived'"}
-	if filter.ProjectID.String() != "00000000-0000-0000-0000-000000000000" {
+	if filter.ProjectID != uuid.Nil {
 		args = append(args, filter.ProjectID)
 		where = append(where, fmt.Sprintf("tc.project_id = $%d", len(args)))
 	}
-	if filter.ServiceID.String() != "00000000-0000-0000-0000-000000000000" {
+	if filter.ServiceID != uuid.Nil {
 		args = append(args, filter.ServiceID)
 		where = append(where, fmt.Sprintf("tc.service_id = $%d", len(args)))
 	}

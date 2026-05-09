@@ -27,15 +27,36 @@ type RequestSample struct {
 	Security any               `json:"security,omitempty"`
 }
 
-// FromSchema generates a RequestSample from a stored requestSchema JSON blob.
-// It covers query parameters, request headers, path variables and the JSON body.
+// Options tweaks how FromSchemaWithOptions generates fallback values.
+type Options struct {
+	// PreferMockTags makes the sampler emit `{{$mock.<helper>}}` placeholder
+	// strings (instead of concrete random values) for *string* fields whose
+	// format or name maps to a runtime mock helper. Non-string fields and
+	// strings without a clear semantic mapping continue to receive concrete
+	// random values so the generated body remains a valid JSON shape. The
+	// example → default → enum precedence still wins over mock tags.
+	//
+	// The runner's `mockdata.Expand` evaluates the placeholders on each
+	// request, so users no longer need to re-click "生成参数" to refresh
+	// dynamic fields like uuid / email / createdAt between runs.
+	PreferMockTags bool
+}
+
+// FromSchema generates a RequestSample with the default options. It is kept
+// for callers (e.g. the OpenAPI importer / generator package) that want
+// stable concrete values baked into the saved template at creation time.
+func FromSchema(raw json.RawMessage) RequestSample {
+	return FromSchemaWithOptions(raw, Options{})
+}
+
+// FromSchemaWithOptions is the configurable variant. See Options for details.
 //
 // For each field the precedence is: example → default → enum[0] → semantic
 // fallback derived from the field name and JSON schema format. The fallback
-// path always returns a freshly randomised value so that calling FromSchema
-// repeatedly produces different samples for fields that lack an explicit
-// example/default/enum.
-func FromSchema(raw json.RawMessage) RequestSample {
+// path produces fresh randomised values (or `{{$mock.<helper>}}` placeholders
+// when Options.PreferMockTags is set) so callers can opt in to runtime-time
+// random generation without losing the stable importer behaviour.
+func FromSchemaWithOptions(raw json.RawMessage, opts Options) RequestSample {
 	sample := RequestSample{
 		Headers: map[string]string{},
 		Query:   map[string]string{},
@@ -56,7 +77,7 @@ func FromSchema(raw json.RawMessage) RequestSample {
 			if name == "" {
 				continue
 			}
-			value := toString(valueFromSchema(name, schemaMap(param["schema"])))
+			value := toString(valueFromSchema(name, schemaMap(param["schema"]), opts))
 			switch location {
 			case "query":
 				sample.Query[name] = value
@@ -70,7 +91,7 @@ func FromSchema(raw json.RawMessage) RequestSample {
 
 	body, _ := request["body"].(map[string]any)
 	if body != nil {
-		sample.Body = valueFromSchema("", body)
+		sample.Body = valueFromSchema("", body, opts)
 		if _, ok := sample.Headers["Content-Type"]; !ok {
 			sample.Headers["Content-Type"] = "application/json"
 		}
@@ -108,7 +129,7 @@ func toString(value any) string {
 // valueFromSchema picks a sample value for the given field. The fieldName is
 // used for semantic-aware fallback (e.g. a string field named "email" yields
 // a random email address) when the schema does not provide example/default/enum.
-func valueFromSchema(fieldName string, schema map[string]any) any {
+func valueFromSchema(fieldName string, schema map[string]any, opts Options) any {
 	if example, ok := schema["example"]; ok {
 		return example
 	}
@@ -122,7 +143,7 @@ func valueFromSchema(fieldName string, schema map[string]any) any {
 		out := map[string]any{}
 		for _, item := range allOf {
 			itemSchema, _ := item.(map[string]any)
-			if sample, ok := valueFromSchema(fieldName, itemSchema).(map[string]any); ok {
+			if sample, ok := valueFromSchema(fieldName, itemSchema, opts).(map[string]any); ok {
 				for key, val := range sample {
 					out[key] = val
 				}
@@ -131,10 +152,10 @@ func valueFromSchema(fieldName string, schema map[string]any) any {
 		return out
 	}
 	if oneOf, ok := schema["oneOf"].([]any); ok && len(oneOf) > 0 {
-		return valueFromSchema(fieldName, schemaMap(oneOf[0]))
+		return valueFromSchema(fieldName, schemaMap(oneOf[0]), opts)
 	}
 	if anyOf, ok := schema["anyOf"].([]any); ok && len(anyOf) > 0 {
-		return valueFromSchema(fieldName, schemaMap(anyOf[0]))
+		return valueFromSchema(fieldName, schemaMap(anyOf[0]), opts)
 	}
 
 	schemaType, _ := schema["type"].(string)
@@ -150,10 +171,10 @@ func valueFromSchema(fieldName string, schema map[string]any) any {
 
 	switch schemaType {
 	case "object":
-		return objectSample(schema)
+		return objectSample(schema, opts)
 	case "array":
 		itemSchema, _ := schema["items"].(map[string]any)
-		return []any{valueFromSchema(fieldName, itemSchema)}
+		return []any{valueFromSchema(fieldName, itemSchema, opts)}
 	case "integer":
 		return integerSample(fieldName, schema)
 	case "number":
@@ -161,10 +182,10 @@ func valueFromSchema(fieldName string, schema map[string]any) any {
 	case "boolean":
 		return gofakeit.Bool()
 	case "string":
-		return stringSample(fieldName, schema)
+		return stringSample(fieldName, schema, opts)
 	default:
 		if props, _ := schema["properties"].(map[string]any); len(props) > 0 {
-			return objectSample(schema)
+			return objectSample(schema, opts)
 		}
 		// Last resort: use the example/default value verbatim when the type
 		// cannot be determined any other way.
@@ -201,12 +222,12 @@ func inferSchemaType(v any) string {
 	return ""
 }
 
-func objectSample(schema map[string]any) map[string]any {
+func objectSample(schema map[string]any, opts Options) map[string]any {
 	properties, _ := schema["properties"].(map[string]any)
 	out := make(map[string]any, len(properties))
 	for name, prop := range properties {
 		propSchema, _ := prop.(map[string]any)
-		out[name] = valueFromSchema(name, propSchema)
+		out[name] = valueFromSchema(name, propSchema, opts)
 	}
 	return out
 }
@@ -247,7 +268,18 @@ func numberSample(fieldName string, schema map[string]any) float64 {
 // schema.format is checked first; when no format hint is available, the field
 // name is inspected to produce a value that matches the field's likely
 // semantics. Every call returns a freshly generated value via gofakeit.
-func stringSample(fieldName string, schema map[string]any) string {
+//
+// When opts.PreferMockTags is set, fields whose semantics map to a runtime
+// mock helper return a `{{$mock.<helper>}}` placeholder string instead, so
+// the runner produces a fresh value on every request without forcing the
+// user to re-click the "生成参数" button between runs.
+func stringSample(fieldName string, schema map[string]any, opts Options) string {
+	if opts.PreferMockTags {
+		if tag := mockTagForString(fieldName, schema); tag != "" {
+			return tag
+		}
+	}
+
 	format, _ := schema["format"].(string)
 	switch format {
 	case "date-time":
@@ -322,6 +354,76 @@ func stringSample(fieldName string, schema map[string]any) string {
 	}
 
 	return gofakeit.Word()
+}
+
+// mockTagForString maps a string field's `format` and (failing that) its
+// normalised name to a runtime `{{$mock.<helper>}}` placeholder. It returns
+// an empty string when no helper is a good semantic match so the caller
+// falls back to a concrete random value. Helper names mirror the canonical
+// list documented by `internal/mockdata.ListHelpers`.
+//
+// Format and field-name patterns intentionally mirror stringSample: the only
+// difference is the *result* (placeholder vs. concrete value) so opting into
+// PreferMockTags does not silently lose semantic coverage.
+func mockTagForString(fieldName string, schema map[string]any) string {
+	format, _ := schema["format"].(string)
+	switch format {
+	case "date-time":
+		return "{{$mock.dateTime}}"
+	case "date":
+		return "{{$mock.date}}"
+	case "email":
+		return "{{$mock.email}}"
+	case "uuid":
+		return "{{$mock.uuid}}"
+	case "uri", "url":
+		return "{{$mock.url}}"
+	case "ipv4":
+		return "{{$mock.ipv4}}"
+	case "ipv6":
+		return "{{$mock.ipv6}}"
+	}
+
+	switch normalizeFieldName(fieldName) {
+	case "id", "uuid", "uid", "guid":
+		return "{{$mock.uuid}}"
+	case "name", "fullname", "displayname", "username", "user":
+		return "{{$mock.name}}"
+	case "firstname":
+		return "{{$mock.firstName}}"
+	case "lastname", "surname":
+		return "{{$mock.lastName}}"
+	case "email", "mail":
+		return "{{$mock.email}}"
+	case "phone", "mobile", "tel", "telephone":
+		return "{{$mock.phone}}"
+	case "url", "uri", "link", "website":
+		return "{{$mock.url}}"
+	case "address":
+		return "{{$mock.address}}"
+	case "city":
+		return "{{$mock.city}}"
+	case "country":
+		return "{{$mock.country}}"
+	case "color", "colour":
+		return "{{$mock.color}}"
+	case "company", "organization", "org":
+		return "{{$mock.company}}"
+	case "createdat", "updatedat", "deletedat", "timestamp", "datetime":
+		return "{{$mock.dateTime}}"
+	case "ip", "ipaddress":
+		return "{{$mock.ipv4}}"
+	case "token", "accesstoken", "secret", "apikey":
+		return "{{$mock.string(32)}}"
+	case "description", "summary", "content", "remark", "comment":
+		return "{{$mock.sentence(8)}}"
+	case "role":
+		return "{{$mock.pick(admin,tester,viewer,developer)}}"
+	case "status":
+		return "{{$mock.pick(active,inactive,pending)}}"
+	}
+
+	return ""
 }
 
 // normalizeFieldName lowercases and strips common separators so that

@@ -119,10 +119,39 @@ import { persistServiceId, readStoredServiceId } from '../../utils/serviceSelect
 import CaseRun from './CaseRun.vue'
 
 const SIDEBAR_WIDTH_STORAGE_KEY = 'autotest.runConsoleApiSidebarWidth'
+const WORKSPACE_STATE_STORAGE_KEY = 'autotest.runConsoleWorkspaceStateByProject'
 const SIDEBAR_MIN = 200
 const SIDEBAR_MAX = 720
 const SIDEBAR_DEFAULT = 320
 const LAYOUT_NARROW_MQ = '(max-width: 1100px)'
+const MAX_STORED_TABS = 20
+
+function readStoredWorkspaceStates() {
+  try {
+    const raw = localStorage.getItem(WORKSPACE_STATE_STORAGE_KEY)
+    const stored = raw ? JSON.parse(raw) : {}
+    return stored && typeof stored === 'object' && !Array.isArray(stored) ? stored : {}
+  } catch {
+    return {}
+  }
+}
+
+function getStoredWorkspaceState(projectId) {
+  if (!projectId) return null
+  const state = readStoredWorkspaceStates()[projectId]
+  return state && typeof state === 'object' && !Array.isArray(state) ? state : null
+}
+
+function storeWorkspaceState(projectId, state) {
+  if (!projectId) return
+  try {
+    const stored = readStoredWorkspaceStates()
+    stored[projectId] = state
+    localStorage.setItem(WORKSPACE_STATE_STORAGE_KEY, JSON.stringify(stored))
+  } catch {
+    // Ignore storage failures; the current workspace state still works in memory.
+  }
+}
 
 function emptySummary() {
   return { running: false, runStatus: '', resultStatus: '', durationMillis: null }
@@ -182,12 +211,14 @@ export default {
         if (panels) panels.scrollTop = 0
       })
     },
-    projectId(newValue, oldValue) {
+    async projectId(newValue, oldValue) {
       if (this.initializing || newValue === oldValue) return
       this.tabs = []
       this.activeCaseId = ''
-      this.loadTree()
-      this.syncRoute('')
+      await this.loadTree()
+      const routeCaseId = this.$route.params.caseID
+      const restored = await this.restoreWorkspaceState({ activeCaseId: routeCaseId, syncRoute: !routeCaseId })
+      if (!restored && !routeCaseId) this.syncRoute('')
     },
     '$route.params.caseID'(caseID) {
       if (!caseID || this.tabs.some((tab) => tab.id === caseID)) {
@@ -214,7 +245,15 @@ export default {
         }
       }
       await this.loadTree()
-      if (initialCase) this.openCase(initialCase, { sync: false })
+      const restored = await this.restoreWorkspaceState({
+        activeCaseId: initialCase?.id || '',
+        syncRoute: !initialCase
+      })
+      if (initialCase && !this.tabs.some((tab) => tab.id === initialCase.id)) {
+        this.openCase(initialCase, { sync: false })
+      } else if (!restored && initialCase) {
+        this.activeCaseId = initialCase.id
+      }
     } finally {
       this.initializing = false
     }
@@ -246,6 +285,59 @@ export default {
       } catch {
         /* ignore */
       }
+    },
+    persistWorkspaceState() {
+      if (!this.projectId) return
+      storeWorkspaceState(this.projectId, {
+        activeCaseId: this.activeCaseId,
+        tabs: this.tabs.slice(0, MAX_STORED_TABS).map((tab) => ({
+          id: tab.id,
+          name: tab.name,
+          method: tab.method,
+          path: tab.path
+        }))
+      })
+    },
+    async restoreWorkspaceState(options = {}) {
+      const stored = getStoredWorkspaceState(this.projectId)
+      const storedTabs = Array.isArray(stored?.tabs) ? stored.tabs.slice(0, MAX_STORED_TABS) : []
+      if (!storedTabs.length) return false
+
+      const restoredTabs = await Promise.all(storedTabs.map(async (tab) => {
+        if (!tab?.id) return null
+        try {
+          const testCase = await getCase(tab.id)
+          if (testCase.projectId && testCase.projectId !== this.projectId) return null
+          return {
+            id: testCase.id,
+            name: tab.name || this.caseTabName(testCase),
+            method: testCase.method,
+            path: testCase.path,
+            summary: emptySummary()
+          }
+        } catch {
+          return null
+        }
+      }))
+
+      this.tabs = restoredTabs.filter(Boolean)
+      if (!this.tabs.length) {
+        this.activeCaseId = ''
+        this.persistWorkspaceState()
+        return false
+      }
+
+      const preferredActiveId = options.activeCaseId || ''
+      if (preferredActiveId && this.tabs.some((tab) => tab.id === preferredActiveId)) {
+        this.activeCaseId = preferredActiveId
+      } else {
+        this.activeCaseId = this.tabs.some((tab) => tab.id === stored.activeCaseId)
+          ? stored.activeCaseId
+          : this.tabs[0].id
+      }
+      if (options.syncRoute !== false) this.syncRoute(this.activeCaseId)
+      this.persistWorkspaceState()
+      return true
     },
     initLayoutMediaQuery() {
       if (typeof window === 'undefined' || !window.matchMedia) return
@@ -482,6 +574,7 @@ export default {
       if (existed) {
         this.activeCaseId = caseId
         if (options.sync !== false) this.syncRoute(caseId)
+        this.persistWorkspaceState()
         return
       }
       const testCase = await getCase(caseId)
@@ -505,10 +598,12 @@ export default {
       }
       this.activeCaseId = testCase.id
       if (options.sync !== false) this.syncRoute(testCase.id)
+      this.persistWorkspaceState()
     },
     closeTab(caseId) {
       const index = this.tabs.findIndex((tab) => tab.id === caseId)
       if (index < 0) return
+      this.caseRunRefs[caseId]?.clearLocalDraft?.()
       const wasActive = this.activeCaseId === caseId
       this.tabs.splice(index, 1)
       if (wasActive) {
@@ -516,6 +611,7 @@ export default {
         this.activeCaseId = next?.id || ''
         this.syncRoute(this.activeCaseId)
       }
+      this.persistWorkspaceState()
     },
     updateTabStatus(caseId, summary) {
       const tab = this.tabs.find((item) => item.id === caseId)
@@ -525,6 +621,7 @@ export default {
     onTabTitleChange({ caseId, name }) {
       const tab = this.tabs.find((item) => item.id === caseId)
       if (tab) tab.name = name
+      this.persistWorkspaceState()
     },
     setCaseRunRef(caseId, el) {
       if (el) {
@@ -538,6 +635,7 @@ export default {
       if (this.$route.path !== target) {
         this.$router.replace(target)
       }
+      this.persistWorkspaceState()
     },
     filterTree(nodes, keyword) {
       return nodes.reduce((items, node) => {

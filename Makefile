@@ -81,8 +81,8 @@ web-dev: ## 启动管理后台前端开发服务。
 web-build: ## 构建管理后台前端产物。
 	npm --prefix web/admin run build
 
-test: ## 运行 Go 测试。
-	go test ./...
+test: ## 运行 Go 测试（显式包含 testdata 包，因为 `./...` 默认排除 testdata 目录）。
+	go test ./... ./internal/testdata
 
 down: ## DB_MANAGED=docker 时停止 docker compose 服务。
 	@if [ "$(DB_MANAGED)" = "docker" ]; then \

@@ -399,6 +399,7 @@
                     <div class="inline-sql-hint scenario-request-hint">
                       Path Vars 的值会直接嵌入路径；Query、Headers 和 Body 作为请求覆盖保存。
                       后续步骤可通过 <code v-pre>{{$steps[N].xxx}}</code> 引用本步骤输出，N 为左侧 <strong>#序号</strong>。
+                      支持运行时模拟数据标签 <code v-pre>{{$mock.uuid}}</code>、<code v-pre>{{$mock.now}}</code>、<code v-pre>{{$mock.email}}</code>、<code v-pre>{{$mock.int(1,100)}}</code>、<code v-pre>{{$mock.pick(a,b,c)}}</code> 等，每次请求实时生成新值。
                     </div>
                 </template>
 

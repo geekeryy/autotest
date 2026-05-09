@@ -33,7 +33,14 @@ func (r *Repository) CreateServer(ctx context.Context, projectID uuid.UUID, inpu
 		where p.id = $1 and p.deleted_at is null
 		returning id, project_id, name, description, port, created_at, updated_at
 	`, projectID, input.Name, input.Description, input.Port)
-	return scanServer(row)
+	server, err := scanServer(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("project not found or inaccessible")
+		}
+		return nil, fmt.Errorf("create mock server: %w", err)
+	}
+	return server, nil
 }
 
 // ListServers returns active mock servers in a project.

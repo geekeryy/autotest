@@ -74,6 +74,34 @@ func TestWriteMockResponseRendersRequestReferences(t *testing.T) {
 	}
 }
 
+func TestWriteMockResponseExpandsMockDataTokens(t *testing.T) {
+	route := testRoute(http.MethodGet, "/api/users/{id}")
+	route.ResponseBody = `{"id":"{{request.pathvar.id}}","trace":"{{$mock.uuid}}","email":"{{$mock.email}}"}`
+	req := httptest.NewRequest(http.MethodGet, "/api/users/42", nil)
+	recorder := httptest.NewRecorder()
+
+	writeMockResponse(recorder, req, route, nil)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	var got map[string]any
+	if err := json.Unmarshal(recorder.Body.Bytes(), &got); err != nil {
+		t.Fatalf("response body is not JSON: %v; body=%s", err, recorder.Body.String())
+	}
+	if got["id"] != "42" {
+		t.Fatalf("id = %v, want path variable to render", got["id"])
+	}
+	trace, _ := got["trace"].(string)
+	if _, err := uuid.Parse(trace); err != nil {
+		t.Fatalf("trace = %v, want uuid (%v)", got["trace"], err)
+	}
+	email, _ := got["email"].(string)
+	if !strings.Contains(email, "@") {
+		t.Fatalf("email = %v, want email-like value", got["email"])
+	}
+}
+
 func TestWriteMockResponseReportsMissingRequestReference(t *testing.T) {
 	route := testRoute(http.MethodGet, "/api/users/{id}")
 	route.ResponseBody = `{"missing":"{{request.query.missing}}"}`

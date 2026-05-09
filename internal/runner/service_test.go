@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -120,6 +121,93 @@ func TestBuildHTTPRequestRendersNestedBodyVariables(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("expected snapshot body to contain %s, got %s", want, got)
 		}
+	}
+}
+
+func TestRenderVariablesExpandsMockDataTokens(t *testing.T) {
+	t.Parallel()
+
+	got := renderVariables("user-{{$mock.uuid}}-{{tenant}}", map[string]string{
+		"tenant": "acme",
+	})
+	if !strings.HasSuffix(got, "-acme") {
+		t.Fatalf("expected variable to be substituted, got %q", got)
+	}
+	if !strings.HasPrefix(got, "user-") {
+		t.Fatalf("expected literal prefix preserved, got %q", got)
+	}
+	if strings.Contains(got, "$mock") || strings.Contains(got, "{{") {
+		t.Fatalf("expected mock token to be expanded, got %q", got)
+	}
+	id := strings.TrimSuffix(strings.TrimPrefix(got, "user-"), "-acme")
+	if _, err := uuid.Parse(id); err != nil {
+		t.Fatalf("expected uuid in expansion, got %q (%v)", id, err)
+	}
+}
+
+func TestBuildHTTPRequestExpandsMockTokensAcrossRequest(t *testing.T) {
+	t.Parallel()
+
+	req, snapshot, err := buildHTTPRequest(context.Background(), RequestDefinition{
+		Method:  "POST",
+		Path:    "/api/v1/users/{{$mock.uuid}}",
+		Headers: map[string]string{"X-Trace": "trace-{{$mock.uuid}}"},
+		Query:   map[string]string{"ts": "{{$mock.timestamp}}"},
+		Body: map[string]any{
+			"id":    "{{$mock.uuid}}",
+			"email": "{{$mock.email}}",
+		},
+	}, project.Environment{BaseURL: "https://example.test"}, nil)
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+
+	if strings.Contains(req.URL.Path, "$mock") {
+		t.Fatalf("expected URL path to be rendered, got %s", req.URL.String())
+	}
+	pathSegments := strings.Split(strings.Trim(req.URL.Path, "/"), "/")
+	pathID := pathSegments[len(pathSegments)-1]
+	if _, err := uuid.Parse(pathID); err != nil {
+		t.Fatalf("expected path uuid, got %q (%v)", pathID, err)
+	}
+
+	trace := req.Header.Get("X-Trace")
+	if !strings.HasPrefix(trace, "trace-") {
+		t.Fatalf("expected trace header to be rendered, got %q", trace)
+	}
+	if _, err := uuid.Parse(strings.TrimPrefix(trace, "trace-")); err != nil {
+		t.Fatalf("expected trace header uuid, got %q (%v)", trace, err)
+	}
+
+	tsRaw := req.URL.Query().Get("ts")
+	if tsRaw == "" || strings.Contains(tsRaw, "$mock") {
+		t.Fatalf("expected timestamp query value, got %q", tsRaw)
+	}
+
+	got := string(snapshot)
+	if !strings.Contains(got, "\"email\":") || strings.Contains(got, "$mock") {
+		t.Fatalf("expected body mock tokens replaced, snapshot=%s", got)
+	}
+
+	// The two body uuids should be independent (different) values.
+	type bodyShape struct {
+		Body struct {
+			ID    string `json:"id"`
+			Email string `json:"email"`
+		} `json:"body"`
+	}
+	var parsed bodyShape
+	if err := json.Unmarshal(snapshot, &parsed); err != nil {
+		t.Fatalf("snapshot JSON: %v", err)
+	}
+	if _, err := uuid.Parse(parsed.Body.ID); err != nil {
+		t.Fatalf("expected body id uuid, got %q (%v)", parsed.Body.ID, err)
+	}
+	if !strings.Contains(parsed.Body.Email, "@") {
+		t.Fatalf("expected email-like body field, got %q", parsed.Body.Email)
+	}
+	if parsed.Body.ID == pathID {
+		t.Fatalf("expected independent uuids per occurrence, got duplicate %q", parsed.Body.ID)
 	}
 }
 

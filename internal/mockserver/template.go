@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"autotest/internal/mockdata"
 )
 
 var mockResponseTemplateRE = regexp.MustCompile(`\{\{\s*([^{}]+?)\s*\}\}`)
@@ -25,6 +27,11 @@ func renderMockResponseBody(input string, route MockRoute, r *http.Request, body
 	if input == "" || !strings.Contains(input, "{{") {
 		return input, nil
 	}
+
+	// Expand runtime mock-data tokens (e.g. {{$mock.uuid}}) first so each
+	// occurrence emits an independent random value before the request.*
+	// reference resolver runs over the remaining placeholders.
+	input = mockdata.Expand(input)
 
 	matches := mockResponseTemplateRE.FindAllStringSubmatchIndex(input, -1)
 	if len(matches) == 0 {

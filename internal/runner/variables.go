@@ -6,12 +6,27 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"autotest/internal/mockdata"
 )
 
+// renderVariables substitutes Mustache placeholders in the input string.
+//
+// Substitution order matters and is performed each iteration:
+//  1. `{{$mock.*}}` runtime data tokens are expanded first so that every
+//     occurrence produces an independent random value.
+//  2. Regular `{{varName}}` placeholders are replaced from the vars map.
+//
+// The loop runs up to five times to support nested cases where a variable's
+// value itself contains another placeholder; mock-data tokens are
+// re-expanded each pass so values produced by chained substitutions remain
+// fully rendered while still emitting a fresh random value at the moment
+// they first appear.
 func renderVariables(input string, vars map[string]string) string {
 	rendered := input
 	for i := 0; i < 5; i++ {
 		before := rendered
+		rendered = mockdata.Expand(rendered)
 		for key, value := range vars {
 			if key == "" {
 				continue

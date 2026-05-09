@@ -12,6 +12,7 @@ import (
 	"autotest/internal/paramsource"
 	"autotest/internal/project"
 	"autotest/internal/report"
+	"autotest/internal/testdata"
 
 	"github.com/google/uuid"
 )
@@ -22,11 +23,19 @@ type Service struct {
 	reports  *report.Repository
 	runner   *Runner
 	params   parameterSourceService
+	testData testDataService
 }
 
 type parameterSourceService interface {
 	ExecuteInlineReferences(ctx context.Context, projectID, serviceID uuid.UUID, refs []paramsource.InlineReference, vars map[string]string) (map[string]string, []paramsource.ExecutionSnapshot, error)
 	ExecuteSQLStep(ctx context.Context, projectID, serviceID, environmentID uuid.UUID, input paramsource.SQLStepInput, vars map[string]string) (paramsource.SQLStepResult, error)
+}
+
+// testDataService is the minimal slice of `internal/testdata.Service` the
+// runner needs to resolve `{{$ds.*}}` references at run time. Defined locally
+// so tests can substitute a fake without dragging in the full service.
+type testDataService interface {
+	Resolve(ctx context.Context, projectID uuid.UUID, refs []testdata.InlineReference) (map[string]string, []testdata.Snapshot, error)
 }
 
 type RunCaseInput struct {
@@ -48,13 +57,14 @@ type RunResultOutput struct {
 	Results []report.Result `json:"results"`
 }
 
-func NewService(cases *testcase.Service, projects *project.ServiceLayer, reports *report.Repository, runner *Runner, params parameterSourceService) *Service {
+func NewService(cases *testcase.Service, projects *project.ServiceLayer, reports *report.Repository, runner *Runner, params parameterSourceService, testData testDataService) *Service {
 	return &Service{
 		cases:    cases,
 		projects: projects,
 		reports:  reports,
 		runner:   runner,
 		params:   params,
+		testData: testData,
 	}
 }
 
@@ -79,6 +89,7 @@ func (s *Service) RunCase(ctx context.Context, testCaseID uuid.UUID, input RunCa
 		effectiveCase.Request = effectiveRequest
 	}
 	var inlineRefs []paramsource.InlineReference
+	var testDataRefs []testdata.InlineReference
 	var inlineScanErr error
 	if reqDef, err := decodeRequest(effectiveRequest); err == nil {
 		if reqDef.Method == "" {
@@ -88,11 +99,19 @@ func (s *Service) RunCase(ctx context.Context, testCaseID uuid.UUID, input RunCa
 			reqDef.Path = tc.Path
 		}
 		inlineRefs, inlineScanErr = collectInlineSQLReferences(reqDef)
+		if inlineScanErr == nil {
+			testDataRefs, inlineScanErr = collectInlineTestDataReferences(reqDef)
+		}
 	}
 	if inlineScanErr == nil {
 		var variableRefs []paramsource.InlineReference
 		variableRefs, inlineScanErr = collectInlineSQLReferencesFromVariables(input.Variables)
 		inlineRefs = append(inlineRefs, variableRefs...)
+	}
+	if inlineScanErr == nil {
+		var dsVariableRefs []testdata.InlineReference
+		dsVariableRefs, inlineScanErr = collectInlineTestDataReferencesFromVariables(input.Variables)
+		testDataRefs = append(testDataRefs, dsVariableRefs...)
 	}
 
 	baseVars, err := mergeVariables(env.Variables, input.Variables)
@@ -109,7 +128,10 @@ func (s *Service) RunCase(ctx context.Context, testCaseID uuid.UUID, input RunCa
 	if inlineScanErr != nil {
 		runErr = inlineScanErr
 	} else {
-		variants, runErr = s.applyInlineSQLReferences(ctx, tc, inlineRefs, variants)
+		variants, runErr = s.applyInlineTestDataReferences(ctx, tc.ProjectID, testDataRefs, variants)
+		if runErr == nil {
+			variants, runErr = s.applyInlineSQLReferences(ctx, tc, inlineRefs, variants)
+		}
 	}
 	rawVars, _ := json.Marshal(variants[0].Variables)
 	rawParamSnapshots := paramsource.MarshalSnapshots(variants[0].ParameterSourceSnapshots)
@@ -121,6 +143,7 @@ func (s *Service) RunCase(ctx context.Context, testCaseID uuid.UUID, input RunCa
 		"environmentName":          env.Name,
 		"runName":                  runName,
 		"parameterSourceSnapshots": variants[0].ParameterSourceSnapshots,
+		"testDataSnapshots":        variants[0].TestDataSnapshots,
 	})
 
 	run, err := s.reports.CreateRun(ctx, report.CreateRunInput{
@@ -194,6 +217,32 @@ func (s *Service) applyInlineSQLReferences(ctx context.Context, tc *testcase.Tes
 	return variants, nil
 }
 
+// applyInlineTestDataReferences resolves `{{$ds.*}}` expressions for every
+// variant. Resolved values are written into each variant's variables so that
+// renderVariables can substitute them just like SQL inline references.
+func (s *Service) applyInlineTestDataReferences(ctx context.Context, projectID uuid.UUID, refs []testdata.InlineReference, variants []caseRunVariant) ([]caseRunVariant, error) {
+	if len(refs) == 0 {
+		return variants, nil
+	}
+	if s.testData == nil {
+		return variants, errors.New("test data service is unavailable")
+	}
+	for idx := range variants {
+		inlineVars, snapshots, err := s.testData.Resolve(ctx, projectID, refs)
+		variants[idx].TestDataSnapshots = append(variants[idx].TestDataSnapshots, snapshots...)
+		if err != nil {
+			return variants, err
+		}
+		if variants[idx].Variables == nil {
+			variants[idx].Variables = map[string]string{}
+		}
+		for key, value := range inlineVars {
+			variants[idx].Variables[key] = value
+		}
+	}
+	return variants, nil
+}
+
 func (s *Service) GetRunResult(ctx context.Context, runID uuid.UUID) (*RunResultOutput, error) {
 	if runID == uuid.Nil {
 		return nil, errors.New("runId is required")
@@ -235,6 +284,7 @@ func mergeVariables(raw json.RawMessage, overrides map[string]any) (map[string]s
 type caseRunVariant struct {
 	Variables                map[string]string
 	ParameterSourceSnapshots []paramsource.ExecutionSnapshot
+	TestDataSnapshots        []testdata.Snapshot
 }
 
 type caseRunVariantExecutor func(context.Context, caseRunVariant) (*report.Result, error)

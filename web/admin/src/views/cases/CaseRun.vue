@@ -592,10 +592,13 @@ const ASSERTION_TYPE_COLORS = {
 }
 
 const ENVIRONMENT_STORAGE_KEY = 'autotest.currentEnvironmentIdByProject'
+const REQUEST_DRAFT_STORAGE_KEY = 'autotest.runConsoleRequestDrafts'
 const BODY_SCHEMA_WIDTH_STORAGE_KEY = 'autotest.runConsole.bodySchemaPanelWidth'
 const BODY_SCHEMA_PANEL_MIN_WIDTH = 260
 const BODY_SCHEMA_PANEL_MAX_WIDTH = 760
 const BODY_SCHEMA_EDITOR_MIN_WIDTH = 320
+const REQUEST_DRAFT_MAX_ENTRIES = 80
+const REQUEST_TAB_NAMES = new Set(['params', 'headers', 'body', 'assertions'])
 
 function clampNumber(value, min, max) {
   return Math.min(Math.max(value, min), max)
@@ -659,6 +662,67 @@ function storeEnvironmentId(projectId, serviceId, environmentId) {
   }
 }
 
+function readStoredRequestDrafts() {
+  try {
+    const raw = localStorage.getItem(REQUEST_DRAFT_STORAGE_KEY)
+    const stored = raw ? JSON.parse(raw) : {}
+    return stored && typeof stored === 'object' && !Array.isArray(stored) ? stored : {}
+  } catch {
+    return {}
+  }
+}
+
+function getStoredRequestDraft(caseId) {
+  if (!caseId) return null
+  const draft = readStoredRequestDrafts()[caseId]
+  return draft && typeof draft === 'object' && !Array.isArray(draft) ? draft : null
+}
+
+function storeRequestDraft(caseId, draft) {
+  if (!caseId) return
+  try {
+    const stored = readStoredRequestDrafts()
+    stored[caseId] = draft
+    const entries = Object.entries(stored)
+    if (entries.length > REQUEST_DRAFT_MAX_ENTRIES) {
+      entries
+        .sort(([, left], [, right]) => Number(left?.updatedAt || 0) - Number(right?.updatedAt || 0))
+        .slice(0, entries.length - REQUEST_DRAFT_MAX_ENTRIES)
+        .forEach(([key]) => { delete stored[key] })
+    }
+    localStorage.setItem(REQUEST_DRAFT_STORAGE_KEY, JSON.stringify(stored))
+  } catch {
+    // Ignore storage failures; the draft remains usable for the current session.
+  }
+}
+
+function deleteStoredRequestDraft(caseId) {
+  if (!caseId) return
+  try {
+    const stored = readStoredRequestDrafts()
+    delete stored[caseId]
+    if (Object.keys(stored).length) {
+      localStorage.setItem(REQUEST_DRAFT_STORAGE_KEY, JSON.stringify(stored))
+    } else {
+      localStorage.removeItem(REQUEST_DRAFT_STORAGE_KEY)
+    }
+  } catch {
+    // Ignore storage failures; closing the tab should still proceed.
+  }
+}
+
+function normalizeDraftRows(rows) {
+  if (!Array.isArray(rows)) return []
+  return rows
+    .filter((row) => row && typeof row === 'object')
+    .map((row) => ({
+      enabled: row.enabled !== false,
+      key: row.key == null ? '' : String(row.key),
+      value: row.value == null ? '' : String(row.value),
+      required: row.required === true
+    }))
+}
+
 export default {
   name: 'CaseRun',
   components: { AssertionEditor, AIGenerateDialog },
@@ -718,7 +782,10 @@ export default {
       aiParamsLoading: false,
       responseBodyCollapsed: {},
       responseJsonCollapsed: {},
-      requestSnapshotJsonCollapsed: {}
+      requestSnapshotJsonCollapsed: {},
+      draftHydrating: false,
+      draftPersistTimer: null,
+      suppressDraftPersist: false
     }
   },
   computed: {
@@ -769,23 +836,49 @@ export default {
           bodyDraft = this.bodyText
         }
       }
+
+      const ep = this.endpoint || null
+      const requestSchema = ep && ep.requestSchema && typeof ep.requestSchema === 'object' ? ep.requestSchema : null
+      const responseSchema = ep && ep.responseSchema && typeof ep.responseSchema === 'object' ? ep.responseSchema : null
+      const schemaParameters = Array.isArray(requestSchema?.parameters) ? requestSchema.parameters : []
+      const pathVarNames = Array.from(new Set([
+        ...schemaParameters.filter((p) => p && p.in === 'path' && p.name).map((p) => p.name),
+        ...Object.keys(this.pathVariables(current.path || ''))
+      ]))
+
+      const rowsToEnabledMap = (rows) => {
+        if (!Array.isArray(rows)) return {}
+        const out = {}
+        for (const row of rows) {
+          if (!row || row.enabled === false) continue
+          const key = String(row.key || '').trim()
+          if (!key) continue
+          out[key] = row.value == null ? '' : String(row.value)
+        }
+        return out
+      }
+
+      const filledPathVars = rowsToEnabledMap(this.pathRows)
+      const filledQuery = rowsToEnabledMap(this.queryRows)
+      const filledHeaders = rowsToEnabledMap(this.headerRows)
+
       return {
         method: current.method,
         path: current.path,
-        endpoint: this.endpoint
+        pathVarNames,
+        endpoint: ep
           ? {
-              summary: this.endpoint.summary,
-              description: this.endpoint.description,
-              parameters: this.endpoint.parameters,
-              requestSchema: this.endpoint.requestSchema,
-              responses: this.endpoint.responses
+              operationId: ep.operationId || '',
+              summary: ep.summary || '',
+              tags: Array.isArray(ep.tags) ? ep.tags : [],
+              requestSchema,
+              responseSchema
             }
           : null,
         currentRequest: {
-          path: current.path,
-          query: current.query,
-          headers: current.headers,
-          variables: current.variables,
+          pathVars: filledPathVars,
+          query: filledQuery,
+          headers: filledHeaders,
           body: bodyDraft
         }
       }
@@ -855,14 +948,17 @@ export default {
     await this.loadData()
   },
   beforeUnmount() {
+    if (!this.suppressDraftPersist) this.persistLocalDraft()
     this.stopBodySchemaResize()
   },
   watch: {
     caseId() {
+      this.persistLocalDraft()
       this.loadData()
     },
     'request.method'() {
       this.activeTab = this.defaultTab()
+      this.schedulePersistDraft()
     },
     'request.path'() {
       this.activeTab = this.defaultTab()
@@ -874,6 +970,52 @@ export default {
       this.pathRows = this.objectToRows(forPath)
       this.variableRows = this.objectToRows(forRest)
       this.request.variables = { ...forPath, ...forRest }
+      this.schedulePersistDraft()
+    },
+    runName() {
+      this.schedulePersistDraft()
+    },
+    activeTab() {
+      this.schedulePersistDraft()
+    },
+    requestBodyViewMode() {
+      this.schedulePersistDraft()
+    },
+    activeSavedIndex() {
+      this.schedulePersistDraft()
+    },
+    bodyText() {
+      this.schedulePersistDraft()
+    },
+    pathRows: {
+      handler() {
+        this.schedulePersistDraft()
+      },
+      deep: true
+    },
+    queryRows: {
+      handler() {
+        this.schedulePersistDraft()
+      },
+      deep: true
+    },
+    headerRows: {
+      handler() {
+        this.schedulePersistDraft()
+      },
+      deep: true
+    },
+    variableRows: {
+      handler() {
+        this.schedulePersistDraft()
+      },
+      deep: true
+    },
+    editableAssertions: {
+      handler() {
+        this.schedulePersistDraft()
+      },
+      deep: true
     },
     aiParamsDialogVisible(val) {
       if (!val) this.aiParamsLoading = false
@@ -894,6 +1036,126 @@ export default {
     },
     rememberCurrentEnvironment() {
       storeEnvironmentId(this.testCase?.projectId, this.testCase?.serviceId, this.environmentId)
+    },
+    schedulePersistDraft() {
+      if (this.suppressDraftPersist || this.draftHydrating || this.loading || !this.testCase?.id) return
+      if (this.draftPersistTimer) clearTimeout(this.draftPersistTimer)
+      this.draftPersistTimer = setTimeout(() => {
+        this.draftPersistTimer = null
+        this.persistLocalDraft()
+      }, 250)
+    },
+    persistLocalDraft() {
+      if (this.draftPersistTimer) {
+        clearTimeout(this.draftPersistTimer)
+        this.draftPersistTimer = null
+      }
+      if (this.suppressDraftPersist || this.draftHydrating || !this.testCase?.id) return
+      storeRequestDraft(this.testCase.id, this.buildLocalDraft())
+    },
+    clearLocalDraft() {
+      this.suppressDraftPersist = true
+      if (this.draftPersistTimer) {
+        clearTimeout(this.draftPersistTimer)
+        this.draftPersistTimer = null
+      }
+      deleteStoredRequestDraft(this.testCase?.id || this.caseId)
+    },
+    buildLocalDraft() {
+      let parsedBody = null
+      let bodyIsJSON = false
+      if (this.bodyText && this.bodyText.trim()) {
+        try {
+          parsedBody = JSON.parse(this.bodyText)
+          bodyIsJSON = true
+        } catch {
+          bodyIsJSON = false
+        }
+      }
+      const activeSaved = this.activeSavedIndex >= 0 ? this.savedRequests[this.activeSavedIndex] : null
+      return {
+        version: 1,
+        caseId: this.testCase?.id || '',
+        updatedAt: Date.now(),
+        runName: this.runName,
+        activeTab: REQUEST_TAB_NAMES.has(this.activeTab) ? this.activeTab : 'params',
+        requestBodyViewMode: this.requestBodyViewMode === 'preview' ? 'preview' : 'edit',
+        activeSavedId: activeSaved?.id || '',
+        request: {
+          method: this.request.method,
+          path: this.normalizePathVariables(this.request.path),
+          headers: this.rowsToObject(this.headerRows),
+          query: this.rowsToObject(this.queryRows),
+          queryEnabled: this.rowsToEnabledMap(this.queryRows),
+          queryRequired: this.rowsToRequiredMap(this.queryRows),
+          variables: {
+            ...this.rowsToObject(this.pathRows),
+            ...this.rowsToObject(this.variableRows)
+          },
+          body: bodyIsJSON ? parsedBody : null,
+          security: this.request.security
+        },
+        pathRows: normalizeDraftRows(this.pathRows),
+        queryRows: normalizeDraftRows(this.queryRows),
+        headerRows: normalizeDraftRows(this.headerRows),
+        variableRows: normalizeDraftRows(this.variableRows),
+        bodyText: this.bodyText,
+        editableAssertions: this.cloneSample(this.editableAssertions)
+      }
+    },
+    restoreLocalDraft() {
+      const draft = getStoredRequestDraft(this.testCase?.id)
+      if (!draft) return false
+
+      const request = this.normalizeRequest(draft.request)
+      const pathRows = normalizeDraftRows(draft.pathRows)
+      const queryRows = normalizeDraftRows(draft.queryRows)
+      const headerRows = normalizeDraftRows(draft.headerRows)
+      const variableRows = normalizeDraftRows(draft.variableRows)
+      const path = this.normalizePathVariables(request.path || this.request.path || this.testCase?.path)
+
+      this.request = {
+        ...this.request,
+        method: request.method || this.request.method || this.testCase?.method || 'GET',
+        path,
+        headers: this.rowsToObject(headerRows),
+        query: this.rowsToObject(queryRows),
+        body: Object.prototype.hasOwnProperty.call(request, 'body') ? request.body : this.request.body,
+        security: Object.prototype.hasOwnProperty.call(request, 'security') ? request.security : this.request.security
+      }
+
+      if (pathRows.length || variableRows.length) {
+        this.pathRows = pathRows
+        this.variableRows = variableRows
+        this.request.variables = {
+          ...this.rowsToObject(pathRows),
+          ...this.rowsToObject(variableRows)
+        }
+      } else {
+        const { forPath, forRest } = this.splitVariablesByPathTemplate(path, request.variables)
+        this.pathRows = this.objectToRows(forPath)
+        this.variableRows = this.objectToRows(forRest)
+        this.request.variables = { ...forPath, ...forRest }
+      }
+      this.queryRows = queryRows.length
+        ? queryRows
+        : this.objectToRows(request.query, request.queryEnabled, request.queryRequired)
+      this.headerRows = headerRows.length ? headerRows : this.objectToRows(request.headers)
+      this.setBodyText(typeof draft.bodyText === 'string'
+        ? draft.bodyText
+        : (request.body == null ? '' : this.formatJSON(request.body)))
+      if (typeof draft.runName === 'string') this.runName = draft.runName
+      this.requestBodyViewMode = draft.requestBodyViewMode === 'preview' ? 'preview' : 'edit'
+      this.activeTab = REQUEST_TAB_NAMES.has(draft.activeTab) ? draft.activeTab : this.defaultTab()
+      this.activeSavedIndex = draft.activeSavedId
+        ? this.savedRequests.findIndex((saved) => saved.id === draft.activeSavedId)
+        : -1
+      if (Array.isArray(draft.editableAssertions)) {
+        this.editableAssertions = this.cloneSample(draft.editableAssertions)
+      }
+      this.payload = null
+      this.emitRunSummary({ running: false, runStatus: '', resultStatus: '', durationMillis: null })
+      return true
     },
     startBodySchemaResize(event) {
       if (event.button !== undefined && event.button !== 0) return
@@ -984,6 +1246,11 @@ export default {
       return String(value)
     },
     async loadData() {
+      if (this.draftPersistTimer) {
+        clearTimeout(this.draftPersistTimer)
+        this.draftPersistTimer = null
+      }
+      this.draftHydrating = true
       this.loading = true
       this.activeSavedIndex = -1
       this.savedRequests = []
@@ -1003,6 +1270,7 @@ export default {
         this.editableAssertions = this.parseAssertions(this.testCase.assertions)
         this.applyRequest(this.buildGeneratedRequest(this.testCase))
         await this.loadSavedRequests()
+        this.restoreLocalDraft()
       } catch {
         // 错误已在全局请求拦截器中提示
         this.testCase = null
@@ -1010,6 +1278,7 @@ export default {
         this.savedRequests = []
       } finally {
         this.loading = false
+        this.draftHydrating = false
       }
     },
     buildGeneratedRequest(row) {

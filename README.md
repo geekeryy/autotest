@@ -108,6 +108,7 @@ JWT_SECRET=autotest-dev-secret-change-me
 > `DB_MANAGED=external` 使用外部 PostgreSQL；设为 `docker` 则通过 `docker compose up -d postgres` 启动容器。
 
 ## TODO
+- 测试数据管理
 - CI/CD 集成与自动化触发
 - 基于 OpenAPI Spec 自动生成完整测试场景
 - 自动生成正向、反向用例
@@ -118,7 +119,6 @@ JWT_SECRET=autotest-dev-secret-change-me
 - 测试报告与统计分析
 - AI 智能分析（测试失败、接口变更的影响分析）
 - 变量引用与函数计算增强
-- 测试数据管理
 - 断言能力增强
 - gRPC / WebSocket / TCP 协议支持
 - 性能测试能力

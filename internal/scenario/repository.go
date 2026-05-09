@@ -141,9 +141,28 @@ func (r *Repository) UpsertStep(ctx context.Context, scenarioID uuid.UUID, input
 		reqOverride = []byte(`{}`)
 	}
 
+	tx, err := r.DB.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin upsert step: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	// 软删除的步骤仍占用 (scenario_id, step_order) 的 unique 槽位，若不先清理，
+	// 后续 INSERT ... ON CONFLICT 会更新到已软删除行上，但不会重置 deleted_at，
+	// 表现为「保存成功但列表查不到、刷新页面后也看不到」。这里在事务内先把
+	// 同 (scenario_id, step_order) 的软删除占位行物理清理掉，使后续 INSERT 走真正的
+	// 新行路径（带新的 step_seq、新的 id），符合软删除的语义。
+	if _, err := tx.Exec(ctx, `
+		delete from test_scenario_steps
+		where scenario_id = $1 and step_order = $2 and deleted_at is not null
+	`, scenarioID, input.StepOrder); err != nil {
+		return nil, fmt.Errorf("cleanup soft-deleted step placeholder: %w", err)
+	}
+
 	// step_seq is assigned only on INSERT (the subquery computes the next value).
-	// On conflict (same scenario_id + step_order), the existing step_seq is preserved.
-	row := r.DB.QueryRow(ctx, `
+	// On conflict (same scenario_id + step_order with deleted_at IS NULL), the existing
+	// step_seq is preserved.
+	row := tx.QueryRow(ctx, `
 		insert into test_scenario_steps
 			(scenario_id, test_case_id, step_seq, step_order, step_type, name, enabled,
 			 config, request_override)
@@ -163,7 +182,15 @@ func (r *Repository) UpsertStep(ctx context.Context, scenarioID uuid.UUID, input
 	`, scenarioID, nullUUID(input.TestCaseID), input.StepOrder, stepType, input.Name, enabled,
 		config, reqOverride)
 
-	return scanStep(row)
+	step, err := scanStep(row)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit upsert step: %w", err)
+	}
+	return step, nil
 }
 
 const reorderStepOrderOffset = 1_000_000

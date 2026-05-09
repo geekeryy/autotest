@@ -21,10 +21,10 @@ func NewService(repo *Repository, endpointSchema EndpointSchemaGetter) *Service 
 }
 
 func (s *Service) CreateManual(ctx context.Context, input CreateManualInput) (*TestCase, error) {
-	if input.ProjectID.String() == "" {
+	if input.ProjectID == uuid.Nil {
 		return nil, errors.New("projectId is required")
 	}
-	if input.ServiceID.String() == "" {
+	if input.ServiceID == uuid.Nil {
 		return nil, errors.New("serviceId is required")
 	}
 	if input.Name == "" {
@@ -136,7 +136,10 @@ func (s *Service) GenerateParams(ctx context.Context, testCaseID uuid.UUID) (*Ge
 		return nil, fmt.Errorf("fetch endpoint schema: %w", err)
 	}
 
-	sample := sampler.FromSchema(requestSchema)
+	// 运行控制台「一键生成参数」走 PreferMockTags 模式：fallback 字符串字段
+	// 输出 `{{$mock.<helper>}}` 占位，由 Runner 在每次发请求时实时生成新值，
+	// 无需用户为 id / email / createdAt 等动态字段反复点击「生成参数」。
+	sample := sampler.FromSchemaWithOptions(requestSchema, sampler.Options{PreferMockTags: true})
 	return &GeneratedParams{
 		Query: sample.Query,
 		Path:  sample.Path,

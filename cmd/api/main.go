@@ -9,19 +9,20 @@ import (
 
 	"autotest/internal/aiprovider"
 	"autotest/internal/auth"
-	"autotest/internal/projectprompt"
 	testcase "autotest/internal/case"
 	"autotest/internal/generator"
 	"autotest/internal/httpx"
 	"autotest/internal/mockserver"
 	"autotest/internal/paramsource"
 	"autotest/internal/project"
+	"autotest/internal/projectprompt"
 	"autotest/internal/report"
 	"autotest/internal/runner"
 	"autotest/internal/scenario"
 	"autotest/internal/scriptlibrary"
 	"autotest/internal/spec"
 	"autotest/internal/store"
+	"autotest/internal/testdata"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -67,8 +68,10 @@ func main() {
 	aiProviderSvc := aiprovider.NewService(aiProviderRepo)
 	projectPromptRepo := projectprompt.NewRepository(repo)
 	projectPromptSvc := projectprompt.NewService(projectPromptRepo)
+	testDataRepo := testdata.NewRepository(repo)
+	testDataSvc := testdata.NewService(testDataRepo, aiProviderSvc, projectPromptSvc)
 	caseRunner := runner.New(nil, nil, reportRepo)
-	runSvc := runner.NewService(caseSvc, projectSvc, reportRepo, caseRunner, paramSourceSvc)
+	runSvc := runner.NewService(caseSvc, projectSvc, reportRepo, caseRunner, paramSourceSvc, testDataSvc)
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -98,6 +101,7 @@ func main() {
 		mockserver.NewHandler(mockServerSvc, projectHandler).Register(r)
 		projectprompt.NewHandler(projectPromptSvc, projectHandler).Register(r)
 		aiprovider.NewHandler(aiProviderSvc, projectHandler, projectPromptSvc).Register(r)
+		testdata.NewHandler(testDataSvc, projectHandler).Register(r)
 		runner.NewHandler(runSvc, scenarioRepo).Register(r)
 	})
 	r.Mount("/api/v1", api)

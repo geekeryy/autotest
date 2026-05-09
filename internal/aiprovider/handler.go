@@ -145,7 +145,7 @@ func (h *Handler) chat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.promptSvc != nil {
-		if cfg, err := h.promptSvc.GetByAction(r.Context(), projectID, req.Action); err == nil {
+		if cfg, err := h.promptSvc.GetByAction(r.Context(), projectID, req.Action); err == nil && cfg != nil {
 			if cfg.Enabled && cfg.SystemPrompt != "" {
 				req.SystemPromptOverride = cfg.SystemPrompt
 			}
