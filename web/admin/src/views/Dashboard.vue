@@ -50,7 +50,6 @@ import {
   Refresh,
   Setting,
   Tickets,
-  Upload,
   DataAnalysis
 } from '@element-plus/icons-vue'
 import { listCases, listDataSources, listProjects, listScenarios } from '../api'
@@ -68,8 +67,7 @@ const SHORTCUTS = [
     permission: 'projects:read',
     icon: Setting
   },
-  { key: 'cases', title: '接口列表', desc: 'API 请求模板', to: '/cases', permission: 'cases:read', icon: Document },
-  { key: 'spec', title: 'OpenAPI 导入', desc: '同步 Swagger 定义', to: '/spec-import', permission: 'specs:import', icon: Upload },
+  { key: 'cases', title: 'API管理', desc: '导入文档与接口模板', to: '/cases', permission: 'cases:read', icon: Document },
   { key: 'run', title: '运行控制台', desc: '调试与保存用例', to: '/run-console', permission: 'cases:read', icon: Monitor },
   { key: 'scenarios', title: '场景编排', desc: '多步骤联调与回归', to: '/scenarios', permission: 'cases:read', icon: Connection },
   { key: 'sql', title: 'SQL 参数源', desc: '动态参数与预览', to: '/sql-parameter-sources', permission: 'projects:read', icon: Tickets }

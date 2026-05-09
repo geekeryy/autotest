@@ -211,17 +211,27 @@ type inputParam struct {
 	Required bool   `json:"required"`
 }
 
-// parseInputParamElement decodes one JSON object into inputParam.
-// Besides {"name","value","required"}, a single-key shorthand is accepted, e.g.
-// {"id":"{{$steps[2].body.id}}"} → name=id, value=that template (matches $1 order).
+// parseInputParamElement decodes one SQL input parameter.
+// Besides {"name","value","required"}, a bare JSON scalar or single-key shorthand
+// is accepted, e.g. "{{$steps[2].body.id}}" or {"id":"{{$steps[2].body.id}}"}.
 func parseInputParamElement(raw json.RawMessage) (inputParam, error) {
 	var p inputParam
-	if err := json.Unmarshal(raw, &p); err != nil {
+	if err := json.Unmarshal(raw, &p); err == nil {
+		if p.Name != "" || p.Value != nil || p.Required {
+			return p, nil
+		}
+	} else if !isJSONScalar(raw) {
 		return p, err
 	}
-	if p.Name != "" || p.Value != nil || p.Required {
-		return p, nil
+
+	if isJSONScalar(raw) {
+		var val any
+		if err := json.Unmarshal(raw, &val); err != nil {
+			return inputParam{}, err
+		}
+		return inputParam{Value: val}, nil
 	}
+
 	var obj map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &obj); err != nil || len(obj) == 0 {
 		return p, nil
@@ -246,6 +256,11 @@ func parseInputParamElement(raw json.RawMessage) (inputParam, error) {
 		return inputParam{}, fmt.Errorf("sql input param %q: %w", k, err)
 	}
 	return inputParam{Name: k, Value: val}, nil
+}
+
+func isJSONScalar(raw json.RawMessage) bool {
+	trimmed := strings.TrimSpace(string(raw))
+	return trimmed != "" && trimmed != "null" && trimmed[0] != '{' && trimmed[0] != '['
 }
 
 func buildArgs(raw json.RawMessage, vars map[string]string) ([]any, map[string]string, error) {

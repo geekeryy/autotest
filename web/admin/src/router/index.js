@@ -7,8 +7,7 @@ import ProjectManagement from '../views/projects/ProjectManagement.vue'
 import SQLParameterSourceList from '../views/data/SQLParameterSourceList.vue'
 import MockServerList from '../views/data/MockServerList.vue'
 import TestDataTableList from '../views/data/TestDataTableList.vue'
-import SpecImport from '../views/spec/SpecImport.vue'
-import CaseList from '../views/cases/CaseList.vue'
+import ApiManagement from '../views/cases/ApiManagement.vue'
 import CaseRunWorkspace from '../views/cases/CaseRunWorkspace.vue'
 import ScenarioList from '../views/scenarios/ScenarioList.vue'
 import ScriptLibraryList from '../views/scriptlib/ScriptLibraryList.vue'
@@ -41,13 +40,10 @@ export const menuRoutes = [
   },
   {
     path: '/case-mgmt',
-    redirect: '/cases',
-    meta: { title: 'API管理' },
-    children: [
-      { path: '/cases', component: CaseList, meta: { title: '接口列表', permission: 'cases:read' } },
-      { path: '/spec-import', component: SpecImport, meta: { title: 'OpenAPI 导入', permission: 'specs:import' } }
-    ]
+    redirect: '/cases'
   },
+  { path: '/cases', component: ApiManagement, meta: { title: 'API管理', permission: 'cases:read' } },
+  { path: '/spec-import', redirect: '/cases' },
   { path: '/run-console', component: CaseRunWorkspace, meta: { title: '运行控制台', permission: 'cases:read' } },
   {
     path: '/run-console/:caseID',

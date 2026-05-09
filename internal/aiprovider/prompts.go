@@ -89,7 +89,7 @@ func userPreamble(action string) string {
 	case ActionGenerateAssertion:
 		return "请基于下方测试意图与上下文生成 Postman 风格 pm.test 断言代码。"
 	case ActionGenerateCaseData:
-		return "请基于下方上下文生成多组测试用例数据 JSON。"
+		return "请基于下方上下文生成多行测试数据 JSON。"
 	default:
 		return ""
 	}
@@ -101,7 +101,7 @@ const generateParamsSystem = `你是接口自动化测试平台的「请求参�
 用户消息中会附带一段 JSON 上下文，可能包含以下字段（任何一项都可能缺失，需按字段名识别，不要凭直觉重命名）：
 - method：HTTP 方法（GET/POST/PUT/PATCH/DELETE …）。
 - path：含 OpenAPI 占位符（` + "`" + `{var}` + "`" + `）的请求路径，例如 ` + "`" + `/api/v1/users/{id}` + "`" + `。
-- pathVarNames：当前路径需要填值的所有路径变量名（数组）。**输出 JSON 顶层 ` + "`" + `path` + "`" + ` 子对象的 key 必须是该数组的子集**；不在数组中的键一律不要出现。
+- pathVarNames：当前路径需要填值的所有路径参数名（数组，字段名保留历史兼容）。**输出 JSON 顶层 ` + "`" + `path` + "`" + ` 子对象的 key 必须是该数组的子集**；不在数组中的键一律不要出现。
 - endpoint.summary / endpoint.operationId / endpoint.tags：接口语义提示，用于推断字段含义。
 - endpoint.requestSchema：请求 schema，含 ` + "`" + `parameters` + "`" + `（query/header/path 列表，每项包含 name/in/schema/description/required）、` + "`" + `body` + "`" + `（JSON Schema：properties/items/example/default/enum/format/description 等）、` + "`" + `security` + "`" + `。
 - endpoint.responseSchema：响应 schema，仅作语义参考，不要照搬到请求里。
@@ -138,7 +138,7 @@ const generateParamsSystem = `你是接口自动化测试平台的「请求参�
 - float / number       → "{{$mock.float(0,1,4)}}" 同上
 - bool / boolean       → "{{$mock.bool}}" 同上
 - string(n)            → "{{$mock.string(8)}}" 指定长度的字母字符串
-- word / sentence(n)   → "{{$mock.word}}" / "{{$mock.sentence(6)}}"
+- word / sentence(n)   → "{{$mock.word}}" / "{{$mock.sentence(6)}}"，sentence 生成中文句子
 - name / firstName / lastName → "{{$mock.name}}" / "{{$mock.firstName}}" / "{{$mock.lastName}}"
 - email / phone / url  → "{{$mock.email}}" / "{{$mock.phone}}" / "{{$mock.url}}"
 - ipv4 / ipv6          → "{{$mock.ipv4}}" / "{{$mock.ipv6}}"
@@ -171,15 +171,15 @@ const generateAssertionSystem = "你是接口自动化测试平台的「断言�
 	"- 至少包含一个 pm.test，覆盖响应状态码与关键业务字段。\n" +
 	"- 不要输出 Markdown 围栏（不要使用三个反引号）；直接输出 JS 源代码，不要任何额外解释。"
 
-const generateCaseDataSystem = `你是接口自动化测试平台的「测试用例数据生成器」。
-- 输入包含接口的请求 schema、字段约束、以及希望生成的用例数量与场景描述。
+const generateCaseDataSystem = `你是接口自动化测试平台的「测试数据行生成器」。
+- 输入包含测试数据表结构、字段约束、已有行上下文、以及希望生成的数据行数量与场景描述。
 - 输出**必须是单个 JSON 对象**，结构如下：
 {
-  "cases": [
-    { "name": "<用例名称，简短中文>", "body": <符合 schema 的请求体>, "notes": "<可选说明>" }
+  "rows": [
+    { "<列 key>": "<单元格值>" }
   ]
 }
-- 至少覆盖正向用例与典型边界/异常用例（如必填缺失、枚举值边界、字符串极限长度）。
+- 尽量生成贴近业务语义、便于接口测试复用的数据行；不要输出表结构之外的列。
 - 严禁输出 JSON 之外的任何文字。`
 
 const rawSystem = `你是接口自动化测试平台的通用 AI 助手，用中文给出简洁、可执行的回答。`

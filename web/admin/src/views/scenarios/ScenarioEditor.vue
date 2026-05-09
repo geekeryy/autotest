@@ -58,6 +58,25 @@
       />
 
       <section class="step-dialog-main scenario-step-console">
+        <el-tabs
+          v-if="stepTabs.length"
+          v-model="activeStepTabId"
+          class="scenario-step-tabs"
+          type="card"
+          closable
+          :before-leave="onStepTabBeforeLeave"
+          @tab-change="onStepTabChange"
+          @tab-remove="closeStepTab"
+        >
+          <el-tab-pane v-for="t in stepTabs" :key="t.id" :name="t.id">
+            <template #label>
+              <span class="scenario-step-tab-label" :title="t.label || ''">
+                {{ t.label || (t.kind === 'draft' ? '新增步骤' : '步骤') }}
+              </span>
+            </template>
+          </el-tab-pane>
+        </el-tabs>
+
         <template v-if="isStepFormActive">
           <el-card class="request-card">
             <div class="scenario-step-title-row">
@@ -131,7 +150,7 @@
                     @click="openStepAIParamsDialog"
                   >AI 生成</el-button>
                   <el-tooltip
-                    content="将当前请求参数保存到该场景步骤（数据库持久化），不会改写接口管理中原始用例"
+                    content="将当前请求参数保存到该场景步骤（数据库持久化），不会改写接口管理中的请求模板"
                     placement="top"
                   >
                     <el-button :loading="savingStep" @click="saveStepFromPanel">保存参数</el-button>
@@ -150,13 +169,13 @@
               <el-tabs v-model="stepForm.requestTab" class="request-tabs">
                   <el-tab-pane label="Params" name="params">
                     <div class="params-section">
-                      <div class="params-section-title">Path Vars</div>
+                      <div class="params-section-title">路径参数（Path Params）</div>
                       <el-table :data="stepForm.pathParamRows" border class="kv-table">
                         <el-table-column width="70" label="启用">
-                          <template #default="{ row }"><el-checkbox v-model="row.enabled" /></template>
+                          <template #default="{ row }"><el-checkbox v-model="row.enabled" :disabled="row.authInherited" @change="markRowOverridden(row)" /></template>
                         </el-table-column>
                         <el-table-column label="参数名" min-width="180">
-                          <template #default="{ row }"><el-input v-model="row.key" placeholder="路径变量名" /></template>
+                          <template #default="{ row }"><el-input v-model="row.key" placeholder="路径参数名" /></template>
                         </el-table-column>
                         <el-table-column label="参数值" min-width="260">
                           <template #default="{ row }"><el-input v-model="row.value" placeholder="支持 {{变量名}}" /></template>
@@ -167,7 +186,7 @@
                           </template>
                         </el-table-column>
                         <el-table-column width="90" label="操作">
-                          <template #default="{ $index }">
+                          <template #default="{ row, $index }">
                             <el-button link type="danger" @click="removeRow(stepForm.pathParamRows, $index)">删除</el-button>
                           </template>
                         </el-table-column>
@@ -181,13 +200,14 @@
                           <template #default="{ row }"><el-checkbox v-model="row.enabled" /></template>
                         </el-table-column>
                         <el-table-column label="参数名" min-width="180">
-                          <template #default="{ row }"><el-input v-model="row.key" placeholder="参数名" /></template>
+                          <template #default="{ row }"><el-input v-model="row.key" placeholder="参数名" @input="markRowOverridden(row)" /></template>
                         </el-table-column>
                         <el-table-column label="参数值" min-width="260">
                           <template #default="{ row }">
                             <div class="query-value-cell">
-                              <el-input v-model="row.value" placeholder="参数值 / {{变量}}" />
+                              <el-input v-model="row.value" placeholder="参数值 / {{变量}}" @input="markRowOverridden(row)" />
                               <span v-if="row.required" class="required-star" aria-label="必填">*</span>
+                              <el-tag v-if="row.authInherited && !row.authOverridden" size="small" type="info">环境认证</el-tag>
                             </div>
                           </template>
                         </el-table-column>
@@ -198,7 +218,7 @@
                         </el-table-column>
                         <el-table-column width="90" label="操作">
                           <template #default="{ $index }">
-                            <el-button link type="danger" @click="removeRow(stepForm.queryRows, $index)">删除</el-button>
+                            <el-button link type="danger" :disabled="row.authInherited && !row.authOverridden" @click="removeRow(stepForm.queryRows, $index)">删除</el-button>
                           </template>
                         </el-table-column>
                       </el-table>
@@ -208,13 +228,18 @@
                   <el-tab-pane label="Headers" name="headers">
                     <el-table :data="stepForm.headerRows" border class="kv-table">
                       <el-table-column width="70" label="启用">
-                        <template #default="{ row }"><el-checkbox v-model="row.enabled" /></template>
+                        <template #default="{ row }"><el-checkbox v-model="row.enabled" :disabled="row.authInherited" @change="markRowOverridden(row)" /></template>
                       </el-table-column>
                       <el-table-column label="Header" min-width="180">
-                        <template #default="{ row }"><el-input v-model="row.key" placeholder="Header" /></template>
+                        <template #default="{ row }"><el-input v-model="row.key" placeholder="Header" @input="markRowOverridden(row)" /></template>
                       </el-table-column>
                       <el-table-column label="Value" min-width="260">
-                        <template #default="{ row }"><el-input v-model="row.value" placeholder="支持 {{变量名}}" /></template>
+                        <template #default="{ row }">
+                          <div class="auth-value-cell">
+                            <el-input v-model="row.value" placeholder="支持 {{变量名}}" @input="markRowOverridden(row)" />
+                            <el-tag v-if="row.authInherited && !row.authOverridden" size="small" type="info">环境认证</el-tag>
+                          </div>
+                        </template>
                       </el-table-column>
                       <el-table-column label="字段注释" min-width="220">
                         <template #default="{ row }">
@@ -222,8 +247,8 @@
                         </template>
                       </el-table-column>
                       <el-table-column width="90" label="操作">
-                        <template #default="{ $index }">
-                          <el-button link type="danger" @click="removeRow(stepForm.headerRows, $index)">删除</el-button>
+                        <template #default="{ row, $index }">
+                          <el-button link type="danger" :disabled="row.authInherited && !row.authOverridden" @click="removeRow(stepForm.headerRows, $index)">删除</el-button>
                         </template>
                       </el-table-column>
                     </el-table>
@@ -294,13 +319,10 @@
                         v-else-if="stepRequestBodyViewMode === 'preview'"
                         class="code-view scenario-body-code-pane"
                       >{{ stepForm.bodyText }}</pre>
-                      <div
+                      <JsonBodyEditor
                         v-show="stepRequestBodyViewMode === 'edit'"
-                        ref="stepBodyEditor"
-                        class="code-editor scenario-body-code-pane"
-                        contenteditable="true"
-                        spellcheck="false"
-                        @input="stepForm.bodyText = $event.target.innerText"
+                        v-model="stepForm.bodyText"
+                        class="scenario-body-code-pane"
                         @blur="formatStepBody"
                       />
                       <div
@@ -317,6 +339,7 @@
                           <div class="schema-field-table-head">
                             <span>字段</span>
                             <span>类型</span>
+                            <span>限制</span>
                             <span>说明</span>
                           </div>
                           <div v-for="row in scenarioStepRequestBodyDocRows" :key="row.path" class="schema-field-row">
@@ -332,6 +355,7 @@
                               <span v-if="row.required" class="schema-required">*</span>
                             </div>
                             <span class="schema-type-chip">{{ row.type }}</span>
+                            <span class="schema-field-limits" :title="row.constraints">{{ row.constraints || '-' }}</span>
                             <span class="schema-field-meaning" :title="row.meaning">{{ row.meaning || '-' }}</span>
                           </div>
                         </div>
@@ -347,7 +371,7 @@
                   </el-tab-pane>
                 </el-tabs>
                 <div class="inline-sql-hint scenario-request-hint">
-                  Path Vars 的值会直接嵌入路径；Query、Headers 和 Body 作为请求覆盖保存。
+                  路径参数（Path Params）的值会直接嵌入路径；Query、Headers 和 Body 作为请求覆盖保存。
                   后续步骤可通过 <code v-pre>{{$steps[N].xxx}}</code> 引用本步骤输出，N 为左侧 <strong>#序号</strong>。
                   支持运行时模拟数据标签 <code v-pre>{{$mock.uuid}}</code>、<code v-pre>{{$mock.now}}</code>、<code v-pre>{{$mock.email}}</code>、<code v-pre>{{$mock.int(1,100)}}</code>、<code v-pre>{{$mock.pick(a,b,c)}}</code> 等，每次请求实时生成新值。
                 </div>
@@ -672,6 +696,7 @@
                           <div class="schema-field-table-head">
                             <span>字段</span>
                             <span>类型</span>
+                            <span>限制</span>
                             <span>说明</span>
                           </div>
                           <div v-for="row in scenarioStepRequestBodyDocRows" :key="'reqsnap-' + row.path" class="schema-field-row">
@@ -687,6 +712,7 @@
                               <span v-if="row.required" class="schema-required">*</span>
                             </div>
                             <span class="schema-type-chip">{{ row.type }}</span>
+                            <span class="schema-field-limits" :title="row.constraints">{{ row.constraints || '-' }}</span>
                             <span class="schema-field-meaning" :title="row.meaning">{{ row.meaning || '-' }}</span>
                           </div>
                         </div>
@@ -761,6 +787,7 @@
                           <div class="schema-field-table-head">
                             <span>字段</span>
                             <span>类型</span>
+                            <span>限制</span>
                             <span>说明</span>
                           </div>
                           <div v-for="row in stepDebugResponseBodyDocRows" :key="'ressnap-' + row.path" class="schema-field-row">
@@ -775,6 +802,7 @@
                               <code :title="row.path">{{ row.name }}</code>
                             </div>
                             <span class="schema-type-chip">{{ row.type }}</span>
+                            <span class="schema-field-limits" :title="row.constraints">{{ row.constraints || '-' }}</span>
                             <span class="schema-field-meaning" :title="row.meaning">{{ row.meaning || '-' }}</span>
                           </div>
                         </div>
@@ -839,7 +867,21 @@
       </section>
     </div>
 
-    <div v-if="lastRunOutput" class="run-result-area">
+    <div
+      v-if="lastRunOutput"
+      class="run-result-area"
+      :style="{ '--run-result-panel-height': `${runResultPanelHeightPx}px` }"
+    >
+      <div
+        class="run-result-resizer"
+        role="separator"
+        aria-orientation="horizontal"
+        tabindex="0"
+        title="拖动调整运行结果面板高度"
+        @mousedown="startRunResultPanelResize"
+        @keydown.up.prevent="nudgeRunResultPanelHeight(24)"
+        @keydown.down.prevent="nudgeRunResultPanelHeight(-24)"
+      />
       <el-collapse v-model="scenarioRunResultActiveNames" class="scenario-run-outer-collapse">
         <el-collapse-item name="panel">
           <template #title>
@@ -850,7 +892,7 @@
               </el-tag>
             </div>
           </template>
-          <div class="run-result-collapse-body">
+          <div class="run-result-collapse-body" :style="runResultPanelBodyStyle">
             <el-collapse>
               <el-collapse-item v-for="(sr, si) in lastRunOutput.stepResults" :key="si" :name="si">
                 <template #title>
@@ -863,85 +905,236 @@
                         >#{{ sr.step.stepSeq != null && sr.step.stepSeq !== '' ? sr.step.stepSeq : '?' }}</span
                       >
                       <span class="step-run-result-title__name">{{ stepDisplayName(sr.step) }}</span>
+                      <span v-if="sr.result?.durationMillis != null" class="step-run-result-title__duration">
+                        {{ formatDuration(sr.result.durationMillis) }}
+                      </span>
                     </div>
                   </template>
                 </template>
                 <div class="step-result-detail">
-                  <div class="result-status-row">
-                    <el-tag
-                      :type="sr.result?.status === 'passed' ? 'success' : sr.result?.status === 'error' ? 'warning' : 'danger'"
-                      size="small"
-                    >{{ sr.result?.status || '未运行' }}</el-tag>
-                    <span v-if="sr.result?.durationMillis" class="duration">
-                      {{ sr.result.durationMillis }}ms
-                    </span>
-                  </div>
-                  <div v-if="sr.result?.error" class="error-text">{{ sr.result.error }}</div>
-                  <div v-if="sr.stepErrors?.length" class="error-text">
-                    步骤错误：{{ sr.stepErrors.join('; ') }}
-                  </div>
-
-                  <template v-if="sr.output && Object.keys(sr.output).length">
-                    <div class="section-label">
-                      步骤输出（可通过 <code>{{ stepsRefSnippet(sr.step.stepSeq, '.xxx') }}</code> 在后续步骤中引用）：
-                    </div>
-                    <pre class="snapshot-pre">{{ JSON.stringify(sr.output, null, 2) }}</pre>
-                  </template>
-
-                  <template v-if="sr.result?.assertions?.length">
-                    <div class="section-label">断言结果：</div>
-                    <el-table :data="sr.result.assertions" border size="small" class="assertion-result-table">
-                      <el-table-column label="类型" width="100">
-                        <template #default="{ row }">
-                          <el-tag size="small" effect="plain">{{ assertionTypeLabel(row.type) }}</el-tag>
-                        </template>
-                      </el-table-column>
-                      <el-table-column label="名称 / 路径" min-width="140">
-                        <template #default="{ row }">
-                          <span v-if="row.name">{{ row.name }}</span>
-                          <code v-else class="assertion-path">{{ row.path || row.headerName || '' }}</code>
-                        </template>
-                      </el-table-column>
-                      <el-table-column label="状态" width="80">
-                        <template #default="{ row }">
-                          <el-tag :type="row.passed ? 'success' : 'danger'" size="small">
-                            {{ row.passed ? '通过' : '失败' }}
-                          </el-tag>
-                        </template>
-                      </el-table-column>
-                      <el-table-column prop="message" label="详情" min-width="180" />
-                    </el-table>
-                  </template>
-
-                  <template v-for="hr in [getStepHttpResponse(sr)]" :key="'srhr' + si">
-                    <div v-if="hr" class="response-http-panel response-http-panel--nested">
-                      <div class="response-http-meta">
-                        <el-tag :type="responseSnapshotStatusType(sr.result?.responseSnapshot)" size="small">
-                          {{ hr.statusCode }}
-                        </el-tag>
+                  <el-tabs
+                    :model-value="runResultDetailTabByStep[si] ?? 'detail'"
+                    class="step-result-info-tabs"
+                    type="border-card"
+                    @update:model-value="(v) => setRunResultDetailTab(si, v)"
+                  >
+                    <el-tab-pane label="详情" name="detail">
+                      <div v-if="sr.result?.error || sr.stepErrors?.length" class="step-result-error-strip">
+                        <div v-if="sr.result?.error" class="error-text">{{ sr.result.error }}</div>
+                        <div v-if="sr.stepErrors?.length" class="error-text">
+                          步骤错误：{{ sr.stepErrors.join('; ') }}
+                        </div>
                       </div>
-                      <el-tabs
-                        :model-value="runResultResponseDetailTabByStep[si] ?? 'body'"
-                        class="response-body-headers-tabs"
-                        type="card"
-                        @update:model-value="(v) => setRunResultResponseDetailTab(si, v)"
+                      <div class="step-result-detail-grid">
+                        <section class="step-result-snapshot-panel">
+                          <div class="step-result-panel-head">
+                            <span>请求</span>
+                            <el-tag v-if="runResultRequestMethod(sr)" size="small" effect="plain">
+                              {{ runResultRequestMethod(sr) }}
+                            </el-tag>
+                          </div>
+                          <template v-for="lines in [runResultJsonLines(si, 'request', sr.result?.requestSnapshot)]" :key="'req-lines-' + si">
+                            <div v-if="lines?.length" class="json-viewer snapshot-pre run-result-json-viewer">
+                              <div
+                                v-for="line in lines"
+                                :key="'req-' + si + '-' + line.id"
+                                class="json-line"
+                                :style="{ paddingLeft: `${line.depth * 16}px` }"
+                              >
+                                <span
+                                  v-if="line.type === 'open'"
+                                  class="json-toggle"
+                                  @click="toggleRunResultJsonCollapse(si, 'request', line.path)"
+                                />
+                                <span
+                                  v-else-if="line.type === 'collapsed'"
+                                  class="json-toggle is-collapsed"
+                                  @click="toggleRunResultJsonCollapse(si, 'request', line.path)"
+                                />
+                                <span v-else class="json-toggle-ph" />
+                                <span
+                                  v-if="line.key !== null && line.key !== undefined"
+                                  class="json-key"
+                                >"{{ line.key }}"<span class="json-colon">: </span></span>
+                                <template v-if="line.type === 'primitive'">
+                                  <span class="json-value" :class="`json-${line.valueType}`">{{ line.displayValue }}</span>
+                                </template>
+                                <template v-else-if="line.type === 'open'">
+                                  <span class="json-bracket">{{ line.bracket }}</span>
+                                </template>
+                                <template v-else-if="line.type === 'close'">
+                                  <span class="json-bracket">{{ line.bracket }}</span>
+                                </template>
+                                <template v-else-if="line.type === 'collapsed'">
+                                  <span class="json-bracket">{{ line.open }}</span><span class="json-collapsed-preview"> {{ line.count }} {{ line.open === '[' ? 'items' : 'keys' }} </span><span class="json-bracket">{{ line.close }}</span>
+                                </template>
+                                <template v-else-if="line.type === 'empty-object'">
+                                  <span class="json-bracket">{}</span>
+                                </template>
+                                <template v-else-if="line.type === 'empty-array'">
+                                  <span class="json-bracket">[]</span>
+                                </template>
+                                <span v-if="line.hasComma" class="json-comma">,</span>
+                              </div>
+                            </div>
+                            <el-empty v-else description="暂无请求信息" :image-size="42" />
+                          </template>
+                        </section>
+
+                        <section class="step-result-snapshot-panel">
+                          <div class="step-result-panel-head">
+                            <span>响应</span>
+                            <el-tag
+                              v-if="getStepHttpResponse(sr)"
+                              :type="responseSnapshotStatusType(sr.result?.responseSnapshot)"
+                              size="small"
+                              effect="plain"
+                            >
+                              {{ getStepHttpResponse(sr).statusCode }}
+                            </el-tag>
+                          </div>
+                          <template v-for="lines in [runResultJsonLines(si, 'response', sr.result?.responseSnapshot)]" :key="'res-lines-' + si">
+                            <div v-if="lines?.length" class="json-viewer snapshot-pre run-result-json-viewer">
+                              <div
+                                v-for="line in lines"
+                                :key="'res-' + si + '-' + line.id"
+                                class="json-line"
+                                :style="{ paddingLeft: `${line.depth * 16}px` }"
+                              >
+                                <span
+                                  v-if="line.type === 'open'"
+                                  class="json-toggle"
+                                  @click="toggleRunResultJsonCollapse(si, 'response', line.path)"
+                                />
+                                <span
+                                  v-else-if="line.type === 'collapsed'"
+                                  class="json-toggle is-collapsed"
+                                  @click="toggleRunResultJsonCollapse(si, 'response', line.path)"
+                                />
+                                <span v-else class="json-toggle-ph" />
+                                <span
+                                  v-if="line.key !== null && line.key !== undefined"
+                                  class="json-key"
+                                >"{{ line.key }}"<span class="json-colon">: </span></span>
+                                <template v-if="line.type === 'primitive'">
+                                  <span class="json-value" :class="`json-${line.valueType}`">{{ line.displayValue }}</span>
+                                </template>
+                                <template v-else-if="line.type === 'open'">
+                                  <span class="json-bracket">{{ line.bracket }}</span>
+                                </template>
+                                <template v-else-if="line.type === 'close'">
+                                  <span class="json-bracket">{{ line.bracket }}</span>
+                                </template>
+                                <template v-else-if="line.type === 'collapsed'">
+                                  <span class="json-bracket">{{ line.open }}</span><span class="json-collapsed-preview"> {{ line.count }} {{ line.open === '[' ? 'items' : 'keys' }} </span><span class="json-bracket">{{ line.close }}</span>
+                                </template>
+                                <template v-else-if="line.type === 'empty-object'">
+                                  <span class="json-bracket">{}</span>
+                                </template>
+                                <template v-else-if="line.type === 'empty-array'">
+                                  <span class="json-bracket">[]</span>
+                                </template>
+                                <span v-if="line.hasComma" class="json-comma">,</span>
+                              </div>
+                            </div>
+                            <el-empty v-else description="暂无响应信息" :image-size="42" />
+                          </template>
+                        </section>
+
+                      </div>
+                    </el-tab-pane>
+
+                    <el-tab-pane label="断言" name="assertions">
+                      <el-table
+                        v-if="sr.result?.assertions?.length"
+                        :data="sr.result.assertions"
+                        border
+                        size="small"
+                        class="assertion-result-table"
                       >
-                        <el-tab-pane label="Body" name="body">
-                          <pre class="snapshot-pre snapshot-pre--response-body">{{ formatSnapshotBody(hr.body) }}</pre>
-                        </el-tab-pane>
-                        <el-tab-pane label="响应头" name="headers">
-                          <el-table :data="headersToRows(hr.headers)" border size="small">
-                            <el-table-column prop="key" label="名称" min-width="160" />
-                            <el-table-column prop="value" label="值" min-width="220" />
-                          </el-table>
-                        </el-tab-pane>
-                      </el-tabs>
-                    </div>
-                    <template v-else-if="sr.result?.responseSnapshot">
-                      <div class="section-label">响应快照：</div>
-                      <pre class="snapshot-pre">{{ formatSnapshot(sr.result.responseSnapshot) }}</pre>
-                    </template>
-                  </template>
+                        <el-table-column label="类型" width="100">
+                          <template #default="{ row }">
+                            <el-tag size="small" effect="plain">{{ assertionTypeLabel(row.type) }}</el-tag>
+                          </template>
+                        </el-table-column>
+                        <el-table-column label="名称 / 路径" min-width="140">
+                          <template #default="{ row }">
+                            <span v-if="row.name">{{ row.name }}</span>
+                            <code v-else class="assertion-path">{{ row.path || row.headerName || '' }}</code>
+                          </template>
+                        </el-table-column>
+                        <el-table-column label="状态" width="80">
+                          <template #default="{ row }">
+                            <el-tag :type="row.passed ? 'success' : 'danger'" size="small">
+                              {{ row.passed ? '通过' : '失败' }}
+                            </el-tag>
+                          </template>
+                        </el-table-column>
+                        <el-table-column prop="message" label="详情" min-width="180" />
+                      </el-table>
+                      <el-empty v-else description="暂无断言结果" :image-size="42" />
+                    </el-tab-pane>
+
+                    <el-tab-pane
+                      v-if="sr.output && Object.keys(sr.output).length"
+                      label="步骤输出"
+                      name="output"
+                    >
+                      <section class="step-result-snapshot-panel step-result-snapshot-panel--full">
+                        <div class="step-result-panel-head">
+                          <span>步骤输出</span>
+                          <span class="step-result-panel-hint">
+                            可通过 <code>{{ stepsRefSnippet(sr.step.stepSeq, '.xxx') }}</code> 在后续步骤中引用
+                          </span>
+                        </div>
+                        <template v-for="lines in [runResultJsonLines(si, 'output', sr.output)]" :key="'out-lines-' + si">
+                          <div v-if="lines?.length" class="json-viewer snapshot-pre run-result-json-viewer">
+                            <div
+                              v-for="line in lines"
+                              :key="'out-' + si + '-' + line.id"
+                              class="json-line"
+                              :style="{ paddingLeft: `${line.depth * 16}px` }"
+                            >
+                              <span
+                                v-if="line.type === 'open'"
+                                class="json-toggle"
+                                @click="toggleRunResultJsonCollapse(si, 'output', line.path)"
+                              />
+                              <span
+                                v-else-if="line.type === 'collapsed'"
+                                class="json-toggle is-collapsed"
+                                @click="toggleRunResultJsonCollapse(si, 'output', line.path)"
+                              />
+                              <span v-else class="json-toggle-ph" />
+                              <span
+                                v-if="line.key !== null && line.key !== undefined"
+                                class="json-key"
+                              >"{{ line.key }}"<span class="json-colon">: </span></span>
+                              <template v-if="line.type === 'primitive'">
+                                <span class="json-value" :class="`json-${line.valueType}`">{{ line.displayValue }}</span>
+                              </template>
+                              <template v-else-if="line.type === 'open'">
+                                <span class="json-bracket">{{ line.bracket }}</span>
+                              </template>
+                              <template v-else-if="line.type === 'close'">
+                                <span class="json-bracket">{{ line.bracket }}</span>
+                              </template>
+                              <template v-else-if="line.type === 'collapsed'">
+                                <span class="json-bracket">{{ line.open }}</span><span class="json-collapsed-preview"> {{ line.count }} {{ line.open === '[' ? 'items' : 'keys' }} </span><span class="json-bracket">{{ line.close }}</span>
+                              </template>
+                              <template v-else-if="line.type === 'empty-object'">
+                                <span class="json-bracket">{}</span>
+                              </template>
+                              <template v-else-if="line.type === 'empty-array'">
+                                <span class="json-bracket">[]</span>
+                              </template>
+                              <span v-if="line.hasComma" class="json-comma">,</span>
+                            </div>
+                          </div>
+                        </template>
+                      </section>
+                    </el-tab-pane>
+                  </el-tabs>
                 </div>
               </el-collapse-item>
             </el-collapse>
@@ -994,7 +1187,14 @@ import SqlEditor from '../../components/SqlEditor.vue'
 import AssertionEditor from '../../components/AssertionEditor.vue'
 import ScriptLibraryPicker from '../../components/ScriptLibraryPicker.vue'
 import AIGenerateDialog from '../../components/AIGenerateDialog.vue'
+import JsonBodyEditor from '../../components/JsonBodyEditor.vue'
 import ScenarioStepTreeNode from './ScenarioStepTreeNode.vue'
+import {
+  SCENARIO_STEP_WORKSPACE_KEY,
+  buildScopeKey,
+  readTabStateByScopeKey,
+  writeTabStateByScopeKey
+} from '../../utils/workspaceTabs.js'
 
 const ASSERTION_TYPE_LABELS = {
   status_code: '状态码',
@@ -1086,7 +1286,8 @@ export default {
     SqlEditor,
     AssertionEditor,
     ScriptLibraryPicker,
-    AIGenerateDialog
+    AIGenerateDialog,
+    JsonBodyEditor
   },
 
   props: {
@@ -1115,8 +1316,11 @@ export default {
       stepRunOutput: null,
       stepRunResultTab: 'response',
       stepRunResponseDetailTab: 'body',
-      runResultResponseDetailTabByStep: {},
+      runResultDetailTabByStep: {},
       scenarioRunResultActiveNames: ['panel'],
+      runResultPanelHeightPx: 360,
+      runResultJsonCollapsed: {},
+      _runResultPanelResize: null,
 
       stepSidebarWidthPx: STEP_SIDEBAR_DEFAULT,
       _stepSidebarResize: null,
@@ -1136,6 +1340,9 @@ export default {
       editingStepName: false,
       controlFlowChildAttach: null,
       sortableInstance: null,
+
+      stepTabs: [],
+      activeStepTabId: '',
 
       stepTypes: STEP_TYPES,
       conditionOperators: CONDITION_OPERATORS,
@@ -1192,8 +1399,19 @@ export default {
       return this.httpResponseFromSnapshot(this.stepRunResult?.responseSnapshot)
     },
     isStepFormActive() {
+      if (!this.activeStepTabId) return false
       const o = Number(this.stepForm.stepOrder)
       return Number.isFinite(o) && o > 0
+    },
+    activeStepTab() {
+      return this.stepTabs.find((t) => t.id === this.activeStepTabId) || null
+    },
+    activeTabStepId() {
+      const tab = this.activeStepTab
+      return tab && tab.kind === 'step' ? tab.stepId : ''
+    },
+    stepWorkspaceScopeKey() {
+      return buildScopeKey(this.projectId, this.serviceId, this.scenario?.id)
     },
     stepTitleDisplay() {
       const custom = (this.stepForm.name || '').trim()
@@ -1208,6 +1426,11 @@ export default {
       return {
         width: `${w}px`,
         flex: `0 0 ${w}px`
+      }
+    },
+    runResultPanelBodyStyle() {
+      return {
+        height: `${this.runResultPanelHeightPx}px`
       }
     },
     scenarioStepResolvedEndpoint() {
@@ -1241,7 +1464,7 @@ export default {
       const raw = (this.stepForm.bodyText || '').trim()
       if (!raw) return null
       try {
-        const parsed = JSON.parse(raw)
+        const parsed = this.parseTemplateAwareJSON(raw)
         const lines = []
         this.collectJsonLines(parsed, null, '$', 0, true, this.stepRequestBodyJsonCollapsed, lines)
         return lines
@@ -1350,7 +1573,7 @@ export default {
       let bodyDraft = null
       if ((this.stepForm.bodyText || '').trim()) {
         try {
-          bodyDraft = JSON.parse(this.stepForm.bodyText)
+          bodyDraft = this.parseTemplateAwareJSON(this.stepForm.bodyText)
         } catch {
           bodyDraft = this.stepForm.bodyText
         }
@@ -1383,8 +1606,16 @@ export default {
   watch: {
     'scenario.id'(newId, oldId) {
       if (!newId || newId === oldId) return
+      if (oldId) {
+        const oldScope = buildScopeKey(this.projectId, this.serviceId, oldId)
+        this.flushStepTabsToStorage(oldScope)
+      }
       this.lastRunOutput = null
-      this.runResultResponseDetailTabByStep = {}
+      this.runResultDetailTabByStep = {}
+      this.runResultJsonCollapsed = {}
+      this._stepTabDrafts = {}
+      this.stepTabs = []
+      this.activeStepTabId = ''
       this.loadStepsForScenario()
     },
     'stepForm.dbDataSourceId'(id) {
@@ -1405,14 +1636,10 @@ export default {
     aiStepParamsDialogVisible(val) {
       if (!val) this.aiStepParamsLoading = false
     },
-    stepRequestBodyViewMode(mode) {
-      if (mode === 'edit' && this.active) this.$nextTick(() => this.syncStepBodyEditorInner())
-    },
     active(val) {
       if (val) {
         this.$nextTick(() => {
           this.initStepSortable()
-          if (this.stepRequestBodyViewMode === 'edit') this.syncStepBodyEditorInner()
         })
       } else if (this.sortableInstance) {
         this.sortableInstance.destroy()
@@ -1423,6 +1650,10 @@ export default {
       if (!this.runEnvId && Array.isArray(envs) && envs.length) {
         this.runEnvId = envs[0].id
       }
+      this.refreshEnvironmentAuthRows()
+    },
+    runEnvId() {
+      this.refreshEnvironmentAuthRows()
     }
   },
 
@@ -1443,23 +1674,349 @@ export default {
   },
 
   async created() {
+    this._stepTabDrafts = {}
+    this._stepTabsPersistTimer = null
+    this._restoringStepTabs = false
     this.initStepSidebarWidth()
     if (Array.isArray(this.environments) && this.environments.length) {
       this.runEnvId = this.environments[0].id
     }
+    this.refreshEnvironmentAuthRows()
     await this.loadStepsForScenario()
   },
 
   beforeUnmount() {
     this.detachStepSidebarResizeListeners()
+    this.detachRunResultPanelResizeListeners()
     this.stopStepBodySchemaResize()
     if (this.sortableInstance) {
       this.sortableInstance.destroy()
       this.sortableInstance = null
     }
+    if (this._stepTabsPersistTimer) {
+      clearTimeout(this._stepTabsPersistTimer)
+      this._stepTabsPersistTimer = null
+    }
+    this.flushStepTabsToStorage(this.stepWorkspaceScopeKey)
   },
 
   methods: {
+    tabIdForStep(stepId) {
+      return stepId ? `step:${stepId}` : ''
+    },
+    generateDraftTabId() {
+      const rand = Math.random().toString(36).slice(2, 9)
+      return `draft:${Date.now().toString(36)}-${rand}`
+    },
+
+    findStepTab(tabId) {
+      if (!tabId) return null
+      return this.stepTabs.find((t) => t.id === tabId) || null
+    },
+
+    stepTabLabelForStep(step) {
+      if (!step) return '步骤'
+      const customName = (step.name || '').trim()
+      if (customName) return customName
+      if (step.stepType === 'api' && step.testCaseId) {
+        const caseName = this.findCaseName?.(step.testCaseId)
+        if (caseName) return caseName
+      }
+      const seq = step.stepSeq != null && step.stepSeq !== '' ? `#${step.stepSeq}` : ''
+      const typeLabel = this.stepTypeLabel?.(step.stepType) || step.stepType || '步骤'
+      return seq ? `${seq} ${typeLabel}` : typeLabel
+    },
+
+    stepTabLabelForForm() {
+      const display = (this.stepForm?.name || '').trim() || this.stepTitleDisplay
+      if (display) return display
+      const typeLabel = this.stepTypeLabel?.(this.stepForm?.stepType) || '步骤'
+      return `新增${typeLabel}`
+    },
+
+    cloneStepFormForSnapshot() {
+      try {
+        return JSON.parse(JSON.stringify(this.stepForm))
+      } catch {
+        return { ...this.stepForm }
+      }
+    },
+
+    snapshotActiveStepTabState() {
+      const tabId = this.activeStepTabId
+      if (!tabId) return
+      if (!this._stepTabDrafts) this._stepTabDrafts = {}
+      this._stepTabDrafts[tabId] = {
+        stepForm: this.cloneStepFormForSnapshot(),
+        editingStepId: this.editingStep?.id || '',
+        editingStepName: this.editingStepName,
+        controlFlowChildAttach: this.controlFlowChildAttach
+          ? { ...this.controlFlowChildAttach }
+          : null,
+        stepRunOutput: this.stepRunOutput,
+        stepRunResultTab: this.stepRunResultTab,
+        stepRunResponseDetailTab: this.stepRunResponseDetailTab
+      }
+    },
+
+    restoreStepTabStateFromDraft(tabId) {
+      const draft = this._stepTabDrafts && this._stepTabDrafts[tabId]
+      if (!draft) return false
+      this.stepForm = draft.stepForm
+      this.editingStep = draft.editingStepId
+        ? this.steps.find((s) => s.id === draft.editingStepId) || null
+        : null
+      this.editingStepName = !!draft.editingStepName
+      this.controlFlowChildAttach = draft.controlFlowChildAttach
+        ? { ...draft.controlFlowChildAttach }
+        : null
+      this.stepRunOutput = draft.stepRunOutput || null
+      this.stepRunResultTab = draft.stepRunResultTab || 'response'
+      this.stepRunResponseDetailTab = draft.stepRunResponseDetailTab || 'body'
+      this.stepRequestBodyViewMode = 'edit'
+      this.stepRequestBodyCollapsed = {}
+      this.stepRequestBodyJsonCollapsed = {}
+      this.stepDebugRequestSnapshotJsonCollapsed = {}
+      this.stepDebugResponseBodyCollapsed = {}
+      this.stepDebugResponseJsonCollapsed = {}
+      return true
+    },
+
+    discardStepTabDraft(tabId) {
+      if (this._stepTabDrafts && tabId) {
+        delete this._stepTabDrafts[tabId]
+      }
+    },
+
+    openStepTab(step) {
+      if (!step?.id) return
+      this.snapshotActiveStepTabState()
+      const tabId = this.tabIdForStep(step.id)
+      let tab = this.findStepTab(tabId)
+      if (!tab) {
+        tab = {
+          id: tabId,
+          kind: 'step',
+          stepId: step.id,
+          label: this.stepTabLabelForStep(step)
+        }
+        this.stepTabs.push(tab)
+      } else {
+        const label = this.stepTabLabelForStep(step)
+        if (tab.label !== label) tab.label = label
+      }
+      this.activeStepTabId = tabId
+      if (!this.restoreStepTabStateFromDraft(tabId)) {
+        this.applyStepToForm(step)
+      }
+      this.scheduleStepTabsPersist()
+    },
+
+    openDraftStepTab(attach = null) {
+      this.snapshotActiveStepTabState()
+      const tabId = this.generateDraftTabId()
+      this.stepTabs.push({
+        id: tabId,
+        kind: 'draft',
+        stepId: '',
+        label: '新增步骤'
+      })
+      this.activeStepTabId = tabId
+      this.editingStep = null
+      this.editingStepName = false
+      this.controlFlowChildAttach = attach || null
+      this.stepRunOutput = null
+      this.stepRunResultTab = 'response'
+      this.stepRunResponseDetailTab = 'body'
+      this.stepRequestBodyViewMode = 'edit'
+      this.stepRequestBodyCollapsed = {}
+      this.stepRequestBodyJsonCollapsed = {}
+      this.stepDebugRequestSnapshotJsonCollapsed = {}
+      this.stepDebugResponseBodyCollapsed = {}
+      this.stepDebugResponseJsonCollapsed = {}
+      this.stepForm = this.emptyStepForm(this.nextStepOrder())
+      this.scheduleStepTabsPersist()
+    },
+
+    onStepTabBeforeLeave(_targetName, currentName) {
+      if (currentName && currentName !== _targetName) {
+        // 此时 activeStepTabId 仍指向旧 tab，stepForm 仍是旧 tab 的内容，先快照。
+        this.snapshotActiveStepTabState()
+      }
+      return true
+    },
+
+    onStepTabChange(targetTabId) {
+      if (!targetTabId) return
+      this.applyStepTabContext(targetTabId)
+      this.scheduleStepTabsPersist()
+    },
+
+    applyStepTabContext(tabId) {
+      const tab = this.findStepTab(tabId)
+      if (!tab) return
+      if (this.restoreStepTabStateFromDraft(tabId)) return
+      if (tab.kind === 'step') {
+        const step = this.steps.find((s) => s.id === tab.stepId)
+        if (step) {
+          this.applyStepToForm(step)
+        } else {
+          this.removeStepTab(tabId)
+        }
+      } else {
+        this.editingStep = null
+        this.editingStepName = false
+        this.controlFlowChildAttach = null
+        this.stepRunOutput = null
+        this.stepRunResultTab = 'response'
+        this.stepRunResponseDetailTab = 'body'
+        this.stepRequestBodyViewMode = 'edit'
+        this.stepRequestBodyCollapsed = {}
+        this.stepRequestBodyJsonCollapsed = {}
+        this.stepDebugRequestSnapshotJsonCollapsed = {}
+        this.stepDebugResponseBodyCollapsed = {}
+        this.stepDebugResponseJsonCollapsed = {}
+        this.stepForm = this.emptyStepForm(this.nextStepOrder())
+      }
+    },
+
+    switchToStepTab(tabId) {
+      const tab = this.findStepTab(tabId)
+      if (!tab) return
+      if (tabId === this.activeStepTabId) return
+      this.snapshotActiveStepTabState()
+      this.activeStepTabId = tabId
+      this.applyStepTabContext(tabId)
+      this.scheduleStepTabsPersist()
+    },
+
+    closeStepTab(tabId) {
+      if (!tabId) return
+      this.removeStepTab(tabId)
+    },
+
+    removeStepTab(tabId) {
+      const idx = this.stepTabs.findIndex((t) => t.id === tabId)
+      if (idx < 0) return
+      const wasActive = this.activeStepTabId === tabId
+      this.stepTabs.splice(idx, 1)
+      this.discardStepTabDraft(tabId)
+      if (wasActive) {
+        const next = this.stepTabs[idx] || this.stepTabs[idx - 1] || null
+        if (next) {
+          this.activeStepTabId = next.id
+          this.applyStepTabContext(next.id)
+        } else {
+          this.activeStepTabId = ''
+          this.editingStep = null
+          this.editingStepName = false
+          this.controlFlowChildAttach = null
+          this.stepRunOutput = null
+          this.stepForm = this.emptyStepForm(undefined)
+        }
+      }
+      this.scheduleStepTabsPersist()
+    },
+
+    refreshStepTabLabel(step) {
+      if (!step?.id) return
+      const tab = this.findStepTab(this.tabIdForStep(step.id))
+      if (!tab) return
+      const label = this.stepTabLabelForStep(step)
+      if (tab.label !== label) {
+        tab.label = label
+        this.scheduleStepTabsPersist()
+      }
+    },
+
+    promoteDraftTabToStep(savedStep) {
+      if (!savedStep?.id) return
+      const tabId = this.activeStepTabId
+      const tab = this.findStepTab(tabId)
+      if (!tab || tab.kind !== 'draft') return
+      const newTabId = this.tabIdForStep(savedStep.id)
+      const existingIdx = this.stepTabs.findIndex(
+        (t) => t.id === newTabId && t.id !== tabId
+      )
+      if (existingIdx !== -1) {
+        this.stepTabs.splice(existingIdx, 1)
+        if (this._stepTabDrafts) delete this._stepTabDrafts[newTabId]
+      }
+      tab.id = newTabId
+      tab.kind = 'step'
+      tab.stepId = savedStep.id
+      tab.label = this.stepTabLabelForStep(savedStep)
+      if (this._stepTabDrafts && this._stepTabDrafts[tabId]) {
+        this._stepTabDrafts[newTabId] = this._stepTabDrafts[tabId]
+        delete this._stepTabDrafts[tabId]
+      }
+      this.activeStepTabId = newTabId
+      this.scheduleStepTabsPersist()
+    },
+
+    scheduleStepTabsPersist() {
+      if (this._restoringStepTabs) return
+      if (!this.stepWorkspaceScopeKey) return
+      if (this._stepTabsPersistTimer) clearTimeout(this._stepTabsPersistTimer)
+      this._stepTabsPersistTimer = setTimeout(() => {
+        this._stepTabsPersistTimer = null
+        this.flushStepTabsToStorage(this.stepWorkspaceScopeKey)
+      }, 150)
+    },
+
+    flushStepTabsToStorage(scopeKey) {
+      if (!scopeKey) return
+      const persistableTabs = this.stepTabs
+        .filter((t) => t.kind === 'step' && t.stepId)
+        .map((t) => ({
+          id: t.id,
+          kind: t.kind,
+          stepId: t.stepId,
+          label: t.label || ''
+        }))
+      const activeTabPersistable =
+        this.stepTabs.find((t) => t.id === this.activeStepTabId)?.kind === 'step'
+          ? this.activeStepTabId
+          : ''
+      writeTabStateByScopeKey(SCENARIO_STEP_WORKSPACE_KEY, scopeKey, {
+        tabs: persistableTabs,
+        activeTabId: activeTabPersistable
+      })
+    },
+
+    restoreStepTabsFromStorage() {
+      const scopeKey = this.stepWorkspaceScopeKey
+      if (!scopeKey) return false
+      const stored = readTabStateByScopeKey(SCENARIO_STEP_WORKSPACE_KEY, scopeKey)
+      const stepIndex = new Map(this.steps.map((s) => [s.id, s]))
+      const restored = []
+      for (const t of stored.tabs) {
+        if (t.kind !== 'step' || !t.stepId) continue
+        const live = stepIndex.get(t.stepId)
+        if (!live) continue
+        restored.push({
+          id: this.tabIdForStep(t.stepId),
+          kind: 'step',
+          stepId: t.stepId,
+          label: this.stepTabLabelForStep(live)
+        })
+      }
+      if (!restored.length) return false
+      this._restoringStepTabs = true
+      try {
+        this.stepTabs = restored
+        const wantActive = stored.activeTabId
+        const matchedActive = restored.find((t) => t.id === wantActive)
+        const finalActive = matchedActive || restored[0]
+        this.activeStepTabId = finalActive.id
+        const step = stepIndex.get(finalActive.stepId)
+        if (step) this.applyStepToForm(step)
+      } finally {
+        this._restoringStepTabs = false
+      }
+      return true
+    },
+
     initStepSidebarWidth() {
       try {
         const raw = localStorage.getItem(STEP_SIDEBAR_WIDTH_STORAGE_KEY)
@@ -1514,11 +2071,100 @@ export default {
       this._stepSidebarResize = null
     },
 
-    setRunResultResponseDetailTab(stepIndex, tab) {
-      this.runResultResponseDetailTabByStep = {
-        ...this.runResultResponseDetailTabByStep,
+    setRunResultDetailTab(stepIndex, tab) {
+      this.runResultDetailTabByStep = {
+        ...this.runResultDetailTabByStep,
         [stepIndex]: tab
       }
+    },
+    clampRunResultPanelHeight(value) {
+      const viewport = typeof window !== 'undefined' ? window.innerHeight : 800
+      const max = Math.max(260, Math.floor(viewport * 0.72))
+      return clampNumber(Number(value) || 360, 220, max)
+    },
+    nudgeRunResultPanelHeight(delta) {
+      this.runResultPanelHeightPx = this.clampRunResultPanelHeight(this.runResultPanelHeightPx + delta)
+    },
+    startRunResultPanelResize(event) {
+      if (event.button !== undefined && event.button !== 0) return
+      const startY = event.clientY
+      const startH = this.runResultPanelHeightPx
+      const onMove = (e) => {
+        this.runResultPanelHeightPx = this.clampRunResultPanelHeight(startH + startY - e.clientY)
+      }
+      const onUp = () => {
+        document.removeEventListener('mousemove', onMove)
+        document.removeEventListener('mouseup', onUp)
+        document.body.style.cursor = ''
+        document.body.style.userSelect = ''
+        this._runResultPanelResize = null
+      }
+      document.addEventListener('mousemove', onMove)
+      document.addEventListener('mouseup', onUp)
+      document.body.style.cursor = 'row-resize'
+      document.body.style.userSelect = 'none'
+      this._runResultPanelResize = { onMove, onUp }
+    },
+    detachRunResultPanelResizeListeners() {
+      if (!this._runResultPanelResize) return
+      document.removeEventListener('mousemove', this._runResultPanelResize.onMove)
+      document.removeEventListener('mouseup', this._runResultPanelResize.onUp)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      this._runResultPanelResize = null
+    },
+    runResultCollapseKey(stepIndex, kind) {
+      return `${stepIndex}:${kind}`
+    },
+    toggleRunResultJsonCollapse(stepIndex, kind, path) {
+      const key = this.runResultCollapseKey(stepIndex, kind)
+      const current = { ...(this.runResultJsonCollapsed[key] || {}) }
+      if (current[path]) {
+        delete current[path]
+      } else {
+        current[path] = true
+      }
+      this.runResultJsonCollapsed = {
+        ...this.runResultJsonCollapsed,
+        [key]: current
+      }
+    },
+    runResultJsonLines(stepIndex, kind, snapshot) {
+      const value = this.normalizeSnapshotForViewer(snapshot)
+      if (value == null || value === '') return []
+      const lines = []
+      const collapsed = this.runResultJsonCollapsed[this.runResultCollapseKey(stepIndex, kind)] || {}
+      this.collectJsonLines(value, null, '$', 0, true, collapsed, lines)
+      return lines
+    },
+    normalizeSnapshotForViewer(value) {
+      if (value == null || value === '') return value
+      if (typeof value === 'string') {
+        const parsed = this.tryParseJSONText(value)
+        return parsed === undefined ? value : this.normalizeSnapshotForViewer(parsed)
+      }
+      if (Array.isArray(value)) {
+        return value.map((item) => this.normalizeSnapshotForViewer(item))
+      }
+      if (typeof value === 'object') {
+        return Object.fromEntries(
+          Object.entries(value).map(([key, item]) => [key, this.normalizeSnapshotForViewer(item)])
+        )
+      }
+      return value
+    },
+    tryParseJSONText(value) {
+      const text = String(value).trim()
+      if (!text || !['{', '['].includes(text[0])) return undefined
+      try {
+        return JSON.parse(text)
+      } catch {
+        return undefined
+      }
+    },
+    runResultRequestMethod(sr) {
+      const req = this.parseSnapshotObject(sr?.result?.requestSnapshot)
+      return req?.method || req?.type || ''
     },
     stepsRefSnippet(stepSeq, pathAfterBracket) {
       const n = stepSeq != null ? String(stepSeq) : '?'
@@ -1704,11 +2350,20 @@ export default {
       try {
         await reorderScenarioSteps(this.scenario.id, { stepIds: ids })
         this.steps = await listScenarioSteps(this.scenario.id)
+        for (const tab of this.stepTabs) {
+          if (tab.kind !== 'step') continue
+          const live = this.steps.find((s) => s.id === tab.stepId)
+          if (live) {
+            tab.label = this.stepTabLabelForStep(live)
+            this.discardStepTabDraft(tab.id)
+          }
+        }
         const curId = this.editingStep?.id
         if (curId) {
           const u = this.steps.find((s) => s.id === curId)
-          if (u) this.editStep(u)
+          if (u) this.applyStepToForm(u)
         }
+        this.scheduleStepTabsPersist()
       } catch {
         this.steps = await listScenarioSteps(this.scenario.id)
       }
@@ -1744,6 +2399,9 @@ export default {
         if (this.editingStep?.id === step.id) {
           this.stepForm.enabled = enabled
         }
+        const tabId = this.tabIdForStep(step.id)
+        const draft = this._stepTabDrafts && this._stepTabDrafts[tabId]
+        if (draft?.stepForm) draft.stepForm.enabled = enabled
       } catch {
         step.enabled = prev
       }
@@ -1752,13 +2410,21 @@ export default {
     async loadStepsForScenario() {
       if (!this.scenario?.id) {
         this.steps = []
+        this.stepTabs = []
+        this.activeStepTabId = ''
+        this._stepTabDrafts = {}
         return
       }
       this.steps = await listScenarioSteps(this.scenario.id)
+      this.stepTabs = []
+      this.activeStepTabId = ''
+      this._stepTabDrafts = {}
+      const restored = this.restoreStepTabsFromStorage()
+      if (restored) return
       if (this.steps.length) {
-        this.editStep(this.steps[0])
+        this.openStepTab(this.steps[0])
       } else {
-        this.startNewStepDraft()
+        this.openDraftStepTab()
       }
     },
     emptyStepForm(stepOrder) {
@@ -1808,19 +2474,7 @@ export default {
     },
 
     startNewStepDraft(attach = null) {
-      this.editingStep = null
-      this.editingStepName = false
-      this.controlFlowChildAttach = attach || null
-      this.stepRunOutput = null
-      this.stepRunResultTab = 'response'
-      this.stepRunResponseDetailTab = 'body'
-      this.stepRequestBodyViewMode = 'edit'
-      this.stepRequestBodyCollapsed = {}
-      this.stepRequestBodyJsonCollapsed = {}
-      this.stepDebugRequestSnapshotJsonCollapsed = {}
-      this.stepDebugResponseBodyCollapsed = {}
-      this.stepDebugResponseJsonCollapsed = {}
-      this.stepForm = this.emptyStepForm(this.nextStepOrder())
+      this.openDraftStepTab(attach)
     },
 
     startNewControlChildDraft(parentStep, branch) {
@@ -1837,7 +2491,8 @@ export default {
       this.$message.info(`保存后会自动加入 #${parentStep.stepSeq} ${branchName}步骤组`)
     },
 
-    editStep(step) {
+    applyStepToForm(step) {
+      if (!step) return
       this.editingStep = step
       this.editingStepName = false
       if (step?.id) {
@@ -1862,6 +2517,11 @@ export default {
       if (this.stepForm.stepType === 'api') {
         this.applyStepRequestEditor(step.testCaseId, step.requestOverride || {})
       }
+    },
+
+    editStep(step) {
+      if (!step?.id) return
+      this.openStepTab(step)
     },
 
     applyStepConfigEditor(rawConfig) {
@@ -1931,11 +2591,11 @@ export default {
     },
 
     selectPanelStep(step) {
-      this.editStep(step)
+      this.openStepTab(step)
     },
 
     isPanelStepActive(step) {
-      return this.editingStep?.id === step.id
+      return Boolean(step?.id) && this.activeTabStepId === step.id
     },
 
     onRequestMethodChange() {
@@ -1974,12 +2634,13 @@ export default {
       const request = this.resolveStepRequest(tc, rawOverride)
       this.stepForm.requestMethod = String(request.method || tc.method || 'GET').toUpperCase()
       this.stepForm.requestPath = this.normalizePathVariables(request.path)
+      this.stepForm.pathParamRows = this.buildStepPathRows(this.stepForm.requestPath, request.variables)
       this.stepForm.queryRows = this.buildStepQueryRows(tc, this.normalizeObject(request.query))
       this.stepForm.headerRows = this.buildStepHeaderRows(tc, this.normalizeObject(request.headers))
-      this.setStepBodyText(request.body == null ? '' : this.formatJSON(request.body))
+      this.setStepBodyText(request.body == null ? '' : this.formatStepBodyValue(request.body))
       this.stepForm.requestSecurity = request.security
-      this.syncPathParamRows()
       this.stepForm.requestTab = this.defaultStepRequestTab()
+      this.refreshEnvironmentAuthRows()
     },
     resolveStepRequest(tc, rawOverride) {
       const base = this.normalizeRequest(tc.request)
@@ -1990,15 +2651,25 @@ export default {
         path: hasOverride('path') ? override.path : (base.path || tc.path),
         headers: hasOverride('headers') ? this.normalizeObject(override.headers) : this.normalizeObject(base.headers),
         query: hasOverride('query') ? this.normalizeObject(override.query) : this.normalizeObject(base.query),
+        variables: hasOverride('variables') ? this.normalizeObject(override.variables) : this.normalizeObject(base.variables),
         body: hasOverride('body') ? override.body : base.body,
         security: hasOverride('security') ? override.security : base.security
       }
+      const separated = this.separateRuntimePathValues(request.path, base.path || tc.path, request.variables)
+      request.path = separated.path
+      request.variables = separated.variables
       return request
     },
 
     syncPathParamRows() {
       const current = this.rowsToObject(this.stepForm.pathParamRows)
-      const defaults = this.pathVariables(this.stepForm.requestPath)
+      this.stepForm.pathParamRows = this.buildStepPathRows(this.stepForm.requestPath, current)
+      this.refreshEnvironmentAuthRows()
+    },
+
+    buildStepPathRows(path, values) {
+      const current = this.normalizeObject(values)
+      const defaults = this.pathVariables(path)
       const rows = []
       for (const key of Object.keys(defaults)) {
         rows.push({
@@ -2007,30 +2678,30 @@ export default {
           value: Object.prototype.hasOwnProperty.call(current, key) ? current[key] : defaults[key]
         })
       }
-      this.stepForm.pathParamRows = rows
+      return rows
     },
 
     buildStepRequestOverride() {
       let body = null
       if (this.stepForm.bodyText.trim()) {
         try {
-          body = JSON.parse(this.stepForm.bodyText)
+          body = this.parseTemplateAwareJSON(this.stepForm.bodyText, true)
         } catch (error) {
           throw new Error(`Body 不是合法 JSON：${error.message}`)
         }
       }
-      let path = this.pathForRun(this.stepForm.requestPath || this.findCasePath(this.stepForm.testCaseId))
-      for (const row of (this.stepForm.pathParamRows || [])) {
-        if (row.enabled !== false && row.key && row.key.trim()) {
-          const escaped = row.key.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-          path = path.replace(new RegExp(`\\{\\{+${escaped}\\}\\}+`, 'g'), row.value || '')
-        }
-      }
+      const path = this.normalizePathVariables(this.stepForm.requestPath || this.findCasePath(this.stepForm.testCaseId))
+      const tc = this.findCase(this.stepForm.testCaseId)
+      const baseRequest = this.normalizeRequest(tc?.request)
       const request = {
         method: this.stepForm.requestMethod || this.findCaseMethod(this.stepForm.testCaseId),
         path,
         headers: this.rowsToObject(this.stepForm.headerRows),
         query: this.rowsToObject(this.stepForm.queryRows),
+        variables: {
+          ...this.normalizeObject(baseRequest.variables),
+          ...this.rowsToObject(this.stepForm.pathParamRows)
+        },
         body
       }
       if (this.stepForm.requestSecurity !== undefined) {
@@ -2042,7 +2713,7 @@ export default {
     formatStepBody() {
       if (!this.stepForm.bodyText.trim()) return
       try {
-        this.setStepBodyText(this.formatJSON(JSON.parse(this.stepForm.bodyText)))
+        this.setStepBodyText(this.formatTemplateAwareJSON(this.stepForm.bodyText))
       } catch (error) {
         this.$message.error(`Body 不是合法 JSON：${error.message}`)
       }
@@ -2053,7 +2724,8 @@ export default {
     },
 
     removeRow(rows, index) {
-      rows.splice(index, 1)
+      const removed = rows.splice(index, 1)
+      if (removed[0]?.authInherited) this.refreshEnvironmentAuthRows()
     },
 
     objectToRows(value, enabledMap, requiredMap) {
@@ -2065,11 +2737,19 @@ export default {
       }))
     },
 
-    rowsToObject(rows) {
+    rowsToObject(rows, options = {}) {
+      const includeInherited = options.includeInherited === true
       return (rows || []).reduce((out, row) => {
+        if (row.authInherited && !row.authOverridden && !includeInherited) return out
         if (row.enabled !== false && row.key && row.key.trim()) out[row.key.trim()] = row.value
         return out
       }, {})
+    },
+
+    markRowOverridden(row) {
+      if (row && row.authInherited) {
+        row.authOverridden = true
+      }
     },
 
     normalizeObject(value) {
@@ -2092,22 +2772,53 @@ export default {
       }
     },
 
+    isPathVariableName(name) {
+      return /^[A-Za-z_][A-Za-z0-9_-]*$/.test(String(name || '').trim())
+    },
+
     normalizePathVariables(path) {
-      return String(path || '').replace(/\{\{+([^{}]+)\}\}+/g, '{$1}')
+      return String(path || '')
+        .replace(/\{+\s*(\$[^{}]+?)\s*\}+/g, (_, expr) => `{{${expr.trim()}}}`)
+        .replace(/\{\{+([^{}]+)\}\}+/g, (match, name) => {
+          const trimmed = String(name || '').trim()
+          return this.isPathVariableName(trimmed) ? `{${trimmed}}` : match
+        })
+    },
+
+    separateRuntimePathValues(path, templatePath, variables) {
+      const normalizedPath = this.normalizePathVariables(path)
+      const normalizedTemplate = this.normalizePathVariables(templatePath)
+      const values = { ...this.normalizeObject(variables) }
+      const pathParts = normalizedPath.split('/')
+      const templateParts = normalizedTemplate.split('/')
+      if (pathParts.length !== templateParts.length) {
+        return { path: normalizedPath, variables: values }
+      }
+      let changed = false
+      for (let idx = 0; idx < templateParts.length; idx += 1) {
+        const match = templateParts[idx].match(/^\{([A-Za-z_][A-Za-z0-9_-]*)\}$/)
+        if (!match || pathParts[idx] === templateParts[idx]) continue
+        if (!Object.prototype.hasOwnProperty.call(values, match[1])) {
+          values[match[1]] = pathParts[idx]
+        }
+        changed = true
+      }
+      return { path: changed ? normalizedTemplate : normalizedPath, variables: values }
     },
 
     pathForRun(path) {
-      return String(path || '').replace(/(^|[^{])\{([^{}]+)\}(?!\})/g, '$1{{$2}}')
+      return this.normalizePathVariables(path).replace(/(^|[^{])\{([^{}]+)\}(?!\})/g, (match, prefix, name) => {
+        const trimmed = String(name || '').trim()
+        return this.isPathVariableName(trimmed) ? `${prefix}{{${trimmed}}}` : match
+      })
     },
 
     pathVariables(path) {
       const variables = {}
-      const source = String(path || '')
-      for (const match of source.matchAll(/\{\{+([^{}]+)\}\}+/g)) {
-        variables[match[1]] = '1'
-      }
+      const source = this.normalizePathVariables(path)
       for (const match of source.matchAll(/(^|[^{])\{([^{}]+)\}(?!\})/g)) {
-        variables[match[2]] = '1'
+        const name = String(match[2] || '').trim()
+        if (this.isPathVariableName(name)) variables[name] = '1'
       }
       return variables
     },
@@ -2120,6 +2831,119 @@ export default {
 
     formatJSON(value) {
       return JSON.stringify(value, null, 2)
+    },
+
+    formatStepBodyValue(value) {
+      const prepared = this.prepareBareTemplateMarkersForFormatting(value)
+      let formatted = this.formatJSON(prepared.value)
+      for (const item of prepared.placeholders) {
+        formatted = formatted.split(JSON.stringify(item.placeholder)).join(item.token)
+      }
+      return formatted
+    },
+
+    parseTemplateAwareJSON(text, markBareTemplates = false) {
+      const source = String(text || '')
+      try {
+        return JSON.parse(source)
+      } catch (nativeError) {
+        const prepared = this.prepareBareTemplateJSON(source)
+        if (!prepared.changed) throw nativeError
+        return this.restoreBareTemplateJSONValue(JSON.parse(prepared.text), prepared.placeholders, markBareTemplates)
+      }
+    },
+
+    formatTemplateAwareJSON(text) {
+      const source = String(text || '')
+      const prepared = this.prepareBareTemplateJSON(source)
+      const parsed = JSON.parse(prepared.text)
+      let formatted = this.formatJSON(parsed)
+      for (const item of prepared.placeholders) {
+        formatted = formatted.split(JSON.stringify(item.placeholder)).join(item.token)
+      }
+      return formatted
+    },
+
+    prepareBareTemplateJSON(text) {
+      const placeholders = []
+      let out = ''
+      let i = 0
+      let inString = false
+      let escaping = false
+      while (i < text.length) {
+        const ch = text[i]
+        if (inString) {
+          out += ch
+          if (escaping) {
+            escaping = false
+          } else if (ch === '\\') {
+            escaping = true
+          } else if (ch === '"') {
+            inString = false
+          }
+          i += 1
+          continue
+        }
+        if (ch === '"') {
+          inString = true
+          out += ch
+          i += 1
+          continue
+        }
+        if (ch === '{' && text[i + 1] === '{') {
+          const end = text.indexOf('}}', i + 2)
+          if (end !== -1) {
+            const token = text.slice(i, end + 2)
+            const placeholder = `__AUTOTEST_BARE_TEMPLATE_${placeholders.length}__`
+            placeholders.push({ placeholder, token })
+            out += JSON.stringify(placeholder)
+            i = end + 2
+            continue
+          }
+        }
+        out += ch
+        i += 1
+      }
+      return { text: out, placeholders, changed: placeholders.length > 0 }
+    },
+
+    restoreBareTemplateJSONValue(value, placeholders, markBareTemplates = false) {
+      if (!placeholders.length || value == null) return value
+      if (typeof value === 'string') {
+        const hit = placeholders.find((item) => item.placeholder === value)
+        if (!hit) return value
+        return markBareTemplates ? { __autotestBareTemplate: hit.token } : hit.token
+      }
+      if (Array.isArray(value)) {
+        return value.map((item) => this.restoreBareTemplateJSONValue(item, placeholders, markBareTemplates))
+      }
+      if (typeof value === 'object') {
+        const out = {}
+        for (const [key, item] of Object.entries(value)) {
+          out[key] = this.restoreBareTemplateJSONValue(item, placeholders, markBareTemplates)
+        }
+        return out
+      }
+      return value
+    },
+
+    prepareBareTemplateMarkersForFormatting(value) {
+      const placeholders = []
+      const walk = (item) => {
+        if (item == null || typeof item !== 'object') return item
+        if (!Array.isArray(item) && Object.keys(item).length === 1 && typeof item.__autotestBareTemplate === 'string') {
+          const placeholder = `__AUTOTEST_FORMAT_BARE_TEMPLATE_${placeholders.length}__`
+          placeholders.push({ placeholder, token: item.__autotestBareTemplate })
+          return placeholder
+        }
+        if (Array.isArray(item)) return item.map(walk)
+        const out = {}
+        for (const [key, child] of Object.entries(item)) {
+          out[key] = walk(child)
+        }
+        return out
+      }
+      return { value: walk(value), placeholders }
     },
 
     cloneSample(value) {
@@ -2163,6 +2987,188 @@ export default {
       return this.objectToRows(merged)
     },
 
+    refreshEnvironmentAuthRows() {
+      if (!this.stepForm || this.stepForm.stepType !== 'api') return
+      this.stepForm.headerRows = this.mergeInheritedAuthRows(
+        this.stepForm.headerRows,
+        this.environmentAuthRequestRows().headers,
+        true
+      )
+      this.stepForm.queryRows = this.mergeInheritedAuthRows(
+        this.stepForm.queryRows,
+        this.environmentAuthRequestRows().query,
+        false
+      )
+    },
+
+    mergeInheritedAuthRows(currentRows, inheritedRows, headerMode) {
+      const manualRows = (currentRows || []).filter((row) => !row.authInherited || row.authOverridden)
+      const exists = (key) => {
+        const target = headerMode ? String(key).toLowerCase() : String(key)
+        return manualRows.some((row) => {
+          if (row.enabled === false) return false
+          const rowKey = headerMode ? String(row.key || '').toLowerCase() : String(row.key || '')
+          return rowKey === target
+        })
+      }
+      const additions = (inheritedRows || [])
+        .filter((row) => row.key && !exists(row.key))
+        .map((row) => ({
+          enabled: true,
+          required: false,
+          ...row,
+          authInherited: true,
+          authOverridden: false
+        }))
+      return [...manualRows, ...additions]
+    },
+
+    environmentAuthRequestRows() {
+      const auth = this.selectEnvironmentAuthDefinition()
+      if (!auth) return { headers: [], query: [] }
+
+      const headers = []
+      const query = []
+      const headerKeys = new Set()
+      const queryKeys = new Set()
+      const addHeader = (key, value) => {
+        const name = String(key || '').trim()
+        const normalized = name.toLowerCase()
+        if (name && !headerKeys.has(normalized)) {
+          headerKeys.add(normalized)
+          headers.push({ key: name, value: String(value ?? '') })
+        }
+      }
+      const addQuery = (key, value) => {
+        const name = String(key || '').trim()
+        if (name && !queryKeys.has(name)) {
+          queryKeys.add(name)
+          query.push({ key: name, value: String(value ?? '') })
+        }
+      }
+
+      for (const [key, value] of Object.entries(this.normalizeObject(auth.headers))) {
+        addHeader(key, value)
+      }
+      for (const [key, value] of Object.entries(this.normalizeObject(auth.query))) {
+        addQuery(key, value)
+      }
+
+      const type = String(auth.type || '').trim().toLowerCase()
+      if (['bearer', 'jwt', 'oauth2'].includes(type)) {
+        const tokenTemplate = auth.token || auth.value || ''
+        const token = String(tokenTemplate).trim()
+        if (token) addHeader('Authorization', token.toLowerCase().startsWith('bearer ') ? token : `Bearer ${token}`)
+      } else if (type === 'basic') {
+        const username = auth.username || '{{username}}'
+        const password = auth.password || '{{password}}'
+        addHeader('Authorization', `Basic ${username}:${password}`)
+      } else if (['api_key', 'apikey', 'api-key'].includes(type)) {
+        const name = auth.name || ''
+        const value = auth.value || auth.token || ''
+        if (String(auth.in || '').toLowerCase() === 'query') addQuery(name, value)
+        else addHeader(name, value)
+      } else if (type === 'header') {
+        addHeader(auth.name, auth.value)
+      } else if (type === 'query') {
+        addQuery(auth.name, auth.value)
+      }
+      return { headers, query }
+    },
+
+    selectEnvironmentAuthDefinition() {
+      const env = this.environments.find((item) => String(item.id) === String(this.runEnvId))
+      const rawAuth = this.parseEnvironmentAuth(env?.auth)
+      if (!rawAuth || !Object.keys(rawAuth).length) return null
+
+      const profiles = this.normalizeObject(rawAuth.profiles)
+      if (!Object.keys(profiles).length) {
+        return this.hasStepSecurityRequirements() ? rawAuth : null
+      }
+
+      const bySecurity = this.profileNameForStepSecurity(rawAuth, profiles)
+      if (bySecurity) return this.normalizeObject(profiles[bySecurity])
+
+      const byPath = this.profileNameForEnvironmentPath(rawAuth, profiles)
+      if (byPath) return this.normalizeObject(profiles[byPath])
+
+      const fallback = String(rawAuth.defaultProfile || '').trim()
+      return fallback && profiles[fallback] ? this.normalizeObject(profiles[fallback]) : null
+    },
+
+    parseEnvironmentAuth(raw) {
+      if (!raw) return {}
+      if (typeof raw === 'object' && !Array.isArray(raw)) return raw
+      if (typeof raw === 'string') {
+        try {
+          const parsed = JSON.parse(raw)
+          return this.normalizeObject(parsed)
+        } catch {
+          return {}
+        }
+      }
+      return {}
+    },
+
+    hasStepSecurityRequirements() {
+      const security = this.stepForm?.requestSecurity
+      return Array.isArray(security) && security.some((requirement) => (
+        requirement && typeof requirement === 'object' && Object.keys(requirement).length > 0
+      ))
+    },
+
+    profileNameForStepSecurity(authConfig, profiles) {
+      const security = Array.isArray(this.stepForm?.requestSecurity) ? this.stepForm.requestSecurity : []
+      const securitySchemes = this.normalizeObject(authConfig.securitySchemes)
+      for (const requirement of security) {
+        if (!requirement || typeof requirement !== 'object') continue
+        for (const schemeName of Object.keys(requirement)) {
+          const scheme = String(schemeName || '').trim()
+          if (!scheme) continue
+          const mapped = String(securitySchemes[scheme] || '').trim()
+          if (mapped && profiles[mapped]) return mapped
+          if (profiles[scheme]) return scheme
+        }
+      }
+      return ''
+    },
+
+    profileNameForEnvironmentPath(authConfig, profiles) {
+      const rules = Array.isArray(authConfig.pathRules) ? authConfig.pathRules : []
+      const paths = [
+        this.normalizePathVariables(this.stepForm?.requestPath || ''),
+        this.normalizePathVariables(this.findCasePath(this.stepForm?.testCaseId) || '')
+      ]
+      let best = ''
+      let bestLen = -1
+      for (const rule of rules) {
+        const profile = String(rule?.profile || '').trim()
+        if (!profile || !profiles[profile]) continue
+        for (const rawPrefix of [rule.prefix, rule.path]) {
+          const prefix = this.normalizeAuthPath(rawPrefix)
+          if (!prefix) continue
+          for (const path of paths) {
+            if (this.pathMatchesAuthPrefix(this.normalizeAuthPath(path), prefix) && prefix.length > bestLen) {
+              best = profile
+              bestLen = prefix.length
+            }
+          }
+        }
+      }
+      return best
+    },
+
+    normalizeAuthPath(path) {
+      const trimmed = String(path || '').trim()
+      if (!trimmed) return ''
+      return trimmed.startsWith('/') ? trimmed : `/${trimmed}`
+    },
+
+    pathMatchesAuthPrefix(path, prefix) {
+      if (!path || !prefix) return false
+      return path === prefix || path.startsWith(`${prefix.replace(/\/+$/, '')}/`)
+    },
+
     requestFromSchema(rawSchema) {
       const schema = this.normalizeRequest(rawSchema)
       const request = {
@@ -2202,6 +3208,9 @@ export default {
     },
 
     parameterCommentForStep(row, location) {
+      if (row?.authInherited && !row?.authOverridden) {
+        return '继承自当前环境认证；修改后会保存为步骤覆盖，支持模板变量。'
+      }
       const name = row?.key
       if (!name) return '-'
       const parameters = Array.isArray(this.scenarioStepRequestSchema?.parameters)
@@ -2270,6 +3279,7 @@ export default {
         required,
         hasChildren,
         type: this.schemaTypeLabel(node),
+        constraints: this.schemaFieldConstraints(node),
         meaning: this.schemaFieldMeaning(node)
       })
 
@@ -2373,6 +3383,140 @@ export default {
       const title = typeof node.title === 'string' ? node.title.trim() : ''
       if (title) return title
       return ''
+    },
+
+    schemaFieldConstraints(schema) {
+      const node = this.normalizeSchemaNode(schema)
+      const constraints = []
+      const sources = [
+        node,
+        node.validation,
+        node.validations,
+        node.constraints,
+        node.rules,
+        node['x-validation'],
+        node['x-validations'],
+        node['x-constraints'],
+        node['x-rules']
+      ].filter((item) => item && typeof item === 'object' && !Array.isArray(item))
+      const seen = new Set()
+      const findValue = (aliases) => {
+        for (const source of sources) {
+          for (const key of aliases) {
+            if (Object.prototype.hasOwnProperty.call(source, key)) {
+              return { exists: true, value: source[key] }
+            }
+          }
+        }
+        return { exists: false, value: undefined }
+      }
+      const valueText = (value) => {
+        if (typeof value === 'string') return value
+        if (Array.isArray(value)) return value.map(valueText).join('|')
+        if (value === null) return 'null'
+        return String(value)
+      }
+      const push = (text) => {
+        if (!text || seen.has(text)) return
+        seen.add(text)
+        constraints.push(text)
+      }
+      const bound = (aliases, symbol) => {
+        const found = findValue(aliases)
+        if (found.exists) push(`${symbol}${valueText(found.value)}`)
+      }
+      const rangeBound = (minAliases, exclusiveMinAliases, maxAliases, exclusiveMaxAliases) => {
+        const min = findValue(minAliases)
+        const max = findValue(maxAliases)
+        const exclusiveMin = findValue(exclusiveMinAliases)
+        const exclusiveMax = findValue(exclusiveMaxAliases)
+
+        if (typeof exclusiveMin.value === 'number') {
+          push(`>${valueText(exclusiveMin.value)}`)
+        } else if (exclusiveMin.value === true && min.exists) {
+          push(`>${valueText(min.value)}`)
+        } else if (min.exists) {
+          push(`≥${valueText(min.value)}`)
+        }
+
+        if (typeof exclusiveMax.value === 'number') {
+          push(`<${valueText(exclusiveMax.value)}`)
+        } else if (exclusiveMax.value === true && max.exists) {
+          push(`<${valueText(max.value)}`)
+        } else if (max.exists) {
+          push(`≤${valueText(max.value)}`)
+        }
+      }
+      const genericMinMax = () => {
+        const min = findValue(['min', 'x-min'])
+        const max = findValue(['max', 'x-max'])
+        if (!min.exists && !max.exists) return
+        const type = this.schemaType(node).split('|')[0]
+        if (type === 'string') {
+          if (min.exists) push(`len≥${valueText(min.value)}`)
+          if (max.exists) push(`len≤${valueText(max.value)}`)
+        } else if (type === 'array') {
+          if (min.exists) push(`items≥${valueText(min.value)}`)
+          if (max.exists) push(`items≤${valueText(max.value)}`)
+        } else if (type === 'object') {
+          if (min.exists) push(`props≥${valueText(min.value)}`)
+          if (max.exists) push(`props≤${valueText(max.value)}`)
+        } else {
+          if (min.exists) push(`≥${valueText(min.value)}`)
+          if (max.exists) push(`≤${valueText(max.value)}`)
+        }
+      }
+
+      if (Array.isArray(node.enum) && node.enum.length > 0) {
+        push(`∈ ${node.enum.map(valueText).join('|')}`)
+      }
+      bound(['const', 'constant', 'x-const'], '=')
+
+      const minLength = findValue(['minLength', 'minlength', 'minLen', 'min_len', 'x-minLength', 'x-min-length'])
+      const maxLength = findValue(['maxLength', 'maxlength', 'maxLen', 'max_len', 'x-maxLength', 'x-max-length'])
+      const exactLength = findValue(['length', 'len', 'exactLength', 'x-length'])
+      if (exactLength.exists) {
+        push(`len=${valueText(exactLength.value)}`)
+      } else if (minLength.exists && maxLength.exists && minLength.value === maxLength.value) {
+        push(`len=${valueText(minLength.value)}`)
+      } else {
+        if (minLength.exists) push(`len≥${valueText(minLength.value)}`)
+        if (maxLength.exists) push(`len≤${valueText(maxLength.value)}`)
+      }
+
+      rangeBound(
+        ['minimum', 'minValue', 'x-minimum'],
+        ['exclusiveMinimum', 'exclusiveMin', 'x-exclusiveMinimum'],
+        ['maximum', 'maxValue', 'x-maximum'],
+        ['exclusiveMaximum', 'exclusiveMax', 'x-exclusiveMaximum']
+      )
+      genericMinMax()
+      bound(['multipleOf', 'multiple', 'x-multipleOf'], '×')
+
+      const minItems = findValue(['minItems', 'minitems', 'min_items', 'minSize', 'x-minItems'])
+      const maxItems = findValue(['maxItems', 'maxitems', 'max_items', 'maxSize', 'x-maxItems'])
+      if (minItems.exists && maxItems.exists && minItems.value === maxItems.value) {
+        push(`items=${valueText(minItems.value)}`)
+      } else {
+        if (minItems.exists) push(`items≥${valueText(minItems.value)}`)
+        if (maxItems.exists) push(`items≤${valueText(maxItems.value)}`)
+      }
+      if (findValue(['uniqueItems', 'unique', 'x-uniqueItems']).value === true) push('unique')
+      bound(['minProperties', 'minProps', 'x-minProperties'], 'props≥')
+      bound(['maxProperties', 'maxProps', 'x-maxProperties'], 'props≤')
+
+      if (typeof node.pattern === 'string' && node.pattern.trim()) {
+        push(`/${node.pattern.trim()}/`)
+      }
+      const pattern = findValue(['regex', 'regexp', 'matches', 'x-pattern'])
+      if (typeof pattern.value === 'string' && pattern.value.trim()) push(`/${pattern.value.trim()}/`)
+      if (findValue(['nullable', 'x-nullable']).value === true) push('null?')
+      if (findValue(['allowEmptyValue', 'allowEmpty', 'x-allowEmptyValue']).value === true) push('empty?')
+      if (findValue(['readOnly', 'readonly']).value === true) push('readOnly')
+      if (findValue(['writeOnly', 'writeonly']).value === true) push('writeOnly')
+      if (findValue(['deprecated', 'x-deprecated']).value === true) push('deprecated')
+
+      return constraints.join(' · ')
     },
 
     schemaTypeLabel(schema) {
@@ -2579,18 +3723,8 @@ export default {
 
     setStepBodyText(text) {
       this.stepForm.bodyText = text
-      this.$nextTick(() => {
-        const el = this.$refs.stepBodyEditor
-        if (el && el.innerText !== text) el.innerText = text || ''
-      })
     },
 
-    syncStepBodyEditorInner() {
-      const el = this.$refs.stepBodyEditor
-      if (!el) return
-      const t = this.stepForm.bodyText ?? ''
-      if (el.innerText !== t) el.innerText = t
-    },
     stepDebugMetricClass(status) {
       if (status === 'passed') return 'is-success'
       if (status === 'failed' || status === 'error') return 'is-danger'
@@ -2695,9 +3829,10 @@ export default {
         const curHeaders = this.rowsToObject(this.stepForm.headerRows)
         const mergedHeaders = { ...curHeaders, ...this.normalizeObject(generated.headers) }
         this.stepForm.headerRows = this.buildStepHeaderRows(tc, mergedHeaders)
+        this.refreshEnvironmentAuthRows()
 
         if (generated.body != null) {
-          this.setStepBodyText(this.formatJSON(generated.body))
+          this.setStepBodyText(this.formatStepBodyValue(generated.body))
         }
         this.$message.success('已重新生成参数')
       } catch {
@@ -2774,11 +3909,12 @@ export default {
 
       this.stepForm.headerRows = this.buildStepHeaderRows(tc, mergedHeaders)
       this.stepForm.queryRows = this.buildStepQueryRows(tc, mergedQuery)
+      this.refreshEnvironmentAuthRows()
 
       let bodyDraft = null
       if ((this.stepForm.bodyText || '').trim()) {
         try {
-          bodyDraft = JSON.parse(this.stepForm.bodyText)
+          bodyDraft = this.parseTemplateAwareJSON(this.stepForm.bodyText)
         } catch {
           bodyDraft = this.stepForm.bodyText
         }
@@ -2789,12 +3925,13 @@ export default {
       } else if (typeof nextBody === 'string') {
         this.setStepBodyText(nextBody)
       } else {
-        this.setStepBodyText(this.formatJSON(nextBody))
+        this.setStepBodyText(this.formatStepBodyValue(nextBody))
       }
 
       if (nextBody != null && nextBody !== '' && !mergedHeaders['Content-Type']) {
         mergedHeaders['Content-Type'] = 'application/json'
         this.stepForm.headerRows = this.buildStepHeaderRows(tc, mergedHeaders)
+        this.refreshEnvironmentAuthRows()
       }
 
       this.$message.success('已应用 AI 生成的参数')
@@ -2985,8 +4122,7 @@ export default {
           try {
             this.steps = await listScenarioSteps(this.scenario.id)
             const cur = this.steps.find((s) => s.id === saved.id)
-            if (cur) this.editStep(cur)
-            else this.editingStep = saved
+            this.handleStepSaved(cur || saved)
           } catch {
             const idx = this.steps.findIndex((s) => s.stepOrder === saved.stepOrder)
             if (idx !== -1) this.steps.splice(idx, 1, saved)
@@ -2994,7 +4130,7 @@ export default {
               this.steps.push(saved)
               this.steps.sort((a, b) => a.stepOrder - b.stepOrder)
             }
-            this.editingStep = saved
+            this.handleStepSaved(saved)
           }
         } else {
           const idx = this.steps.findIndex((s) => s.stepOrder === saved.stepOrder)
@@ -3004,13 +4140,27 @@ export default {
             this.steps.push(saved)
             this.steps.sort((a, b) => a.stepOrder - b.stepOrder)
           }
-          this.editingStep = saved
+          this.handleStepSaved(saved)
         }
         this.$message.success('步骤参数已保存')
         return saved
       } finally {
         this.savingStep = false
       }
+    },
+
+    handleStepSaved(savedStep) {
+      if (!savedStep?.id) return
+      const tab = this.findStepTab(this.activeStepTabId)
+      if (tab && tab.kind === 'draft') {
+        this.promoteDraftTabToStep(savedStep)
+      } else if (tab && tab.kind === 'step' && tab.stepId === savedStep.id) {
+        this.refreshStepTabLabel(savedStep)
+      } else {
+        this.openStepTab(savedStep)
+        return
+      }
+      this.applyStepToForm(savedStep)
     },
 
     saveStepFromPanel() {
@@ -3124,11 +4274,15 @@ export default {
       await this.removeStepFromControlConfigs(step.stepSeq, step.id)
       await deleteScenarioStep(this.scenario.id, step.id)
       this.steps = this.steps.filter((s) => s.id !== step.id)
-      if (this.editingStep?.id === step.id) {
+      const removedTabId = this.tabIdForStep(step.id)
+      if (this.findStepTab(removedTabId)) {
+        this.removeStepTab(removedTabId)
+      }
+      if (!this.stepTabs.length) {
         if (this.steps.length) {
-          this.editStep(this.steps[0])
+          this.openStepTab(this.steps[0])
         } else {
-          this.startNewStepDraft()
+          this.openDraftStepTab()
         }
       }
       this.$message.success('步骤已删除')
@@ -3196,7 +4350,8 @@ export default {
       }
       this.running = true
       this.lastRunOutput = null
-      this.runResultResponseDetailTabByStep = {}
+      this.runResultDetailTabByStep = {}
+      this.runResultJsonCollapsed = {}
       try {
         const output = await runScenario(this.scenario.id, {
           environmentId: this.runEnvId,
@@ -3333,7 +4488,6 @@ export default {
     }
   }
 }
-}
 </script>
 
 <style scoped>
@@ -3378,6 +4532,25 @@ export default {
   border-top: 1px solid var(--el-border-color);
   padding: 0;
   flex-shrink: 0;
+  position: relative;
+}
+
+.run-result-resizer {
+  height: 10px;
+  margin-top: -5px;
+  cursor: row-resize;
+  background: transparent;
+  touch-action: none;
+}
+
+.run-result-resizer:hover,
+.run-result-resizer:focus-visible {
+  background: color-mix(in srgb, var(--el-color-primary) 16%, transparent);
+  outline: none;
+}
+
+.run-result-resizer:focus-visible {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--el-color-primary) 42%, transparent);
 }
 
 .scenario-run-outer-collapse {
@@ -3406,7 +4579,6 @@ export default {
 
 .run-result-collapse-body {
   padding: 0 20px 16px;
-  max-height: 45vh;
   overflow-y: auto;
 }
 
@@ -3433,6 +4605,13 @@ export default {
   white-space: nowrap;
   font-weight: 600;
   min-width: 0;
+}
+
+.step-run-result-title__duration {
+  flex-shrink: 0;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  font-weight: 500;
 }
 
 .step-run-icon {
@@ -3497,6 +4676,66 @@ export default {
   padding: 4px 0;
 }
 
+.step-result-info-tabs {
+  --el-border-color-light: var(--el-border-color-lighter);
+}
+
+.step-result-info-tabs :deep(.el-tabs__content) {
+  padding: 12px;
+}
+
+.step-result-error-strip {
+  margin-bottom: 10px;
+}
+
+.step-result-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.step-result-snapshot-panel {
+  min-width: 0;
+}
+
+.step-result-snapshot-panel--full {
+  grid-column: 1 / -1;
+}
+
+.step-result-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 28px;
+  margin-bottom: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--el-text-color-regular);
+}
+
+.step-result-panel-hint {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--el-text-color-secondary);
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-result-json-viewer {
+  max-height: none;
+  min-height: 96px;
+  margin: 0;
+  padding: 10px 0;
+  white-space: nowrap;
+  word-break: normal;
+}
+
+.step-result-snapshot-panel .snapshot-pre {
+  max-height: none;
+}
+
 .result-status-row {
   display: flex;
   align-items: center;
@@ -3530,6 +4769,17 @@ export default {
   max-height: 180px;
   white-space: pre-wrap;
   word-break: break-all;
+}
+
+.step-result-snapshot-panel .run-result-json-viewer {
+  white-space: nowrap;
+  word-break: normal;
+}
+
+@media (max-width: 1100px) {
+  .step-result-detail-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .kv-table,
@@ -3644,6 +4894,55 @@ export default {
 .step-dialog-main.scenario-step-console {
   padding: 12px 14px 16px;
   background: #f3f6fb;
+}
+
+.scenario-step-tabs {
+  flex: 0 0 auto;
+  margin: 0 0 10px;
+}
+
+.scenario-step-tabs :deep(.el-tabs__header) {
+  margin-bottom: 0;
+  border-bottom: 1px solid var(--el-border-color-light);
+}
+
+.scenario-step-tabs :deep(.el-tabs__nav) {
+  border: none;
+}
+
+.scenario-step-tabs :deep(.el-tabs__item) {
+  height: 30px;
+  line-height: 30px;
+  padding: 0 12px !important;
+  font-size: 12.5px;
+  color: var(--el-text-color-regular);
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+}
+
+.scenario-step-tabs :deep(.el-tabs__item:hover) {
+  color: var(--el-color-primary);
+}
+
+.scenario-step-tabs :deep(.el-tabs__item.is-active) {
+  background: #ffffff;
+  border-color: var(--el-border-color-light);
+  color: var(--el-color-primary);
+}
+
+.scenario-step-tabs :deep(.el-tabs__content) {
+  display: none;
+}
+
+.scenario-step-tab-label {
+  display: inline-block;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+  pointer-events: none;
 }
 
 .request-card {
@@ -3865,6 +5164,7 @@ export default {
   align-items: stretch;
 }
 
+.body-schema-layout > .scenario-body-code-pane,
 .body-schema-layout > .code-editor,
 .body-schema-layout > .json-viewer.code-view {
   min-width: 0;
@@ -3945,7 +5245,7 @@ export default {
 .schema-field-table-head,
 .schema-field-row {
   display: grid;
-  grid-template-columns: minmax(112px, 1.25fr) minmax(72px, 0.65fr) minmax(120px, 1.2fr);
+  grid-template-columns: minmax(104px, 1.15fr) minmax(72px, 0.62fr) minmax(96px, 0.9fr) minmax(120px, 1.2fr);
   align-items: center;
   column-gap: 8px;
 }
@@ -4119,6 +5419,16 @@ export default {
   white-space: nowrap;
 }
 
+.schema-field-limits {
+  overflow: hidden;
+  color: #475569;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .schema-field-meaning {
   overflow: hidden;
   color: var(--app-secondary-text, var(--el-text-color-secondary));
@@ -4136,6 +5446,17 @@ export default {
 }
 
 .query-value-cell :deep(.el-input) {
+  flex: 1 1 auto;
+}
+
+.auth-value-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+
+.auth-value-cell :deep(.el-input) {
   flex: 1 1 auto;
 }
 

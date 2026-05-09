@@ -1,16 +1,28 @@
-// 多 Tab 工作区（场景编排 / 运行控制台）的 Tab 列表持久化助手。
-// 存储结构（按 projectId+serviceId 维度独立保存）：
-//   { "<projectId>:<serviceId>": { tabs: [...], activeTabId: '' } }
-// tabs 元素允许携带任意可序列化字段（如 name/method/path），由调用方约定。
+// 多 Tab 工作区（场景编排 / 运行控制台 / 场景内步骤编辑）的 Tab 列表持久化助手。
+// 存储结构（按 scope 字符串维度独立保存）：
+//   { "<scope-key>": { tabs: [...], activeTabId: '' } }
+// scope-key 由调用方传入：
+//   - 场景级 / 运行控制台：projectId:serviceId
+//   - 场景内步骤级：projectId:serviceId:scenarioId
+// tabs 元素允许携带任意可序列化字段（如 name/method/path/kind），由调用方约定。
 
 export const SCENARIO_WORKSPACE_KEY = 'autotest.scenarioWorkspaceByProjectService'
 export const RUN_CONSOLE_WORKSPACE_KEY = 'autotest.runConsoleWorkspaceByProjectService'
+export const SCENARIO_STEP_WORKSPACE_KEY = 'autotest.scenarioStepWorkspaceByScope'
 
 const EMPTY_STATE = Object.freeze({ tabs: [], activeTabId: '' })
 
 function scopeId(projectId, serviceId) {
   if (!projectId || !serviceId) return ''
   return `${projectId}:${serviceId}`
+}
+
+export function buildScopeKey(...parts) {
+  if (!parts.length) return ''
+  for (const p of parts) {
+    if (p == null || p === '') return ''
+  }
+  return parts.join(':')
 }
 
 function readBucket(storageKey) {
@@ -66,6 +78,41 @@ export function clearTabState(storageKey, projectId, serviceId) {
   const bucket = readBucket(storageKey)
   if (!bucket[id]) return
   delete bucket[id]
+  writeBucket(storageKey, bucket)
+}
+
+// 按调用方自构造的 scope-key 持久化（适用于二维之外的 scope，如 projectId:serviceId:scenarioId）。
+export function readTabStateByScopeKey(storageKey, scopeKey) {
+  if (!scopeKey) return { tabs: [], activeTabId: '' }
+  const bucket = readBucket(storageKey)
+  const entry = bucket[scopeKey]
+  if (!entry || typeof entry !== 'object') return { tabs: [], activeTabId: '' }
+  const tabs = Array.isArray(entry.tabs) ? entry.tabs.filter((t) => t && t.id) : []
+  const activeTabId = typeof entry.activeTabId === 'string' ? entry.activeTabId : ''
+  return { tabs, activeTabId }
+}
+
+export function writeTabStateByScopeKey(storageKey, scopeKey, state) {
+  if (!scopeKey) return
+  const tabs = Array.isArray(state?.tabs) ? state.tabs.filter((t) => t && t.id) : []
+  const activeTabId = typeof state?.activeTabId === 'string' ? state.activeTabId : ''
+  const bucket = readBucket(storageKey)
+  if (!tabs.length && !activeTabId) {
+    if (bucket[scopeKey]) {
+      delete bucket[scopeKey]
+      writeBucket(storageKey, bucket)
+    }
+    return
+  }
+  bucket[scopeKey] = { tabs, activeTabId }
+  writeBucket(storageKey, bucket)
+}
+
+export function clearTabStateByScopeKey(storageKey, scopeKey) {
+  if (!scopeKey) return
+  const bucket = readBucket(storageKey)
+  if (!bucket[scopeKey]) return
+  delete bucket[scopeKey]
   writeBucket(storageKey, bucket)
 }
 

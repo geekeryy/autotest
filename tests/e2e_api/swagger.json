@@ -79,8 +79,8 @@
     "AuditLog": {
       "properties": {
         "action": {
-          "description": "操作类型，如 import.swagger、run.suite、report.created",
-          "example": "run.suite",
+          "description": "操作类型，如 import.swagger、run.scenario、report.created",
+          "example": "run.scenario",
           "type": "string"
         },
         "actor": {
@@ -101,7 +101,7 @@
         },
         "resource": {
           "description": "操作对象，格式为 类型:名称",
-          "example": "suite:regression",
+          "example": "scenario:regression",
           "type": "string"
         }
       },

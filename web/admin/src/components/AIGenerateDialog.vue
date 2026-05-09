@@ -98,7 +98,7 @@ import { projectState } from '../utils/currentProject'
 const ACTION_TITLES = {
   generate_params: 'AI 生成请求参数',
   generate_assertion: 'AI 生成断言脚本',
-  generate_case_data: 'AI 生成测试用例数据',
+  generate_case_data: 'AI 生成测试数据行',
   raw: 'AI 生成'
 }
 

@@ -193,8 +193,6 @@ func (r *Repository) UpsertStep(ctx context.Context, scenarioID uuid.UUID, input
 	return step, nil
 }
 
-const reorderStepOrderOffset = 1_000_000
-
 // ReorderSteps assigns step_order 1..n to rows in the given order (by step id).
 // Uses a two-phase update so (scenario_id, step_order) stays unique.
 // step_seq is never modified here — it is a permanent identifier.
@@ -251,12 +249,35 @@ func (r *Repository) ReorderSteps(ctx context.Context, scenarioID uuid.UUID, ord
 		return fmt.Errorf("stepIds must list every step exactly once")
 	}
 
+	var minOrder int
+	if err := tx.QueryRow(ctx, `
+		select coalesce(min(step_order), 1)
+		from test_scenario_steps
+		where scenario_id = $1
+	`, scenarioID).Scan(&minOrder); err != nil {
+		return fmt.Errorf("load minimum step order: %w", err)
+	}
+	scratchBase := minOrder - len(existing) - 1
 	if _, err := tx.Exec(ctx, `
-		update test_scenario_steps
-		set step_order = step_order + $2, updated_at = now()
-		where scenario_id = $1 and deleted_at is null
-	`, scenarioID, reorderStepOrderOffset); err != nil {
+		with ranked as (
+			select id, row_number() over (order by id)::integer as rn
+			from test_scenario_steps
+			where scenario_id = $1 and deleted_at is null
+		)
+		update test_scenario_steps s
+		set step_order = $2 + ranked.rn,
+		    updated_at = now()
+		from ranked
+		where s.id = ranked.id
+	`, scenarioID, scratchBase); err != nil {
 		return fmt.Errorf("shift step orders: %w", err)
+	}
+
+	if _, err := tx.Exec(ctx, `
+		delete from test_scenario_steps
+		where scenario_id = $1 and deleted_at is not null and step_order between 1 and $2
+	`, scenarioID, len(orderedStepIDs)); err != nil {
+		return fmt.Errorf("cleanup soft-deleted step order placeholders: %w", err)
 	}
 
 	for i, id := range orderedStepIDs {

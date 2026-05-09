@@ -122,6 +122,26 @@ func TestBuildArgsSingleKeyShorthand(t *testing.T) {
 	}
 }
 
+func TestBuildArgsPositionalScalarValues(t *testing.T) {
+	t.Parallel()
+
+	stepVar := "$steps[2].body.data.id"
+	args, snapshot, err := buildArgs(json.RawMessage(`[
+		"{{`+stepVar+`}}",
+		123,
+		true
+	]`), map[string]string{stepVar: "550e8400-e29b-41d4-a716-446655440000"})
+	if err != nil {
+		t.Fatalf("build args: %v", err)
+	}
+	if len(args) != 3 || args[0] != "550e8400-e29b-41d4-a716-446655440000" || args[1] != "123" || args[2] != "true" {
+		t.Fatalf("unexpected args: %#v", args)
+	}
+	if snapshot["$1"] != "550e8400-e29b-41d4-a716-446655440000" || snapshot["$2"] != "123" || snapshot["$3"] != "true" {
+		t.Fatalf("unexpected input snapshot: %#v", snapshot)
+	}
+}
+
 func TestDataSourceInputUnmarshalAcceptsStringPorts(t *testing.T) {
 	t.Parallel()
 

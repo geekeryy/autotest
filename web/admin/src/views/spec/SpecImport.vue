@@ -1,7 +1,7 @@
 <template>
   <div class="page-card">
     <div class="page-header">
-      <h2 class="page-title">Swagger/OpenAPI 导入</h2>
+      <h2 class="page-title">OpenAPI/Swagger 导入</h2>
     </div>
 
     <div class="toolbar spec-toolbar">
@@ -9,7 +9,7 @@
         v-model="serviceId"
         class="spec-filter-select"
         :placeholder="projectId ? '选择服务' : '请先在顶部选择项目'"
-        :title="projectId ? '选择当前项目下的服务，用于导入 Swagger/OpenAPI' : '请先在顶部选择项目后再选择服务'"
+        :title="projectId ? '选择当前项目下的服务，用于导入 OpenAPI/Swagger' : '请先在顶部选择项目后再选择服务'"
         :disabled="!projectId"
         :no-data-text="projectId ? '当前项目暂无服务' : '请先在顶部选择项目'"
         filterable
@@ -33,7 +33,7 @@
     </div>
 
     <el-alert v-if="summary" type="success" show-icon :closable="false" class="summary">
-      <template #title>导入成功：接口定义 {{ summary.endpoints.length }} 个，生成可运行接口 {{ summary.generatedCases }} 条</template>
+      <template #title>导入成功：接口定义 {{ summary.endpoints.length }} 个，生成请求模板 {{ summary.generatedCases }} 条</template>
     </el-alert>
 
     <el-table :data="specs" border>

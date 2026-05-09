@@ -1,7 +1,7 @@
 <template>
   <div class="page-card">
     <div class="page-header">
-      <h2 class="page-title">API管理</h2>
+        <h2 class="page-title">接口列表</h2>
       <el-button type="primary" :disabled="!projectId || !serviceId" @click="dialogVisible = true">新增接口</el-button>
     </div>
 

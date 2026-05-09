@@ -12,7 +12,7 @@ import (
 	"github.com/google/uuid"
 )
 
-var ErrTestCaseNotFound = errors.New("test case not found")
+var ErrTestCaseNotFound = errors.New("接口请求模板或已保存测试用例不存在")
 
 type Source string
 
@@ -29,6 +29,9 @@ const (
 	StatusActive Status = "active"
 )
 
+// TestCase is the historical storage model for rows in test_cases.
+// SourceAuto/SourceManual rows are runnable request templates; SourceDerived
+// rows are saved test case snapshots under a parent template.
 type TestCase struct {
 	ID               uuid.UUID       `json:"id"`
 	ProjectID        uuid.UUID       `json:"projectId"`

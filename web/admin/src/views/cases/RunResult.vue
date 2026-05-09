@@ -2,7 +2,7 @@
   <div class="result-page">
     <div class="result-header">
       <div>
-        <el-button link type="primary" @click="$router.push('/cases')">返回API管理</el-button>
+        <el-button link type="primary" @click="$router.push('/cases')">返回接口列表</el-button>
         <h2>{{ run?.name || '运行结果' }}</h2>
         <p v-if="run">Run ID: {{ run.id }}</p>
       </div>

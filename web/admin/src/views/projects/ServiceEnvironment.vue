@@ -367,7 +367,7 @@ export default {
       await this.loadServices()
     },
     async removeService(row) {
-      await this.$confirm(`确认删除服务 ${row.name}？服务关联的环境、接口库、测试集和运行记录将被软删除。`, '提示')
+      await this.$confirm(`确认删除服务 ${row.name}？服务关联的环境、接口库、场景编排和运行记录将被软删除。`, '提示')
       this.deletingServiceId = row.id
       try {
         await deleteService(this.projectId, row.id)

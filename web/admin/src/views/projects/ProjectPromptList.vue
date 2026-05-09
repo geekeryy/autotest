@@ -144,7 +144,7 @@ import { projectState } from '../../utils/currentProject'
 const ACTION_OPTIONS = [
   { value: 'generate_params', label: '生成请求参数' },
   { value: 'generate_assertion', label: '生成断言脚本' },
-  { value: 'generate_case_data', label: '生成测试用例数据' },
+  { value: 'generate_case_data', label: '生成测试数据行' },
   { value: 'raw', label: '通用对话' }
 ]
 
@@ -169,15 +169,15 @@ const DEFAULT_SYSTEM_PROMPTS = {
 - 可用 API：pm.test('名称', () => { ... })、pm.response.code、pm.response.json()、pm.expect(...).to.equal(...) 等。
 - 至少包含一个 pm.test，覆盖响应状态码与关键业务字段。
 - 不要输出 Markdown 围栏（不要使用三个反引号）；直接输出 JS 源代码，不要任何额外解释。`,
-  generate_case_data: `你是接口自动化测试平台的「测试用例数据生成器」。
-- 输入包含接口的请求 schema、字段约束、以及希望生成的用例数量与场景描述。
+  generate_case_data: `你是接口自动化测试平台的「测试数据行生成器」。
+- 输入包含测试数据表结构、字段约束、已有行上下文、以及希望生成的数据行数量与场景描述。
 - 输出**必须是单个 JSON 对象**，结构如下：
 {
-  "cases": [
-    { "name": "<用例名称，简短中文>", "body": <符合 schema 的请求体>, "notes": "<可选说明>" }
+  "rows": [
+    { "<列 key>": "<单元格值>" }
   ]
 }
-- 至少覆盖正向用例与典型边界/异常用例（如必填缺失、枚举值边界、字符串极限长度）。
+- 尽量生成贴近业务语义、便于接口测试复用的数据行；不要输出表结构之外的列。
 - 严禁输出 JSON 之外的任何文字。`,
   raw: `你是接口自动化测试平台的通用 AI 助手，用中文给出简洁、可执行的回答。`
 }

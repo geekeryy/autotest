@@ -50,10 +50,14 @@ func New(client *http.Client, engine *assertion.Engine, results ResultStore) *Ru
 	return &Runner{Client: client, Engine: engine, Results: results}
 }
 
+// ExecuteCase runs a historical test_cases row. In product terms, SourceAuto
+// and SourceManual rows are request templates, while SourceDerived rows are
+// saved test case snapshots.
 func (r *Runner) ExecuteCase(ctx context.Context, runID uuid.UUID, tc testcase.TestCase, env project.Environment, vars map[string]string, parameterSourceSnapshots json.RawMessage) (*report.Result, error) {
 	return r.executeCase(ctx, runID, nil, tc, env, vars, parameterSourceSnapshots)
 }
 
+// ExecuteCaseWithStepID is ExecuteCase with an attached scenario step result.
 func (r *Runner) ExecuteCaseWithStepID(ctx context.Context, runID uuid.UUID, stepID uuid.UUID, tc testcase.TestCase, env project.Environment, vars map[string]string, parameterSourceSnapshots json.RawMessage) (*report.Result, error) {
 	return r.executeCase(ctx, runID, &stepID, tc, env, vars, parameterSourceSnapshots)
 }
@@ -175,7 +179,7 @@ func buildHTTPRequest(ctx context.Context, def RequestDefinition, env project.En
 	target := renderVariables(def.URL, effectiveVars)
 	if target == "" {
 		base := strings.TrimRight(env.BaseURL, "/")
-		path := "/" + strings.TrimLeft(renderVariables(def.Path, effectiveVars), "/")
+		path := "/" + strings.TrimLeft(renderPathVariables(def.Path, effectiveVars), "/")
 		target = base + path
 	}
 
@@ -310,7 +314,7 @@ func selectEnvironmentAuth(rawAuth json.RawMessage, def RequestDefinition, reque
 		}
 	}
 
-	pathCandidates := []string{requestPath, renderVariables(def.Path, vars)}
+	pathCandidates := []string{requestPath, renderPathVariables(def.Path, vars)}
 	if profileName := profileNameForPathRules(cfg, pathCandidates); profileName != "" {
 		return authProfile(cfg, profileName)
 	}

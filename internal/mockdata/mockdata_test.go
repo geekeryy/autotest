@@ -199,6 +199,46 @@ func TestExpandStringHelperLength(t *testing.T) {
 	}
 }
 
+func TestExpandSentenceHelperReturnsChinese(t *testing.T) {
+	t.Parallel()
+
+	got := Expand("{{$mock.sentence(6)}}")
+	if !strings.HasSuffix(got, "。") {
+		t.Fatalf("expected Chinese sentence punctuation, got %q", got)
+	}
+	if regexp.MustCompile(`[A-Za-z]`).MatchString(got) {
+		t.Fatalf("expected sentence helper to avoid English letters, got %q", got)
+	}
+	if !regexp.MustCompile(`\p{Han}`).MatchString(got) {
+		t.Fatalf("expected sentence helper to contain Chinese characters, got %q", got)
+	}
+}
+
+func TestExpandChineseNameAddressAndPhoneHelpers(t *testing.T) {
+	t.Parallel()
+
+	hanOnly := regexp.MustCompile(`^\p{Han}+$`)
+	for _, token := range []string{"{{$mock.name}}", "{{$mock.firstName}}", "{{$mock.lastName}}"} {
+		got := Expand(token)
+		if !hanOnly.MatchString(got) {
+			t.Fatalf("expected %s to expand to Chinese characters only, got %q", token, got)
+		}
+	}
+
+	address := Expand("{{$mock.address}}")
+	if !regexp.MustCompile(`^\p{Han}+\d+号$`).MatchString(address) {
+		t.Fatalf("expected Chinese address ending with a door number, got %q", address)
+	}
+	if regexp.MustCompile(`[A-Za-z]`).MatchString(address) {
+		t.Fatalf("expected address helper to avoid English letters, got %q", address)
+	}
+
+	phone := Expand("{{$mock.phone}}")
+	if !regexp.MustCompile(`^1[3-9]\d{9}$`).MatchString(phone) {
+		t.Fatalf("expected mainland China mobile phone format, got %q", phone)
+	}
+}
+
 func TestExpandIPAndEmailHelpers(t *testing.T) {
 	t.Parallel()
 

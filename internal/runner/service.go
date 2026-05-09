@@ -38,6 +38,8 @@ type testDataService interface {
 	Resolve(ctx context.Context, projectID uuid.UUID, refs []testdata.InlineReference) (map[string]string, []testdata.Snapshot, error)
 }
 
+// RunCaseInput is the request body for the historical /cases/{id}/run route.
+// The route ID points at a request template or a saved test case snapshot.
 type RunCaseInput struct {
 	EnvironmentID uuid.UUID       `json:"environmentId"`
 	Name          string          `json:"name"`
@@ -45,6 +47,7 @@ type RunCaseInput struct {
 	Variables     map[string]any  `json:"variables"`
 }
 
+// RunCaseOutput is the run result for the historical /cases/{id}/run route.
 type RunCaseOutput struct {
 	Run     *report.Run     `json:"run"`
 	Result  *report.Result  `json:"result"`
@@ -68,9 +71,11 @@ func NewService(cases *testcase.Service, projects *project.ServiceLayer, reports
 	}
 }
 
+// RunCase runs a request template or saved test case snapshot via the
+// historical /cases route.
 func (s *Service) RunCase(ctx context.Context, testCaseID uuid.UUID, input RunCaseInput) (*RunCaseOutput, error) {
 	if input.EnvironmentID == uuid.Nil {
-		return nil, errors.New("environmentId is required")
+		return nil, errors.New("运行环境 ID 不能为空")
 	}
 
 	tc, err := s.cases.Get(ctx, testCaseID)

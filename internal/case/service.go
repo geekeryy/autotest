@@ -42,21 +42,21 @@ func (s *Service) List(ctx context.Context, filter ListFilter) ([]TestCase, erro
 
 func (s *Service) ListSaved(ctx context.Context, parentCaseID uuid.UUID) ([]TestCase, error) {
 	if parentCaseID == uuid.Nil {
-		return nil, errors.New("parent case id is required")
+		return nil, errors.New("接口模板 ID 不能为空")
 	}
 	return s.repo.ListSaved(ctx, parentCaseID)
 }
 
 func (s *Service) Get(ctx context.Context, testCaseID uuid.UUID) (*TestCase, error) {
 	if testCaseID == uuid.Nil {
-		return nil, errors.New("testCaseId is required")
+		return nil, errors.New("接口模板或测试用例 ID 不能为空")
 	}
 	return s.repo.Get(ctx, testCaseID)
 }
 
 func (s *Service) CreateSaved(ctx context.Context, parentCaseID uuid.UUID, input CreateSavedInput) (*TestCase, error) {
 	if parentCaseID == uuid.Nil {
-		return nil, errors.New("parent case id is required")
+		return nil, errors.New("接口模板 ID 不能为空")
 	}
 	if input.Name == "" {
 		return nil, errors.New("用例名称不能为空")
@@ -73,14 +73,14 @@ func (s *Service) CreateSaved(ctx context.Context, parentCaseID uuid.UUID, input
 
 func (s *Service) DeleteSaved(ctx context.Context, parentCaseID, savedCaseID uuid.UUID) error {
 	if parentCaseID == uuid.Nil || savedCaseID == uuid.Nil {
-		return errors.New("case id is required")
+		return errors.New("接口模板 ID 和已保存测试用例 ID 不能为空")
 	}
 	return s.repo.DeleteSaved(ctx, parentCaseID, savedCaseID)
 }
 
 func (s *Service) Rename(ctx context.Context, testCaseID uuid.UUID, input RenameInput) (*TestCase, error) {
 	if testCaseID == uuid.Nil {
-		return nil, errors.New("testCaseId is required")
+		return nil, errors.New("接口模板或测试用例 ID 不能为空")
 	}
 	name := strings.TrimSpace(input.Name)
 	if name == "" {
@@ -92,7 +92,7 @@ func (s *Service) Rename(ctx context.Context, testCaseID uuid.UUID, input Rename
 // Patch applies a partial update to a test case. Currently supports name and assertions.
 func (s *Service) Patch(ctx context.Context, testCaseID uuid.UUID, input PatchInput) (*TestCase, error) {
 	if testCaseID == uuid.Nil {
-		return nil, errors.New("testCaseId is required")
+		return nil, errors.New("接口模板或测试用例 ID 不能为空")
 	}
 	if input.Name != nil {
 		name := strings.TrimSpace(*input.Name)
@@ -117,7 +117,7 @@ func (s *Service) Patch(ctx context.Context, testCaseID uuid.UUID, input PatchIn
 // associated endpoint's OpenAPI request schema.
 func (s *Service) GenerateParams(ctx context.Context, testCaseID uuid.UUID) (*GeneratedParams, error) {
 	if testCaseID == uuid.Nil {
-		return nil, errors.New("testCaseId is required")
+		return nil, errors.New("接口模板 ID 不能为空")
 	}
 
 	tc, err := s.repo.Get(ctx, testCaseID)

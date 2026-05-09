@@ -332,6 +332,9 @@ func schemaValueAsMap(schema *openapi3.Schema, seen map[*openapi3.Schema]bool) m
 	if schema.Format != "" {
 		out["format"] = schema.Format
 	}
+	for key, value := range schema.Extensions {
+		out[key] = value
+	}
 	if schema.Example != nil {
 		out["example"] = schema.Example
 	}
@@ -343,6 +346,60 @@ func schemaValueAsMap(schema *openapi3.Schema, seen map[*openapi3.Schema]bool) m
 	}
 	if len(schema.Required) > 0 {
 		out["required"] = append([]string(nil), schema.Required...)
+	}
+	if schema.Min != nil {
+		out["minimum"] = *schema.Min
+	}
+	if schema.Max != nil {
+		out["maximum"] = *schema.Max
+	}
+	if schema.ExclusiveMin {
+		out["exclusiveMinimum"] = true
+	}
+	if schema.ExclusiveMax {
+		out["exclusiveMaximum"] = true
+	}
+	if schema.MultipleOf != nil {
+		out["multipleOf"] = *schema.MultipleOf
+	}
+	if schema.MinLength > 0 {
+		out["minLength"] = schema.MinLength
+	}
+	if schema.MaxLength != nil {
+		out["maxLength"] = *schema.MaxLength
+	}
+	if schema.Pattern != "" {
+		out["pattern"] = schema.Pattern
+	}
+	if schema.MinItems > 0 {
+		out["minItems"] = schema.MinItems
+	}
+	if schema.MaxItems != nil {
+		out["maxItems"] = *schema.MaxItems
+	}
+	if schema.UniqueItems {
+		out["uniqueItems"] = true
+	}
+	if schema.MinProps > 0 {
+		out["minProperties"] = schema.MinProps
+	}
+	if schema.MaxProps != nil {
+		out["maxProperties"] = *schema.MaxProps
+	}
+	if schema.Nullable {
+		out["nullable"] = true
+	}
+	if schema.ReadOnly {
+		out["readOnly"] = true
+	}
+	if schema.WriteOnly {
+		out["writeOnly"] = true
+	}
+	if schema.AllowEmptyValue {
+		out["allowEmptyValue"] = true
+	}
+	if schema.Deprecated {
+		out["deprecated"] = true
 	}
 	if len(schema.Properties) > 0 {
 		properties := make(map[string]any, len(schema.Properties))

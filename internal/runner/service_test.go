@@ -36,6 +36,16 @@ func TestRenderVariablesHandlesWrappedPlaceholders(t *testing.T) {
 	}
 }
 
+func TestExtractPathVarNamesIgnoresRuntimeTemplates(t *testing.T) {
+	t.Parallel()
+
+	names := extractPathVarNames("/api/admin/v1/sites/{{$steps[11].body.data.id}}/coaches/{coach_id}/{{legacyId}}/{{$ds.users.id}}/{{sql.userSeed.id}}")
+
+	if strings.Join(names, ",") != "legacyId,coach_id" {
+		t.Fatalf("expected only OpenAPI-style path variables, got %#v", names)
+	}
+}
+
 func TestMergeVariablesUsesEnvironmentAndOverrides(t *testing.T) {
 	t.Parallel()
 
@@ -124,6 +134,61 @@ func TestBuildHTTPRequestRendersNestedBodyVariables(t *testing.T) {
 	}
 }
 
+func TestBuildHTTPRequestRendersOpenAPIPathVariablesAtRuntime(t *testing.T) {
+	t.Parallel()
+
+	req, snapshot, err := buildHTTPRequest(context.Background(), RequestDefinition{
+		Method: "GET",
+		Path:   "/api/admin/v1/sites/{id}/coaches/{coach_id}",
+		Variables: map[string]any{
+			"id": "{{$steps[11].body.data.id}}",
+		},
+	}, project.Environment{BaseURL: "https://example.test"}, map[string]string{
+		"$steps[11].body.data.id": "site-42",
+		"coach_id":                "coach-7",
+	})
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	if req.URL.Path != "/api/admin/v1/sites/site-42/coaches/coach-7" {
+		t.Fatalf("expected rendered OpenAPI path variables, got %q", req.URL.Path)
+	}
+	if strings.Contains(string(snapshot), "$steps") || strings.Contains(string(snapshot), "{id}") {
+		t.Fatalf("expected request snapshot to contain rendered path, got %s", string(snapshot))
+	}
+}
+
+func TestBuildAPIRequestParamsRendersStepRefPathVariables(t *testing.T) {
+	t.Parallel()
+
+	stepOutputs := map[int]any{
+		11: map[string]any{
+			"body": map[string]any{
+				"data": map[string]any{"id": "site-42"},
+			},
+		},
+	}
+	for _, expr := range []string{
+		`{"variables":{"id":"{{$steps[11].body.data.id}}"}}`,
+		`{"variables":{"id":"{{{$steps[11].body.data.id}}}"}}`,
+		`{"variables":{"id":"{$steps[11].body.data.id}"}}`,
+	} {
+		vars := map[string]string{}
+		injectStepRefs(expr, stepOutputs, vars)
+		if vars["$steps[11].body.data.id"] != "site-42" {
+			t.Fatalf("expected step ref from %s to resolve, got %#v", expr, vars)
+		}
+		reqParams := buildAPIRequestParams(json.RawMessage(`{
+			"method":"GET",
+			"path":"/api/admin/v1/sites/{id}/coaches",
+			"variables":{"id":"{{$steps[11].body.data.id}}"}
+		}`), "", vars)
+		if got := reqParams["pathvar"].(map[string]any)["id"]; got != "site-42" {
+			t.Fatalf("expected rendered pathvar id, got %#v", got)
+		}
+	}
+}
+
 func TestRenderVariablesExpandsMockDataTokens(t *testing.T) {
 	t.Parallel()
 
@@ -208,6 +273,127 @@ func TestBuildHTTPRequestExpandsMockTokensAcrossRequest(t *testing.T) {
 	}
 	if parsed.Body.ID == pathID {
 		t.Fatalf("expected independent uuids per occurrence, got duplicate %q", parsed.Body.ID)
+	}
+}
+
+func TestBuildHTTPRequestKeepsQuotedMockBodyValueStringTyped(t *testing.T) {
+	t.Parallel()
+
+	_, snapshot, err := buildHTTPRequest(context.Background(), RequestDefinition{
+		Method: "POST",
+		Path:   "/jobs",
+		Body: map[string]any{
+			"duration": "{{$mock.int(30,60)}}",
+			"ratio":    "{{$mock.float(1,2,2)}}",
+			"enabled":  "{{$mock.bool}}",
+			"label":    "job-{{$mock.int(1,9)}}",
+		},
+	}, project.Environment{BaseURL: "https://example.test"}, nil)
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+
+	var parsed struct {
+		Body map[string]any `json:"body"`
+	}
+	if err := json.Unmarshal(snapshot, &parsed); err != nil {
+		t.Fatalf("snapshot JSON: %v", err)
+	}
+	if _, ok := parsed.Body["duration"].(string); !ok {
+		t.Fatalf("expected quoted duration mock token to remain string, got %T (%v)", parsed.Body["duration"], parsed.Body["duration"])
+	}
+	if _, ok := parsed.Body["ratio"].(string); !ok {
+		t.Fatalf("expected quoted ratio mock token to remain string, got %T (%v)", parsed.Body["ratio"], parsed.Body["ratio"])
+	}
+	if _, ok := parsed.Body["enabled"].(string); !ok {
+		t.Fatalf("expected quoted enabled mock token to remain string, got %T (%v)", parsed.Body["enabled"], parsed.Body["enabled"])
+	}
+	if _, ok := parsed.Body["label"].(string); !ok {
+		t.Fatalf("expected embedded mock token to remain string, got %T (%v)", parsed.Body["label"], parsed.Body["label"])
+	}
+}
+
+func TestBuildHTTPRequestKeepsBareMockBodyValueTyped(t *testing.T) {
+	t.Parallel()
+
+	_, snapshot, err := buildHTTPRequest(context.Background(), RequestDefinition{
+		Method: "POST",
+		Path:   "/jobs",
+		Body: map[string]any{
+			"duration": map[string]any{"__autotestBareTemplate": "{{$mock.int(30,60)}}"},
+			"ratio":    map[string]any{"__autotestBareTemplate": "{{$mock.float(1,2,2)}}"},
+			"enabled":  map[string]any{"__autotestBareTemplate": "{{$mock.bool}}"},
+		},
+	}, project.Environment{BaseURL: "https://example.test"}, nil)
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+
+	var parsed struct {
+		Body map[string]any `json:"body"`
+	}
+	if err := json.Unmarshal(snapshot, &parsed); err != nil {
+		t.Fatalf("snapshot JSON: %v", err)
+	}
+	if _, ok := parsed.Body["duration"].(float64); !ok {
+		t.Fatalf("expected duration to remain numeric, got %T (%v)", parsed.Body["duration"], parsed.Body["duration"])
+	}
+	if _, ok := parsed.Body["ratio"].(float64); !ok {
+		t.Fatalf("expected ratio to remain numeric, got %T (%v)", parsed.Body["ratio"], parsed.Body["ratio"])
+	}
+	if _, ok := parsed.Body["enabled"].(bool); !ok {
+		t.Fatalf("expected enabled to remain boolean, got %T (%v)", parsed.Body["enabled"], parsed.Body["enabled"])
+	}
+}
+
+func TestBuildHTTPRequestKeepsBareStepRefsScalarTyped(t *testing.T) {
+	t.Parallel()
+
+	_, snapshot, err := buildHTTPRequest(context.Background(), RequestDefinition{
+		Method: "POST",
+		Path:   "/orders",
+		Body: map[string]any{
+			"amount":       map[string]any{"__autotestBareTemplate": "{{$steps[4].rows[0].amount}}"},
+			"discount":     map[string]any{"__autotestBareTemplate": "{{$steps[4].rows[0].discount}}"},
+			"enabled":      map[string]any{"__autotestBareTemplate": "{{$steps[4].rows[0].enabled}}"},
+			"missingValue": map[string]any{"__autotestBareTemplate": "{{$steps[4].rows[0].missingValue}}"},
+			"rawText":      map[string]any{"__autotestBareTemplate": "{{$steps[4].rows[0].rawText}}"},
+			"quotedAmount": "{{$steps[4].rows[0].amount}}",
+		},
+	}, project.Environment{BaseURL: "https://example.test"}, map[string]string{
+		"$steps[4].rows[0].amount":       "6309",
+		"$steps[4].rows[0].discount":     "12.5",
+		"$steps[4].rows[0].enabled":      "true",
+		"$steps[4].rows[0].missingValue": "null",
+		"$steps[4].rows[0].rawText":      "order-6309",
+	})
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+
+	var parsed struct {
+		Body map[string]any `json:"body"`
+	}
+	if err := json.Unmarshal(snapshot, &parsed); err != nil {
+		t.Fatalf("snapshot JSON: %v", err)
+	}
+	if _, ok := parsed.Body["amount"].(float64); !ok {
+		t.Fatalf("expected amount to remain numeric, got %T (%v)", parsed.Body["amount"], parsed.Body["amount"])
+	}
+	if _, ok := parsed.Body["discount"].(float64); !ok {
+		t.Fatalf("expected discount to remain numeric, got %T (%v)", parsed.Body["discount"], parsed.Body["discount"])
+	}
+	if _, ok := parsed.Body["enabled"].(bool); !ok {
+		t.Fatalf("expected enabled to remain boolean, got %T (%v)", parsed.Body["enabled"], parsed.Body["enabled"])
+	}
+	if parsed.Body["missingValue"] != nil {
+		t.Fatalf("expected missingValue to remain null, got %T (%v)", parsed.Body["missingValue"], parsed.Body["missingValue"])
+	}
+	if _, ok := parsed.Body["rawText"].(string); !ok {
+		t.Fatalf("expected rawText to remain string, got %T (%v)", parsed.Body["rawText"], parsed.Body["rawText"])
+	}
+	if _, ok := parsed.Body["quotedAmount"].(string); !ok {
+		t.Fatalf("expected quotedAmount to remain string, got %T (%v)", parsed.Body["quotedAmount"], parsed.Body["quotedAmount"])
 	}
 }
 
@@ -387,6 +573,26 @@ func TestBuildHTTPRequestAppliesEnvironmentAuthForSecuredRequest(t *testing.T) {
 	}
 	if got := req.Header.Get("Authorization"); got != "Bearer env-token" {
 		t.Fatalf("expected bearer auth header, got %q", got)
+	}
+}
+
+func TestBuildHTTPRequestRequestHeaderOverridesEnvironmentAuth(t *testing.T) {
+	t.Parallel()
+
+	req, _, err := buildHTTPRequest(context.Background(), RequestDefinition{
+		Method:   "GET",
+		Path:     "/api/v1/users",
+		Headers:  map[string]string{"Authorization": "Bearer {{stepToken}}"},
+		Security: []map[string][]string{{"BearerAuth": []string{}}},
+	}, project.Environment{
+		BaseURL: "https://example.test",
+		Auth:    []byte(`{"type":"bearer","token":"{{envToken}}"}`),
+	}, map[string]string{"envToken": "env-token", "stepToken": "step-token"})
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	if got := req.Header.Get("Authorization"); got != "Bearer step-token" {
+		t.Fatalf("expected request header override, got %q", got)
 	}
 }
 

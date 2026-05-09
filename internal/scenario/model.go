@@ -37,6 +37,8 @@ type Scenario struct {
 type Step struct {
 	ID              uuid.UUID       `json:"id"`
 	ScenarioID      uuid.UUID       `json:"scenarioId"`
+	// TestCaseID is a historical JSON field; for API steps it references the
+	// runnable request template stored in test_cases.
 	TestCaseID      uuid.UUID       `json:"testCaseId,omitempty"`
 	StepSeq         int             `json:"stepSeq"`
 	StepOrder       int             `json:"stepOrder"`
@@ -64,6 +66,7 @@ type UpdateScenarioInput struct {
 }
 
 type UpsertStepInput struct {
+	// TestCaseID is kept for API compatibility and means request template ID.
 	TestCaseID      uuid.UUID       `json:"testCaseId,omitempty"`
 	StepOrder       int             `json:"stepOrder"`
 	StepType        StepType        `json:"stepType"`

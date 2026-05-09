@@ -131,7 +131,7 @@ func (r *Repository) List(ctx context.Context, filter ListFilter) ([]TestCase, e
 
 	rows, err := r.DB.Query(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("list test cases: %w", err)
+		return nil, fmt.Errorf("查询接口请求模板: %w", err)
 	}
 	defer rows.Close()
 
@@ -165,7 +165,7 @@ func (r *Repository) ListSaved(ctx context.Context, parentCaseID uuid.UUID) ([]T
 		order by child.created_at asc, child.updated_at asc
 	`, parentCaseID, SourceDerived)
 	if err != nil {
-		return nil, fmt.Errorf("list saved test cases: %w", err)
+		return nil, fmt.Errorf("查询已保存测试用例: %w", err)
 	}
 	defer rows.Close()
 
@@ -367,7 +367,7 @@ func (r *Repository) DeleteSaved(ctx context.Context, parentCaseID, savedCaseID 
 		  and deleted_at is null
 	`, savedCaseID, parentCaseID, SourceDerived)
 	if err != nil {
-		return fmt.Errorf("delete saved test case: %w", err)
+		return fmt.Errorf("删除已保存测试用例: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrTestCaseNotFound

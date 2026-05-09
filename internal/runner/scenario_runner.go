@@ -294,7 +294,7 @@ func buildAPIRequestParams(effectiveRequest json.RawMessage, fallbackPath string
 	pathvar := make(map[string]any)
 	for _, name := range extractPathVarNames(path) {
 		if val, ok := effectiveVars[name]; ok {
-			pathvar[name] = val
+			pathvar[name] = renderVariables(val, effectiveVars)
 		}
 	}
 

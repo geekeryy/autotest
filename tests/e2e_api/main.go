@@ -455,8 +455,8 @@ func adminAuditLogs() []auditLog {
 		{
 			ID:        "audit-2",
 			Actor:     "admin-root",
-			Action:    "run.suite",
-			Resource:  "suite:regression",
+			Action:    "run.scenario",
+			Resource:  "scenario:regression",
 			CreatedAt: now.Add(-10 * time.Minute),
 		},
 		{
@@ -923,8 +923,8 @@ func swaggerDefinitions() map[string]any {
 		"AuditLog": objectSchema([]string{"id", "actor", "action", "resource", "createdAt"}, map[string]any{
 			"id":        stringSchemaWithDesc("audit-1", "审计日志唯一标识"),
 			"actor":     stringSchemaWithDesc("admin-root", "操作人用户名"),
-			"action":    stringSchemaWithDesc("run.suite", "操作类型，如 import.swagger、run.suite、report.created"),
-			"resource":  stringSchemaWithDesc("suite:regression", "操作对象，格式为 类型:名称"),
+			"action":    stringSchemaWithDesc("run.scenario", "操作类型，如 import.swagger、run.scenario、report.created"),
+			"resource":  stringSchemaWithDesc("scenario:regression", "操作对象，格式为 类型:名称"),
 			"createdAt": dateTimeSchemaWithDesc("操作时间"),
 		}),
 		"User": objectSchema([]string{"id", "name", "email", "role", "active", "createdAt", "updatedAt"}, map[string]any{

@@ -1,8 +1,10 @@
 package runner
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"regexp"
 	"strconv"
 	"strings"
@@ -43,6 +45,44 @@ func renderVariables(input string, vars map[string]string) string {
 	return rendered
 }
 
+// renderPathVariables substitutes both Mustache-style variables and OpenAPI
+// path variables like {id}. Path parameter values may themselves contain
+// runtime templates, so each substituted value is rendered before use.
+func renderPathVariables(input string, vars map[string]string) string {
+	rendered := renderVariables(input, vars)
+	for i := 0; i < 5; i++ {
+		before := rendered
+		rendered = renderOpenAPIPathVariables(rendered, vars)
+		rendered = renderVariables(rendered, vars)
+		if rendered == before {
+			break
+		}
+	}
+	return rendered
+}
+
+func renderOpenAPIPathVariables(input string, vars map[string]string) string {
+	var b strings.Builder
+	for i := 0; i < len(input); {
+		if input[i] == '{' && (i+1 >= len(input) || input[i+1] != '{') {
+			if rel := strings.IndexByte(input[i+1:], '}'); rel >= 0 {
+				end := i + 1 + rel
+				name := strings.TrimSpace(input[i+1 : end])
+				if pathVarIdentRE.MatchString(name) {
+					if value, ok := vars[name]; ok {
+						b.WriteString(renderVariables(value, vars))
+						i = end + 1
+						continue
+					}
+				}
+			}
+		}
+		b.WriteByte(input[i])
+		i++
+	}
+	return b.String()
+}
+
 func renderMap(input map[string]string, vars map[string]string) map[string]string {
 	out := make(map[string]string, len(input))
 	for key, value := range input {
@@ -62,19 +102,99 @@ func renderAny(input any, vars map[string]string) any {
 		}
 		return out
 	case map[string]any:
+		if token, ok := bareTemplateToken(value); ok {
+			return renderBareTemplateValue(token, vars)
+		}
 		out := make(map[string]any, len(value))
 		for key, item := range value {
 			out[renderVariables(key, vars)] = renderAny(item, vars)
 		}
 		return out
 	case map[string]string:
-		out := make(map[string]string, len(value))
+		out := make(map[string]any, len(value))
 		for key, item := range value {
 			out[renderVariables(key, vars)] = renderVariables(item, vars)
 		}
 		return out
 	default:
 		return input
+	}
+}
+
+var exactMockValuePattern = regexp.MustCompile(`^\s*\{\{\s*\$mock\s*\.\s*([A-Za-z][A-Za-z0-9_]*)\s*(?:\([^()]*\))?\s*\}\}\s*$`)
+var exactStepValuePattern = regexp.MustCompile(`^\s*\{\{\s*\$steps\[\d+\][^{}]*?\s*\}\}\s*$`)
+
+func bareTemplateToken(input map[string]any) (string, bool) {
+	if len(input) != 1 {
+		return "", false
+	}
+	token, ok := input["__autotestBareTemplate"].(string)
+	return token, ok && token != ""
+}
+
+func renderBareTemplateValue(input string, vars map[string]string) any {
+	rendered := renderVariables(input, vars)
+	if exactStepValuePattern.MatchString(input) {
+		if value, ok := parseBareTemplateScalar(rendered); ok {
+			return value
+		}
+		return rendered
+	}
+	matches := exactMockValuePattern.FindStringSubmatch(input)
+	if len(matches) < 2 {
+		return rendered
+	}
+	switch strings.ToLower(strings.TrimSpace(matches[1])) {
+	case "int", "integer", "timestamp":
+		if n, err := strconv.ParseInt(rendered, 10, 64); err == nil {
+			return n
+		}
+	case "float", "number":
+		if n, err := strconv.ParseFloat(rendered, 64); err == nil {
+			return n
+		}
+	case "bool", "boolean":
+		if b, err := strconv.ParseBool(rendered); err == nil {
+			return b
+		}
+	}
+	return rendered
+}
+
+func parseBareTemplateScalar(input string) (any, bool) {
+	trimmed := strings.TrimSpace(input)
+	if trimmed == "" {
+		return nil, false
+	}
+	decoder := json.NewDecoder(bytes.NewReader([]byte(trimmed)))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return nil, false
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		return nil, false
+	}
+	switch v := value.(type) {
+	case nil, bool, string:
+		return v, true
+	case json.Number:
+		if strings.ContainsAny(v.String(), ".eE") {
+			if n, err := strconv.ParseFloat(v.String(), 64); err == nil {
+				return n, true
+			}
+			return nil, false
+		}
+		if n, err := strconv.ParseInt(v.String(), 10, 64); err == nil {
+			return n, true
+		}
+		if n, err := strconv.ParseFloat(v.String(), 64); err == nil {
+			return n, true
+		}
+		return nil, false
+	default:
+		return nil, false
 	}
 }
 
@@ -113,7 +233,7 @@ func renderAny(input any, vars map[string]string) any {
 // Callers must create a per-step copy of the vars map before calling this
 // function so the injected keys do not leak into subsequent steps.
 
-var stepRefScanRE = regexp.MustCompile(`\{\{(\$steps\[\d+\][^}]*)\}\}`)
+var stepRefScanRE = regexp.MustCompile(`\{+\s*(\$steps\[\d+\][^{}]*?)\s*\}+`)
 var stepRefKeyRE = regexp.MustCompile(`^\$steps\[(\d+)\](.*)$`)
 
 func injectStepRefs(text string, stepOutputs map[int]any, vars map[string]string) {
@@ -224,8 +344,7 @@ func parseOutputSegment(segment string) (field string, indices []int, err error)
 // pathVarNameRE matches {{varName}} placeholders (2+ braces) used in path templates.
 var pathVarNameRE = regexp.MustCompile(`\{\{+([^{}]+)\}\}+`)
 
-// pathVarNameSingleRE matches {varName} placeholders (single braces, OpenAPI style).
-var pathVarNameSingleRE = regexp.MustCompile(`(?:^|[^{])\{([^{}]+)\}(?:[^}]|$)`)
+var pathVarIdentRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_-]*$`)
 
 // extractPathVarNames returns the unique variable names referenced in a path
 // template. Both {{varName}} (runner style) and {varName} (OpenAPI style) are
@@ -236,17 +355,35 @@ func extractPathVarNames(path string) []string {
 	var names []string
 	for _, m := range pathVarNameRE.FindAllStringSubmatch(path, -1) {
 		name := strings.TrimSpace(m[1])
-		if name != "" && !seen[name] {
+		if pathVarIdentRE.MatchString(name) && !seen[name] {
 			seen[name] = true
 			names = append(names, name)
 		}
 	}
-	for _, m := range pathVarNameSingleRE.FindAllStringSubmatch(path, -1) {
-		name := strings.TrimSpace(m[1])
-		if name != "" && !seen[name] {
+	for _, name := range extractOpenAPIPathVarNames(path) {
+		if pathVarIdentRE.MatchString(name) && !seen[name] {
 			seen[name] = true
 			names = append(names, name)
 		}
+	}
+	return names
+}
+
+func extractOpenAPIPathVarNames(input string) []string {
+	var names []string
+	for i := 0; i < len(input); {
+		if input[i] == '{' && (i+1 >= len(input) || input[i+1] != '{') {
+			if rel := strings.IndexByte(input[i+1:], '}'); rel >= 0 {
+				end := i + 1 + rel
+				name := strings.TrimSpace(input[i+1 : end])
+				if pathVarIdentRE.MatchString(name) {
+					names = append(names, name)
+					i = end + 1
+					continue
+				}
+			}
+		}
+		i++
 	}
 	return names
 }

@@ -46,6 +46,26 @@ paths:
                 name:
                   type: string
                   description: 用户姓名
+                  minLength: 2
+                  maxLength: 20
+                  pattern: "^[A-Za-z]+$"
+                age:
+                  type: integer
+                  minimum: 1
+                  maximum: 120
+                  exclusiveMaximum: true
+                  multipleOf: 1
+                role:
+                  type: string
+                  enum: [admin, tester]
+                  nullable: true
+                tags:
+                  type: array
+                  minItems: 1
+                  maxItems: 3
+                  uniqueItems: true
+                  items:
+                    type: string
       responses:
         "201":
           description: created
@@ -101,6 +121,22 @@ paths:
 	name, _ := properties["name"].(map[string]any)
 	if body["title"] != "创建用户参数" || body["description"] != "创建用户请求" || name["description"] != "用户姓名" {
 		t.Fatalf("expected body field descriptions, got %#v", body)
+	}
+	if name["minLength"] != float64(2) || name["maxLength"] != float64(20) || name["pattern"] != "^[A-Za-z]+$" {
+		t.Fatalf("expected string validation constraints, got %#v", name)
+	}
+	age, _ := properties["age"].(map[string]any)
+	if age["minimum"] != float64(1) || age["maximum"] != float64(120) || age["exclusiveMaximum"] != true || age["multipleOf"] != float64(1) {
+		t.Fatalf("expected numeric validation constraints, got %#v", age)
+	}
+	role, _ := properties["role"].(map[string]any)
+	enumValues, _ := role["enum"].([]any)
+	if len(enumValues) != 2 || role["nullable"] != true {
+		t.Fatalf("expected enum and nullable constraints, got %#v", role)
+	}
+	tags, _ := properties["tags"].(map[string]any)
+	if tags["minItems"] != float64(1) || tags["maxItems"] != float64(3) || tags["uniqueItems"] != true {
+		t.Fatalf("expected array validation constraints, got %#v", tags)
 	}
 	var responseSchema map[string]any
 	if err := json.Unmarshal(endpoint.ResponseSchema, &responseSchema); err != nil {

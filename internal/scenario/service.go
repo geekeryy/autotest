@@ -63,7 +63,7 @@ func (s *Service) UpsertStep(ctx context.Context, scenarioID uuid.UUID, input Up
 	switch input.StepType {
 	case StepTypeAPI:
 		if input.TestCaseID == uuid.Nil {
-			return nil, errors.New("testCaseId is required for api steps")
+			return nil, errors.New("API 步骤必须选择接口请求模板")
 		}
 	case StepTypeDatabase, StepTypeScript, StepTypeFor, StepTypeCondition:
 		if len(input.Config) == 0 {

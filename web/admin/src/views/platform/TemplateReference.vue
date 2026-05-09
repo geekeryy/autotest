@@ -19,7 +19,7 @@
         </li>
       </ol>
       <p class="pipeline-note">
-        以上顺序保证：模拟标签先生成具体值，再被场景引用 / SQL 引用 / 普通变量替换。互不干扰。
+        以上顺序保证：模拟标签先生成具体值，再被场景引用 / 测试数据引用 / SQL 引用 / 普通变量替换。互不干扰。
       </p>
     </el-alert>
 
@@ -112,26 +112,64 @@ GET /api/v1/users/{{sql.userSeed[status=active].id}}</pre>
         </section>
       </el-tab-pane>
 
-      <!-- 4. 路径变量（OpenAPI 风格） -->
-      <el-tab-pane name="pathvar" label="路径变量">
+      <!-- 4. 测试数据内联引用 -->
+      <el-tab-pane name="testdata" label="测试数据内联引用">
+        <section class="ref-section">
+          <h3 class="ref-section-title"><code v-pre>{{$ds.&lt;tableKey&gt;.&lt;column&gt;}}</code></h3>
+          <p class="ref-section-desc">
+            从「测试数据 / 测试数据表」中取值。Runner 在发请求前会自动扫描请求并解析用到的测试数据表引用，
+            <code>tableKey</code> 在当前项目下唯一。
+          </p>
+          <el-table :data="testDataInlineFields" border class="ref-table" :show-header="true">
+            <el-table-column label="语法" min-width="360">
+              <template #default="{ row }"><code class="ref-token">{{ row.name }}</code></template>
+            </el-table-column>
+            <el-table-column label="示例" min-width="300">
+              <template #default="{ row }"><code class="ref-token">{{ row.example }}</code></template>
+            </el-table-column>
+            <el-table-column label="说明" min-width="320" prop="description" />
+          </el-table>
+          <div class="ref-card ref-card-block">
+            <div class="ref-card-title">生效范围</div>
+            <ul class="ref-bullet-list">
+              <li>请求模板的 Path / Query / Header / Body / 变量值</li>
+              <li>场景 API 步骤的请求覆盖参数</li>
+              <li>环境变量与运行覆盖变量值</li>
+            </ul>
+          </div>
+          <pre v-pre class="ref-code">// 默认取首行
+POST /api/v1/users
+{
+  "email": "{{$ds.users.email}}"
+}
+
+// 等值过滤：从测试数据表中挑出 role=admin 的第一行
+{
+  "adminEmail": "{{$ds.users[role=admin].email}}"
+}</pre>
+        </section>
+      </el-tab-pane>
+
+      <!-- 5. 路径参数（OpenAPI 风格） -->
+      <el-tab-pane name="pathvar" label="路径参数">
         <section class="ref-section">
           <h3 class="ref-section-title"><code v-pre>{name}</code></h3>
           <p class="ref-section-desc">
             <strong>OpenAPI 单大括号风格</strong>，仅在请求路径中识别，例如 <code>/api/v1/users/{id}</code>。
-            运行时由「路径变量」表（<code>Path Vars</code>）中同名行的「参数值」填充。未填值且无同名运行变量时保持占位符不变。
+            运行时由「路径参数（Path Params）」表中同名行的「参数值」填充。未填值且无同名运行变量时保持占位符不变。
           </p>
           <div class="ref-card">
             <div class="ref-card-title">和 <code v-pre>{{varName}}</code> 的区别</div>
             <ul class="ref-bullet-list">
               <li><code>{id}</code> 仅在 URL Path 中识别；不会被 Query/Header/Body 渲染管线处理。</li>
               <li>如果在 Path 中希望使用其他来源（如 SQL/步骤引用/模拟标签），仍可写双大括号形式，例如 <code v-pre>/api/v1/users/{{$mock.uuid}}</code>。</li>
-              <li>Path Vars 表中的同名条目优先级最高；未启用的行会被忽略。</li>
+              <li>路径参数表中的同名条目优先级最高；未启用的行会被忽略。</li>
             </ul>
           </div>
         </section>
       </el-tab-pane>
 
-      <!-- 5. 运行时模拟数据标签 -->
+      <!-- 6. 运行时模拟数据标签 -->
       <el-tab-pane name="mock" label="运行时模拟标签">
         <section class="ref-section">
           <h3 class="ref-section-title">
@@ -182,12 +220,12 @@ GET /api/v1/users/{{sql.userSeed[status=active].id}}</pre>
         </section>
       </el-tab-pane>
 
-      <!-- 6. Mock 响应模板 -->
+      <!-- 7. Mock 响应模板 -->
       <el-tab-pane name="mockresp" label="Mock 响应模板">
         <section class="ref-section">
           <h3 class="ref-section-title"><code v-pre>{{request.xxx}}</code></h3>
           <p class="ref-section-desc">
-            仅在 <strong>Mock Server 规则的响应体</strong>中生效，用于把当前 mock 请求的方法、路径变量、查询参数、请求头与 JSON 请求体回显到响应中。
+            仅在 <strong>Mock Server 规则的响应体</strong>中生效，用于把当前 mock 请求的方法、路径参数、查询参数、请求头与 JSON 请求体回显到响应中。
             如果引用的字段不存在或请求体不是合法 JSON，Mock 会返回 500 并提示出错的占位符。
           </p>
           <el-table :data="mockResponseFields" border class="ref-table">
@@ -213,6 +251,7 @@ import {
   mockHelperList,
   stepRefFields,
   sqlInlineFields,
+  testDataInlineFields,
   mockResponseFields,
   renderingPipeline
 } from '../../utils/templateTokens'
@@ -225,6 +264,7 @@ export default {
       mockKeyword: '',
       stepRefFields,
       sqlInlineFields,
+      testDataInlineFields,
       mockResponseFields,
       renderingPipeline
     }

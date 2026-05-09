@@ -2,7 +2,7 @@
   <div class="debug-page" :class="{ 'is-embedded': embedded }">
     <div v-if="!embedded || savedRequests.length" class="debug-header">
       <div>
-        <el-button v-if="!embedded" link type="primary" @click="$router.push('/cases')">返回API管理</el-button>
+        <el-button v-if="!embedded" link type="primary" @click="$router.push('/cases')">返回接口列表</el-button>
         <div v-if="savedRequests.length" class="saved-requests-tabs">
           <div v-for="(saved, index) in savedRequests" :key="saved.id"
             class="saved-request-tab"
@@ -81,7 +81,7 @@
         <div class="send-actions">
           <el-button :loading="generating" @click="generateParams">生成参数</el-button>
           <el-button :loading="aiParamsLoading" :disabled="aiParamsLoading" @click="openAIParamsDialog">AI 生成</el-button>
-          <el-tooltip content="将当前请求参数保存为一条测试用例（数据库持久化，可在路径右侧 Tab 切换并被场景/测试集引用）" placement="top">
+          <el-tooltip content="将当前请求参数保存为一条测试用例（数据库持久化，可在路径右侧 Tab 切换并被场景编排引用）" placement="top">
             <el-button :loading="savingCase" @click="saveCurrentRequest">保存用例</el-button>
           </el-tooltip>
           <el-button class="send-button" type="primary" :loading="running" :disabled="!environmentId"
@@ -94,12 +94,12 @@
       <el-tabs v-model="activeTab" class="request-tabs">
         <el-tab-pane label="Params" name="params">
           <div class="params-section">
-            <div class="params-section-title">Path Vars</div>
+            <div class="params-section-title">路径参数（Path Params）</div>
             <el-table :data="pathRows" border class="kv-table">
               <el-table-column width="70" label="启用"><template #default="{ row }"><el-checkbox
                     v-model="row.enabled" /></template></el-table-column>
               <el-table-column label="参数名" min-width="180"><template #default="{ row }"><el-input v-model="row.key"
-                    placeholder="路径变量名" /></template></el-table-column>
+                    placeholder="路径参数名" /></template></el-table-column>
               <el-table-column label="参数值" min-width="260"><template #default="{ row }"><el-input v-model="row.value"
                     placeholder="参数值" /></template></el-table-column>
               <el-table-column label="字段注释" min-width="220">
@@ -192,8 +192,12 @@
               </div>
             </div>
             <pre v-else-if="requestBodyViewMode === 'preview'" class="code-view">{{ bodyText }}</pre>
-            <div v-show="requestBodyViewMode === 'edit'" ref="bodyEditor" class="code-editor" contenteditable spellcheck="false"
-              @input="bodyText = $event.target.innerText" @blur="formatBody"></div>
+            <JsonBodyEditor
+              v-show="requestBodyViewMode === 'edit'"
+              v-model="bodyText"
+              class="body-json-editor"
+              @blur="formatBody"
+            />
             <div class="body-schema-resizer" title="拖拽调整注释区宽度" @pointerdown="startBodySchemaResize"></div>
             <div class="schema-panel">
               <div class="schema-panel-title-row">
@@ -204,6 +208,7 @@
                 <div class="schema-field-table-head">
                   <span>字段</span>
                   <span>类型</span>
+                  <span>限制</span>
                   <span>说明</span>
                 </div>
                 <div v-for="row in requestBodyDocRows" :key="row.path" class="schema-field-row">
@@ -214,6 +219,7 @@
                     <span v-if="row.required" class="schema-required">*</span>
                   </div>
                   <span class="schema-type-chip">{{ row.type }}</span>
+                  <span class="schema-field-limits" :title="row.constraints">{{ row.constraints || '-' }}</span>
                   <span class="schema-field-meaning" :title="row.meaning">{{ row.meaning || '-' }}</span>
                 </div>
               </div>
@@ -341,6 +347,7 @@
                     <div class="schema-field-table-head">
                       <span>字段</span>
                       <span>类型</span>
+                      <span>限制</span>
                       <span>说明</span>
                     </div>
                     <div v-for="row in requestBodyDocRows" :key="row.path" class="schema-field-row">
@@ -351,6 +358,7 @@
                         <span v-if="row.required" class="schema-required">*</span>
                       </div>
                       <span class="schema-type-chip">{{ row.type }}</span>
+                      <span class="schema-field-limits" :title="row.constraints">{{ row.constraints || '-' }}</span>
                       <span class="schema-field-meaning" :title="row.meaning">{{ row.meaning || '-' }}</span>
                     </div>
                   </div>
@@ -403,6 +411,7 @@
                     <div class="schema-field-table-head">
                       <span>字段</span>
                       <span>类型</span>
+                      <span>限制</span>
                       <span>说明</span>
                     </div>
                     <div v-for="row in responseBodyDocRows" :key="row.path" class="schema-field-row">
@@ -412,6 +421,7 @@
                         <code :title="row.path">{{ row.name }}</code>
                       </div>
                       <span class="schema-type-chip">{{ row.type }}</span>
+                      <span class="schema-field-limits" :title="row.constraints">{{ row.constraints || '-' }}</span>
                       <span class="schema-field-meaning" :title="row.meaning">{{ row.meaning || '-' }}</span>
                     </div>
                   </div>
@@ -572,6 +582,7 @@ import {
 import { buildCurlFromRequestSnapshot } from '../../utils/curl'
 import AssertionEditor from '../../components/AssertionEditor.vue'
 import AIGenerateDialog from '../../components/AIGenerateDialog.vue'
+import JsonBodyEditor from '../../components/JsonBodyEditor.vue'
 
 const ASSERTION_TYPE_LABELS = {
   status_code: '状态码',
@@ -725,7 +736,7 @@ function normalizeDraftRows(rows) {
 
 export default {
   name: 'CaseRun',
-  components: { AssertionEditor, AIGenerateDialog },
+  components: { AssertionEditor, AIGenerateDialog, JsonBodyEditor },
   props: {
     caseId: {
       type: String,
@@ -978,7 +989,7 @@ export default {
     activeTab() {
       this.schedulePersistDraft()
     },
-    requestBodyViewMode() {
+    requestBodyViewMode(mode) {
       this.schedulePersistDraft()
     },
     activeSavedIndex() {
@@ -1305,14 +1316,15 @@ export default {
         queryEnabled[key] = generated.queryRequired.has(key) || savedQueryKeys.has(key)
         if (!Object.prototype.hasOwnProperty.call(queryRequired, key)) queryRequired[key] = false
       }
+      const separatedPath = this.separateRuntimePathValues(saved.path || row.path, row.path, mergedVariables)
       const request = {
         method: saved.method || row.method,
-        path: this.normalizePathVariables(saved.path || row.path),
+        path: separatedPath.path,
         headers: { ...generated.headers, ...this.normalizeObject(saved.headers) },
         query: mergedQuery,
         queryEnabled,
         queryRequired,
-        variables: mergedVariables,
+        variables: separatedPath.variables,
         body: generated.hasBody ? generated.body : saved.body
       }
       const security = Object.prototype.hasOwnProperty.call(saved, 'security') ? saved.security : generated.security
@@ -1538,7 +1550,7 @@ export default {
           environmentId: this.environmentId,
           request: {
             method: this.request.method,
-            path: this.pathForRun(this.request.path),
+            path: this.normalizePathVariables(this.request.path),
             headers: this.rowsToObject(this.headerRows),
             query: this.rowsToObject(this.queryRows),
             body,
@@ -1578,11 +1590,6 @@ export default {
     },
     setBodyText(text) {
       this.bodyText = text
-      this.$nextTick(() => {
-        if (this.$refs.bodyEditor && this.$refs.bodyEditor.innerText !== text) {
-          this.$refs.bodyEditor.innerText = text
-        }
-      })
     },
     addRow(rows) {
       rows.push({ enabled: true, key: '', value: '', required: false })
@@ -1779,6 +1786,7 @@ export default {
         required,
         hasChildren,
         type: this.schemaTypeLabel(node),
+        constraints: this.schemaFieldConstraints(node),
         meaning: this.schemaFieldMeaning(node)
       })
 
@@ -1863,6 +1871,139 @@ export default {
       if (title) return title
       return ''
     },
+    schemaFieldConstraints(schema) {
+      const node = this.normalizeSchemaNode(schema)
+      const constraints = []
+      const sources = [
+        node,
+        node.validation,
+        node.validations,
+        node.constraints,
+        node.rules,
+        node['x-validation'],
+        node['x-validations'],
+        node['x-constraints'],
+        node['x-rules']
+      ].filter((item) => item && typeof item === 'object' && !Array.isArray(item))
+      const seen = new Set()
+      const findValue = (aliases) => {
+        for (const source of sources) {
+          for (const key of aliases) {
+            if (Object.prototype.hasOwnProperty.call(source, key)) {
+              return { exists: true, value: source[key] }
+            }
+          }
+        }
+        return { exists: false, value: undefined }
+      }
+      const valueText = (value) => {
+        if (typeof value === 'string') return value
+        if (Array.isArray(value)) return value.map(valueText).join('|')
+        if (value === null) return 'null'
+        return String(value)
+      }
+      const push = (text) => {
+        if (!text || seen.has(text)) return
+        seen.add(text)
+        constraints.push(text)
+      }
+      const bound = (aliases, symbol) => {
+        const found = findValue(aliases)
+        if (found.exists) push(`${symbol}${valueText(found.value)}`)
+      }
+      const rangeBound = (minAliases, exclusiveMinAliases, maxAliases, exclusiveMaxAliases) => {
+        const min = findValue(minAliases)
+        const max = findValue(maxAliases)
+        const exclusiveMin = findValue(exclusiveMinAliases)
+        const exclusiveMax = findValue(exclusiveMaxAliases)
+
+        if (typeof exclusiveMin.value === 'number') {
+          push(`>${valueText(exclusiveMin.value)}`)
+        } else if (exclusiveMin.value === true && min.exists) {
+          push(`>${valueText(min.value)}`)
+        } else if (min.exists) {
+          push(`≥${valueText(min.value)}`)
+        }
+
+        if (typeof exclusiveMax.value === 'number') {
+          push(`<${valueText(exclusiveMax.value)}`)
+        } else if (exclusiveMax.value === true && max.exists) {
+          push(`<${valueText(max.value)}`)
+        } else if (max.exists) {
+          push(`≤${valueText(max.value)}`)
+        }
+      }
+      const genericMinMax = () => {
+        const min = findValue(['min', 'x-min'])
+        const max = findValue(['max', 'x-max'])
+        if (!min.exists && !max.exists) return
+        const type = this.schemaType(node).split('|')[0]
+        if (type === 'string') {
+          if (min.exists) push(`len≥${valueText(min.value)}`)
+          if (max.exists) push(`len≤${valueText(max.value)}`)
+        } else if (type === 'array') {
+          if (min.exists) push(`items≥${valueText(min.value)}`)
+          if (max.exists) push(`items≤${valueText(max.value)}`)
+        } else if (type === 'object') {
+          if (min.exists) push(`props≥${valueText(min.value)}`)
+          if (max.exists) push(`props≤${valueText(max.value)}`)
+        } else {
+          if (min.exists) push(`≥${valueText(min.value)}`)
+          if (max.exists) push(`≤${valueText(max.value)}`)
+        }
+      }
+
+      if (Array.isArray(node.enum) && node.enum.length > 0) {
+        push(`∈ ${node.enum.map(valueText).join('|')}`)
+      }
+      bound(['const', 'constant', 'x-const'], '=')
+
+      const minLength = findValue(['minLength', 'minlength', 'minLen', 'min_len', 'x-minLength', 'x-min-length'])
+      const maxLength = findValue(['maxLength', 'maxlength', 'maxLen', 'max_len', 'x-maxLength', 'x-max-length'])
+      const exactLength = findValue(['length', 'len', 'exactLength', 'x-length'])
+      if (exactLength.exists) {
+        push(`len=${valueText(exactLength.value)}`)
+      } else if (minLength.exists && maxLength.exists && minLength.value === maxLength.value) {
+        push(`len=${valueText(minLength.value)}`)
+      } else {
+        if (minLength.exists) push(`len≥${valueText(minLength.value)}`)
+        if (maxLength.exists) push(`len≤${valueText(maxLength.value)}`)
+      }
+
+      rangeBound(
+        ['minimum', 'minValue', 'x-minimum'],
+        ['exclusiveMinimum', 'exclusiveMin', 'x-exclusiveMinimum'],
+        ['maximum', 'maxValue', 'x-maximum'],
+        ['exclusiveMaximum', 'exclusiveMax', 'x-exclusiveMaximum']
+      )
+      genericMinMax()
+      bound(['multipleOf', 'multiple', 'x-multipleOf'], '×')
+
+      const minItems = findValue(['minItems', 'minitems', 'min_items', 'minSize', 'x-minItems'])
+      const maxItems = findValue(['maxItems', 'maxitems', 'max_items', 'maxSize', 'x-maxItems'])
+      if (minItems.exists && maxItems.exists && minItems.value === maxItems.value) {
+        push(`items=${valueText(minItems.value)}`)
+      } else {
+        if (minItems.exists) push(`items≥${valueText(minItems.value)}`)
+        if (maxItems.exists) push(`items≤${valueText(maxItems.value)}`)
+      }
+      if (findValue(['uniqueItems', 'unique', 'x-uniqueItems']).value === true) push('unique')
+      bound(['minProperties', 'minProps', 'x-minProperties'], 'props≥')
+      bound(['maxProperties', 'maxProps', 'x-maxProperties'], 'props≤')
+
+      if (typeof node.pattern === 'string' && node.pattern.trim()) {
+        push(`/${node.pattern.trim()}/`)
+      }
+      const pattern = findValue(['regex', 'regexp', 'matches', 'x-pattern'])
+      if (typeof pattern.value === 'string' && pattern.value.trim()) push(`/${pattern.value.trim()}/`)
+      if (findValue(['nullable', 'x-nullable']).value === true) push('null?')
+      if (findValue(['allowEmptyValue', 'allowEmpty', 'x-allowEmptyValue']).value === true) push('empty?')
+      if (findValue(['readOnly', 'readonly']).value === true) push('readOnly')
+      if (findValue(['writeOnly', 'writeonly']).value === true) push('writeOnly')
+      if (findValue(['deprecated', 'x-deprecated']).value === true) push('deprecated')
+
+      return constraints.join(' · ')
+    },
     schemaTypeLabel(schema) {
       const node = this.normalizeSchemaNode(schema)
       const type = this.schemaType(node)
@@ -1940,12 +2081,42 @@ export default {
       }
       return JSON.parse(JSON.stringify(request))
     },
+    isPathVariableName(name) {
+      return /^[A-Za-z_][A-Za-z0-9_-]*$/.test(String(name || '').trim())
+    },
     normalizePathVariables(path) {
       return String(path || '')
-        .replace(/\{\{+([^{}]+)\}\}+/g, '{$1}')
+        .replace(/\{+\s*(\$[^{}]+?)\s*\}+/g, (_, expr) => `{{${expr.trim()}}}`)
+        .replace(/\{\{+([^{}]+)\}\}+/g, (match, name) => {
+          const trimmed = String(name || '').trim()
+          return this.isPathVariableName(trimmed) ? `{${trimmed}}` : match
+        })
+    },
+    separateRuntimePathValues(path, templatePath, variables) {
+      const normalizedPath = this.normalizePathVariables(path)
+      const normalizedTemplate = this.normalizePathVariables(templatePath)
+      const values = { ...this.normalizeObject(variables) }
+      const pathParts = normalizedPath.split('/')
+      const templateParts = normalizedTemplate.split('/')
+      if (pathParts.length !== templateParts.length) {
+        return { path: normalizedPath, variables: values }
+      }
+      let changed = false
+      for (let idx = 0; idx < templateParts.length; idx += 1) {
+        const match = templateParts[idx].match(/^\{([A-Za-z_][A-Za-z0-9_-]*)\}$/)
+        if (!match || pathParts[idx] === templateParts[idx]) continue
+        if (!Object.prototype.hasOwnProperty.call(values, match[1])) {
+          values[match[1]] = pathParts[idx]
+        }
+        changed = true
+      }
+      return { path: changed ? normalizedTemplate : normalizedPath, variables: values }
     },
     pathForRun(path) {
-      return String(path || '').replace(/(^|[^{])\{([^{}]+)\}(?!\})/g, '$1{{$2}}')
+      return this.normalizePathVariables(path).replace(/(^|[^{])\{([^{}]+)\}(?!\})/g, (match, prefix, name) => {
+        const trimmed = String(name || '').trim()
+        return this.isPathVariableName(trimmed) ? `${prefix}{{${trimmed}}}` : match
+      })
     },
     defaultTab() {
       const m = String(this.request.method || '').toUpperCase()
@@ -1959,12 +2130,10 @@ export default {
     },
     pathVariables(path) {
       const variables = {}
-      const source = String(path || '')
-      for (const match of source.matchAll(/\{\{+([^{}]+)\}\}+/g)) {
-        variables[match[1]] = '1'
-      }
+      const source = this.normalizePathVariables(path)
       for (const match of source.matchAll(/(^|[^{])\{([^{}]+)\}(?!\})/g)) {
-        variables[match[2]] = '1'
+        const name = String(match[2] || '').trim()
+        if (this.isPathVariableName(name)) variables[name] = '1'
       }
       return variables
     },
@@ -2056,12 +2225,13 @@ export default {
         ...schemaGenerated.queryRequiredMap,
         ...this.normalizeObject(request.queryRequired)
       }
-      const path = this.normalizePathVariables(request.path || row.path)
       const mergedVariables = {
         ...this.normalizeObject(request.pathVars),
         ...this.normalizeObject(request.variables)
       }
-      const { forPath, forRest } = this.splitVariablesByPathTemplate(path, mergedVariables)
+      const separatedPath = this.separateRuntimePathValues(request.path || row.path, row.path, mergedVariables)
+      const path = separatedPath.path
+      const { forPath, forRest } = this.splitVariablesByPathTemplate(path, separatedPath.variables)
       return {
         id: row.id,
         label: row.name,
@@ -2088,7 +2258,7 @@ export default {
       }, {})
       return {
         method: this.request.method,
-        path: this.pathForRun(this.request.path),
+        path: this.normalizePathVariables(this.request.path),
         headers: this.rowsToObject(this.headerRows),
         query: this.rowsToObject(this.queryRows),
         queryEnabled,
@@ -2184,7 +2354,7 @@ export default {
       const id = this.savedRequests[index]?.id
       if (!id || !this.testCase?.id) return
       try {
-        await ElMessageBox.confirm(`确定删除用例「${label}」吗？`, '删除确认', {
+        await ElMessageBox.confirm(`确定删除已保存的测试用例「${label}」吗？`, '删除确认', {
           confirmButtonText: '删除',
           cancelButtonText: '取消',
           type: 'warning',
@@ -2683,6 +2853,7 @@ export default {
   align-items: stretch;
 }
 
+.body-schema-layout > .body-json-editor,
 .body-schema-layout > .code-editor,
 .body-schema-layout > .code-view {
   min-width: 0;
@@ -2755,7 +2926,7 @@ export default {
 .schema-field-table-head,
 .schema-field-row {
   display: grid;
-  grid-template-columns: minmax(112px, 1.25fr) minmax(72px, 0.65fr) minmax(120px, 1.2fr);
+  grid-template-columns: minmax(104px, 1.15fr) minmax(72px, 0.62fr) minmax(96px, 0.9fr) minmax(120px, 1.2fr);
   align-items: center;
   column-gap: 8px;
 }
@@ -2920,6 +3091,16 @@ export default {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 11px;
   line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.schema-field-limits {
+  overflow: hidden;
+  color: #475569;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.4;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
