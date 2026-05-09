@@ -58,6 +58,11 @@ export const menuRoutes = [
   { path: '/cases/:caseID/run', redirect: (to) => ({ path: `/run-console/${to.params.caseID}` }) },
   { path: '/scenarios', component: ScenarioList, meta: { title: '场景编排', permission: 'cases:read' } },
   {
+    path: '/scenarios/:scenarioID',
+    component: ScenarioList,
+    meta: { title: '场景编排', permission: 'cases:read', hidden: true, activeMenu: '/scenarios' }
+  },
+  {
     path: '/platform',
     redirect: '/script-library',
     meta: { title: '平台资源' },
