@@ -651,7 +651,7 @@ export default {
 
 :global(.json-help-content) {
   line-height: 1.55;
-  font-size: 12px;
+  font-size: var(--app-font-size-small);
 }
 
 :global(.json-help-content p) {
@@ -679,7 +679,7 @@ export default {
   border-radius: 3px;
   background: rgba(255, 255, 255, 0.14);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 11px;
+  font-size: var(--app-font-size-small);
 }
 
 :global(.json-help-code) {
@@ -688,7 +688,7 @@ export default {
   border-radius: 6px;
   background: rgba(0, 0, 0, 0.28);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 11px;
+  font-size: var(--app-font-size-small);
   line-height: 1.45;
   white-space: pre;
   overflow-x: auto;

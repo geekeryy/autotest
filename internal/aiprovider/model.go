@@ -31,10 +31,12 @@ const (
 
 // Supported actions. They map to internal prompt templates.
 const (
-	ActionGenerateParams    = "generate_params"
-	ActionGenerateAssertion = "generate_assertion"
-	ActionGenerateCaseData  = "generate_case_data"
-	ActionRaw               = "raw"
+	ActionGenerateParams     = "generate_params"
+	ActionGenerateAssertion  = "generate_assertion"
+	ActionGenerateCaseData   = "generate_case_data"
+	ActionAnalyzeFailure     = "analyze_failure"
+	ActionAnalyzeSpecChanges = "analyze_spec_changes"
+	ActionRaw                = "raw"
 )
 
 // Provider is the API-facing representation of an AI provider configuration.

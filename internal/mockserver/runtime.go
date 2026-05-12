@@ -12,16 +12,26 @@ import (
 	"sync"
 	"time"
 
+	"autotest/internal/templating"
+
 	"github.com/google/uuid"
 )
 
 const stopTimeout = 5 * time.Second
 
+// MockSetService is the runtime-facing slice of `mockset.Service` we use to
+// resolve `{{$mock.set.<key>}}` family tokens inside mock response bodies.
+// Defined locally to avoid an import cycle and to keep the runtime testable.
+type MockSetService interface {
+	Lookup(ctx context.Context, projectID uuid.UUID, key string) (values []string, weights []float64, ok bool)
+}
+
 // Runtime manages in-process HTTP servers for mock server configurations.
 type Runtime struct {
-	repo    *Repository
-	mu      sync.Mutex
-	running map[uuid.UUID]*runningServer
+	repo     *Repository
+	mockSets MockSetService
+	mu       sync.Mutex
+	running  map[uuid.UUID]*runningServer
 }
 
 type runningServer struct {
@@ -31,10 +41,15 @@ type runningServer struct {
 }
 
 // NewRuntime creates a Runtime backed by the repository used for live rule reads.
-func NewRuntime(repo *Repository) *Runtime {
+//
+// mockSets 可选；非 nil 时启用 `{{$mock.set.<key>}}` 在 Mock 响应体里的解析。
+// 每个 HTTP 请求获得独立的游标 map，意味着同一个请求内多次出现
+// `{{$mock.set.<key>[*]}}` 会按顺序循环；不同请求互不影响。
+func NewRuntime(repo *Repository, mockSets MockSetService) *Runtime {
 	return &Runtime{
-		repo:    repo,
-		running: map[uuid.UUID]*runningServer{},
+		repo:     repo,
+		mockSets: mockSets,
+		running:  map[uuid.UUID]*runningServer{},
 	}
 }
 
@@ -147,6 +162,11 @@ func (rt *Runtime) mockHandler(serverID uuid.UUID) http.Handler {
 			writeRuntimeError(w, http.StatusBadRequest, "读取请求体失败")
 			return
 		}
+		server, err := rt.repo.GetServerByID(r.Context(), serverID)
+		if err != nil {
+			writeRuntimeError(w, http.StatusInternalServerError, "读取 Mock Server 失败")
+			return
+		}
 		routes, err := rt.repo.ListEnabledRoutesForServer(r.Context(), serverID)
 		if err != nil {
 			writeRuntimeError(w, http.StatusInternalServerError, "读取 Mock 规则失败")
@@ -161,11 +181,29 @@ func (rt *Runtime) mockHandler(serverID uuid.UUID) http.Handler {
 			writeRuntimeError(w, http.StatusNotFound, "mock route not found")
 			return
 		}
-		writeMockResponse(w, r, *route, body)
+		mockCfg := rt.buildRequestMockConfig(server.ProjectID)
+		writeMockResponse(w, r, *route, body, mockCfg)
 	})
 }
 
-func writeMockResponse(w http.ResponseWriter, r *http.Request, route MockRoute, body []byte) {
+// buildRequestMockConfig returns a per-request MockExpanderConfig wiring the
+// project's value-set service into the templating Mock hook. Each HTTP
+// request gets its own Cursors map so `[*]` sequential tokens cycle through
+// values within a single response render but never leak across requests.
+func (rt *Runtime) buildRequestMockConfig(projectID uuid.UUID) *templating.MockExpanderConfig {
+	if rt.mockSets == nil {
+		return nil
+	}
+	resolver := templating.MockSetResolverFunc(func(key string) ([]string, []float64, bool) {
+		return rt.mockSets.Lookup(context.Background(), projectID, key)
+	})
+	return &templating.MockExpanderConfig{
+		Sets:    resolver,
+		Cursors: map[string]*int{},
+	}
+}
+
+func writeMockResponse(w http.ResponseWriter, r *http.Request, route MockRoute, body []byte, mockCfg *templating.MockExpanderConfig) {
 	if route.DelayMillis > 0 {
 		timer := time.NewTimer(time.Duration(route.DelayMillis) * time.Millisecond)
 		defer timer.Stop()
@@ -176,7 +214,7 @@ func writeMockResponse(w http.ResponseWriter, r *http.Request, route MockRoute, 
 		}
 	}
 
-	responseBody, err := renderMockResponseBody(route.ResponseBody, route, r, body)
+	responseBody, err := renderMockResponseBody(route.ResponseBody, route, r, body, mockCfg)
 	if err != nil {
 		writeRuntimeError(w, http.StatusInternalServerError, fmt.Sprintf("渲染 Mock 响应失败: %v", err))
 		return

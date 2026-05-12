@@ -11,7 +11,7 @@ import (
 )
 
 func TestMockHandlerHandlesCORSPreflight(t *testing.T) {
-	runtime := NewRuntime(nil)
+	runtime := NewRuntime(nil, nil)
 	req := httptest.NewRequest(http.MethodOptions, "/api/users", nil)
 	req.Header.Set("Origin", "http://localhost:5173")
 	req.Header.Set("Access-Control-Request-Headers", "content-type,x-mock-case")
@@ -41,7 +41,7 @@ func TestWriteMockResponseRendersRequestReferences(t *testing.T) {
 	req.Header.Set("X-Trace", "abc-123")
 	recorder := httptest.NewRecorder()
 
-	writeMockResponse(recorder, req, route, []byte(body))
+	writeMockResponse(recorder, req, route, []byte(body), nil)
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
@@ -80,7 +80,7 @@ func TestWriteMockResponseExpandsMockDataTokens(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/users/42", nil)
 	recorder := httptest.NewRecorder()
 
-	writeMockResponse(recorder, req, route, nil)
+	writeMockResponse(recorder, req, route, nil, nil)
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
@@ -102,13 +102,46 @@ func TestWriteMockResponseExpandsMockDataTokens(t *testing.T) {
 	}
 }
 
+func TestWriteMockResponseSupportsDollarReqAlias(t *testing.T) {
+	body := `{"user":{"name":"jiangyang"}}`
+	route := testRoute(http.MethodPost, "/api/users/{id}")
+	// Mix the legacy `request.*` form and the new `$req.*` alias in the same
+	// response body; both must render to the same value so existing mock
+	// rules saved before the alias was introduced keep working unchanged.
+	route.ResponseBody = `{"legacy":"{{request.pathvar.id}}","alias":"{{$req.pathvar.id}}","mode":"{{$req.query.mode}}","method":"{{$req.method}}","name":"{{$req.body.user.name}}"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/users/42?mode=preview", strings.NewReader(body))
+	recorder := httptest.NewRecorder()
+
+	writeMockResponse(recorder, req, route, []byte(body), nil)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	var got map[string]any
+	if err := json.Unmarshal(recorder.Body.Bytes(), &got); err != nil {
+		t.Fatalf("response body is not JSON: %v; body=%s", err, recorder.Body.String())
+	}
+	if got["legacy"] != "42" || got["alias"] != "42" {
+		t.Fatalf("legacy/alias path var mismatch: %#v", got)
+	}
+	if got["mode"] != "preview" {
+		t.Fatalf("mode = %v, want preview", got["mode"])
+	}
+	if got["method"] != http.MethodPost {
+		t.Fatalf("method = %v, want POST", got["method"])
+	}
+	if got["name"] != "jiangyang" {
+		t.Fatalf("name = %v, want jiangyang", got["name"])
+	}
+}
+
 func TestWriteMockResponseReportsMissingRequestReference(t *testing.T) {
 	route := testRoute(http.MethodGet, "/api/users/{id}")
 	route.ResponseBody = `{"missing":"{{request.query.missing}}"}`
 	req := httptest.NewRequest(http.MethodGet, "/api/users/42", nil)
 	recorder := httptest.NewRecorder()
 
-	writeMockResponse(recorder, req, route, nil)
+	writeMockResponse(recorder, req, route, nil, nil)
 
 	if recorder.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusInternalServerError)

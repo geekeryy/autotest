@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"log"
 	"strings"
 
 	"github.com/google/uuid"
@@ -77,6 +79,32 @@ func (s *Service) DeleteServer(ctx context.Context, projectID, serverID uuid.UUI
 		}
 	}
 	return s.repo.DeleteServer(ctx, projectID, serverID)
+}
+
+// AutoStartAll 在 API 进程启动时按持久化的 auto_start=true 配置自动拉起 Mock Server。
+// 单个 Server 启动失败（端口占用、配置异常等）只记录日志，不影响其他 Mock Server，
+// 也不会让调用方失败。返回的 error 仅用于读取持久化列表本身失败的场景。
+func (s *Service) AutoStartAll(ctx context.Context) error {
+	if s == nil || s.runtime == nil || s.repo == nil {
+		return nil
+	}
+	servers, err := s.repo.ListAutoStartServers(ctx)
+	if err != nil {
+		return fmt.Errorf("加载默认启动 Mock Server 列表: %w", err)
+	}
+	for _, server := range servers {
+		if err := s.runtime.Start(server); err != nil {
+			if errors.Is(err, ErrMockServerRunning) {
+				continue
+			}
+			log.Printf("默认启动 Mock Server 失败 id=%s name=%s port=%d: %v",
+				server.ID, server.Name, server.Port, err)
+			continue
+		}
+		log.Printf("默认启动 Mock Server 成功 id=%s name=%s port=%d",
+			server.ID, server.Name, server.Port)
+	}
+	return nil
 }
 
 // StartServer starts a configured mock server on its port.

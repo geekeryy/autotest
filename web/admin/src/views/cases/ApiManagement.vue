@@ -85,6 +85,26 @@
           <el-table-column prop="contentHash" label="内容 Hash" min-width="220" show-overflow-tooltip />
           <el-table-column prop="status" label="状态" width="100" />
           <el-table-column prop="createdAt" label="导入时间" width="170" :formatter="formatDateTimeColumn" />
+          <el-table-column label="操作" width="140">
+            <template #default="{ row }">
+              <el-tooltip
+                content="基于本次 spec 与上一版本的结构化 diff 调用 AI 分析变更影响"
+                placement="top"
+              >
+                <el-button
+                  size="small"
+                  type="warning"
+                  plain
+                  :loading="aiAnalysisLoading && analyzingSpecId === row.id"
+                  :disabled="aiAnalysisLoading"
+                  @click="openSpecChangesAnalysis(row)"
+                >
+                  <AiSparkleIcon class="ai-spec-changes-icon" />
+                  <span>AI 分析</span>
+                </el-button>
+              </el-tooltip>
+            </template>
+          </el-table-column>
         </el-table>
       </div>
 
@@ -135,20 +155,42 @@
         <el-button type="primary" @click="submitCase">保存</el-button>
       </template>
     </el-dialog>
+
+    <AIAnalysisDialog
+      v-model="aiAnalysisDialogVisible"
+      title="AI 分析 Spec 变更影响"
+      :loading="aiAnalysisLoading"
+      :text="aiAnalysisText"
+      :model="aiAnalysisModel"
+      :elapsed-millis="aiAnalysisElapsed"
+      :error="aiAnalysisError"
+      :info="aiAnalysisInfo"
+      @retry="rerunSpecChangesAnalysis"
+    />
   </div>
 </template>
 
 <script>
 import { Upload } from '@element-plus/icons-vue'
-import { createCase, importSpec, listCases, listEndpoints, listServices, listSpecs } from '../../api'
+import {
+  analyzeSpecChanges,
+  createCase,
+  importSpec,
+  listCases,
+  listEndpoints,
+  listServices,
+  listSpecs
+} from '../../api'
 import { hasPermission } from '../../auth'
 import { loadGlobalProjects, projectState } from '../../utils/currentProject'
 import { formatDateTime } from '../../utils/datetime'
 import { persistServiceId, readStoredServiceId } from '../../utils/serviceSelection'
+import AIAnalysisDialog from '../../components/AIAnalysisDialog.vue'
+import AiSparkleIcon from '../../components/icons/AiSparkleIcon.vue'
 
 export default {
   name: 'ApiManagement',
-  components: { Upload },
+  components: { Upload, AIAnalysisDialog, AiSparkleIcon },
   data() {
     return {
       services: [],
@@ -162,7 +204,15 @@ export default {
       fileName: '',
       dialogVisible: false,
       methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
-      form: this.emptyCaseForm()
+      form: this.emptyCaseForm(),
+      aiAnalysisDialogVisible: false,
+      aiAnalysisLoading: false,
+      aiAnalysisText: '',
+      aiAnalysisModel: '',
+      aiAnalysisElapsed: 0,
+      aiAnalysisError: '',
+      aiAnalysisInfo: '',
+      analyzingSpecId: ''
     }
   },
   async created() {
@@ -318,6 +368,52 @@ export default {
       if (value === 'DELETE') return 'danger'
       if (value === 'PUT' || value === 'PATCH') return 'warning'
       return 'info'
+    },
+    /**
+     * 打开 Spec 变更 AI 分析弹窗：先打开弹窗以保证用户立即看到 loading 反馈，
+     * 再异步调用 analyzeSpecChanges。analyzingSpecId 用于行级 loading 标识，
+     * 避免多行同时显示 loading。
+     */
+    async openSpecChangesAnalysis(row) {
+      if (!row?.id || !this.projectId || !this.serviceId) {
+        this.$message.warning('请先选择项目与服务')
+        return
+      }
+      this.analyzingSpecId = row.id
+      this.aiAnalysisDialogVisible = true
+      await this.runSpecChangesAnalysis(row.id)
+    },
+    async runSpecChangesAnalysis(specId) {
+      if (!specId || !this.projectId || !this.serviceId) return
+      this.aiAnalysisLoading = true
+      this.aiAnalysisText = ''
+      this.aiAnalysisModel = ''
+      this.aiAnalysisElapsed = 0
+      this.aiAnalysisError = ''
+      this.aiAnalysisInfo = ''
+      try {
+        const resp = await analyzeSpecChanges(this.projectId, this.serviceId, specId)
+        // 后端在没有上一版本可对比时返回 { message } 而非 AI 文本，前端把这种
+        // 情况显示为温和的 info 提示，与真正的失败错误区分开。
+        if (resp && resp.message && !resp.text) {
+          this.aiAnalysisInfo = resp.message
+        } else {
+          this.aiAnalysisText = resp?.text || ''
+          this.aiAnalysisModel = resp?.model || ''
+          this.aiAnalysisElapsed = Number(resp?.elapsedMillis) || 0
+          if (!this.aiAnalysisText) {
+            this.aiAnalysisError = 'AI 未返回任何分析内容'
+          }
+        }
+      } catch (error) {
+        this.aiAnalysisError = error?.response?.data?.error || error?.message || 'AI 分析失败，请稍后重试'
+      } finally {
+        this.aiAnalysisLoading = false
+      }
+    },
+    rerunSpecChangesAnalysis() {
+      if (!this.analyzingSpecId) return
+      this.runSpecChangesAnalysis(this.analyzingSpecId)
     }
   }
 }
@@ -363,6 +459,12 @@ export default {
   align-self: center;
   color: var(--app-secondary-text);
   font-size: var(--app-font-size-small);
+}
+
+.ai-spec-changes-icon {
+  font-size: 14px;
+  margin-right: 4px;
+  vertical-align: -2px;
 }
 
 .api-layout {

@@ -18,6 +18,13 @@ const (
 	PermissionUsersManage       = "users:manage"
 	PermissionRolesManage       = "roles:manage"
 	PermissionPermissionsManage = "permissions:manage"
+	PermissionAPIKeysManage     = "apikeys:manage"
+)
+
+// 认证来源：JWT 走原有用户名密码登录流程，APIKey 走 internal/apikey 校验。
+const (
+	SourceJWT    = "jwt"
+	SourceAPIKey = "apikey"
 )
 
 type User struct {
@@ -106,6 +113,11 @@ type Principal struct {
 	UserID      uuid.UUID
 	Username    string
 	Permissions map[string]struct{}
+	// Source 区分调用来源：SourceJWT 或 SourceAPIKey；默认空值视为 SourceJWT。
+	Source string
+	// Scopes 仅在 Source 为 SourceAPIKey 时由 internal/apikey 注入，
+	// 用于在路由层判断 API Key 是否被允许访问当前接口。
+	Scopes map[string]struct{}
 }
 
 type defaultPermission struct {
@@ -126,4 +138,5 @@ var defaultPermissions = []defaultPermission{
 	{PermissionUsersManage, "管理用户", "用户管理接口权限"},
 	{PermissionRolesManage, "管理角色", "角色管理接口权限"},
 	{PermissionPermissionsManage, "管理权限", "权限点管理接口权限"},
+	{PermissionAPIKeysManage, "管理API Key", "创建、禁用、删除 API Key（用于 CI/CD 调用平台开放接口）"},
 }

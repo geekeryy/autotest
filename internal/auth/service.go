@@ -12,10 +12,17 @@ import (
 
 var ErrUnauthorized = errors.New("invalid username or password")
 
+// APIKeyAuthenticator 由 internal/apikey 实现，用于在 Authenticate 中间件中
+// 桥接 API Key 校验逻辑，避免 internal/auth 反向依赖 apikey 包。
+type APIKeyAuthenticator interface {
+	Authenticate(ctx context.Context, token string) (*Principal, error)
+}
+
 type Service struct {
 	repo   *Repository
 	secret []byte
 	ttl    time.Duration
+	apiKey APIKeyAuthenticator
 }
 
 func NewService(repo *Repository) *Service {
@@ -28,6 +35,12 @@ func NewService(repo *Repository) *Service {
 		secret: []byte(secret),
 		ttl:    24 * time.Hour,
 	}
+}
+
+// WithAPIKey 注入 API Key 校验实现，由调用方在初始化阶段绑定。
+// 未注入时 Authenticate 仅识别 JWT，遇到 at- 前缀 token 直接返回 401。
+func (s *Service) WithAPIKey(authn APIKeyAuthenticator) {
+	s.apiKey = authn
 }
 
 func (s *Service) EnsureDefaultAdmin(ctx context.Context) error {
@@ -94,6 +107,7 @@ func (s *Service) ValidateToken(ctx context.Context, token string) (*Principal, 
 		UserID:      user.ID,
 		Username:    user.Username,
 		Permissions: permissions,
+		Source:      SourceJWT,
 	}, nil
 }
 

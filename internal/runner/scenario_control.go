@@ -12,6 +12,7 @@ import (
 	"autotest/internal/project"
 	"autotest/internal/report"
 	"autotest/internal/scenario"
+	"autotest/internal/templating"
 
 	"github.com/google/uuid"
 )
@@ -34,6 +35,9 @@ type scenarioExecution struct {
 	controlledSeq map[int]bool
 	stepResults   []StepRunResult
 	executions    int
+	// mockCfg 在 run 入口构造一次，所有步骤共享游标，使
+	// `{{$mock.set.<key>[*]}}` 在同一 run 内按顺序遍历不重复。
+	mockCfg *templating.MockExpanderConfig
 }
 
 type forStepConfig struct {
@@ -127,7 +131,7 @@ func skippedConditionSeqs(branches []conditionBranchConfig, elseSeqs []int, pick
 	return uniquePositiveSeqs(skipped)
 }
 
-func newScenarioExecution(s *Service, runID uuid.UUID, env project.Environment, baseVars map[string]string, steps []scenario.Step) *scenarioExecution {
+func newScenarioExecution(s *Service, runID uuid.UUID, env project.Environment, baseVars map[string]string, steps []scenario.Step, mockCfg *templating.MockExpanderConfig) *scenarioExecution {
 	stepsBySeq := make(map[int]scenario.Step, len(steps))
 	for _, step := range steps {
 		stepsBySeq[step.StepSeq] = step
@@ -141,6 +145,7 @@ func newScenarioExecution(s *Service, runID uuid.UUID, env project.Environment, 
 		steps:         steps,
 		stepsBySeq:    stepsBySeq,
 		controlledSeq: collectControlledStepSeqs(steps),
+		mockCfg:       mockCfg,
 	}
 }
 
@@ -191,7 +196,7 @@ func (e *scenarioExecution) executeStep(ctx context.Context, step scenario.Step,
 }
 
 func (e *scenarioExecution) executeExecutableStep(ctx context.Context, step scenario.Step) report.RunStatus {
-	result, stepOutput, err := e.service.executeScenarioStep(ctx, e.runID, step, e.env, e.baseVars, e.stepOutputs)
+	result, stepOutput, err := e.service.executeScenarioStep(ctx, e.runID, step, e.env, e.baseVars, e.stepOutputs, e.mockCfg)
 	stepResult := StepRunResult{Step: step, Result: result, Output: stepOutput}
 	if err != nil {
 		stepResult.StepErrors = []string{err.Error()}
@@ -213,7 +218,7 @@ func (e *scenarioExecution) executeForStep(ctx context.Context, step scenario.St
 		return report.RunFailed
 	}
 	cfg.BodyStepSeqs = uniquePositiveSeqs(cfg.BodyStepSeqs)
-	items, mode, err := buildLoopItems(cfg, e.baseVars, e.stepOutputs)
+	items, mode, err := buildLoopItems(cfg, e.baseVars, e.stepOutputs, e.mockCfg)
 	if err != nil {
 		e.appendControlError(ctx, step, err, nil)
 		return report.RunFailed
@@ -275,7 +280,7 @@ func (e *scenarioExecution) executeConditionStep(ctx context.Context, step scena
 
 	for i, br := range branches {
 		sub := conditionStepConfig{Left: br.Left, Operator: br.Operator, Right: br.Right}
-		ok, detail, err := evaluateCondition(sub, e.baseVars, e.stepOutputs)
+		ok, detail, err := evaluateCondition(sub, e.baseVars, e.stepOutputs, e.mockCfg)
 		evaluations = append(evaluations, map[string]any{
 			"index":   i,
 			"matched": ok,
@@ -463,7 +468,7 @@ func collectControlledStepSeqs(steps []scenario.Step) map[int]bool {
 	return out
 }
 
-func buildLoopItems(cfg forStepConfig, vars map[string]string, stepOutputs map[int]any) ([]any, string, error) {
+func buildLoopItems(cfg forStepConfig, vars map[string]string, stepOutputs map[int]any, mockCfg *templating.MockExpanderConfig) ([]any, string, error) {
 	mode := strings.ToLower(strings.TrimSpace(cfg.Mode))
 	if mode == "" {
 		if strings.TrimSpace(cfg.ItemsExpression) != "" || len(cfg.Items) > 0 {
@@ -475,7 +480,7 @@ func buildLoopItems(cfg forStepConfig, vars map[string]string, stepOutputs map[i
 
 	switch mode {
 	case "count", "times":
-		count, err := resolveLoopCount(cfg, vars, stepOutputs)
+		count, err := resolveLoopCount(cfg, vars, stepOutputs, mockCfg)
 		if err != nil {
 			return nil, "", err
 		}
@@ -488,7 +493,7 @@ func buildLoopItems(cfg forStepConfig, vars map[string]string, stepOutputs map[i
 		}
 		return items, "count", nil
 	case "array", "items", "for_each", "foreach":
-		items, err := resolveLoopArray(cfg, vars, stepOutputs)
+		items, err := resolveLoopArray(cfg, vars, stepOutputs, mockCfg)
 		if err != nil {
 			return nil, "", err
 		}
@@ -501,14 +506,14 @@ func buildLoopItems(cfg forStepConfig, vars map[string]string, stepOutputs map[i
 	}
 }
 
-func resolveLoopCount(cfg forStepConfig, vars map[string]string, stepOutputs map[int]any) (int, error) {
+func resolveLoopCount(cfg forStepConfig, vars map[string]string, stepOutputs map[int]any, mockCfg *templating.MockExpanderConfig) (int, error) {
 	if strings.TrimSpace(cfg.CountExpression) == "" {
 		if cfg.Count < 0 {
 			return 0, errors.New("loop count must be >= 0")
 		}
 		return cfg.Count, nil
 	}
-	raw := renderControlExpression(cfg.CountExpression, vars, stepOutputs)
+	raw := renderControlExpression(cfg.CountExpression, vars, stepOutputs, mockCfg)
 	count, err := strconv.Atoi(strings.TrimSpace(raw))
 	if err != nil {
 		return 0, fmt.Errorf("loop countExpression must render to an integer: %w", err)
@@ -519,10 +524,10 @@ func resolveLoopCount(cfg forStepConfig, vars map[string]string, stepOutputs map
 	return count, nil
 }
 
-func resolveLoopArray(cfg forStepConfig, vars map[string]string, stepOutputs map[int]any) ([]any, error) {
+func resolveLoopArray(cfg forStepConfig, vars map[string]string, stepOutputs map[int]any, mockCfg *templating.MockExpanderConfig) ([]any, error) {
 	raw := strings.TrimSpace(cfg.ItemsExpression)
 	if raw != "" {
-		raw = renderControlExpression(raw, vars, stepOutputs)
+		raw = renderControlExpression(raw, vars, stepOutputs, mockCfg)
 	} else if len(cfg.Items) > 0 {
 		raw = string(cfg.Items)
 	}
@@ -567,14 +572,14 @@ func coerceLoopItems(value any) ([]any, error) {
 	}
 }
 
-func evaluateCondition(cfg conditionStepConfig, vars map[string]string, stepOutputs map[int]any) (bool, map[string]any, error) {
+func evaluateCondition(cfg conditionStepConfig, vars map[string]string, stepOutputs map[int]any, mockCfg *templating.MockExpanderConfig) (bool, map[string]any, error) {
 	leftRaw := strings.TrimSpace(cfg.Left)
 	if leftRaw == "" {
 		return false, nil, errors.New("condition left expression is required")
 	}
 	op := normalizeConditionOperator(cfg.Operator)
-	left := renderControlExpression(leftRaw, vars, stepOutputs)
-	right := renderControlExpression(cfg.Right, vars, stepOutputs)
+	left := renderControlExpression(leftRaw, vars, stepOutputs, mockCfg)
+	right := renderControlExpression(cfg.Right, vars, stepOutputs, mockCfg)
 	detail := map[string]any{
 		"left":      leftRaw,
 		"operator":  op,
@@ -622,10 +627,10 @@ func evaluateCondition(cfg conditionStepConfig, vars map[string]string, stepOutp
 	}
 }
 
-func renderControlExpression(input string, vars map[string]string, stepOutputs map[int]any) string {
+func renderControlExpression(input string, vars map[string]string, stepOutputs map[int]any, mockCfg *templating.MockExpanderConfig) string {
 	renderVars := copyVars(vars)
 	injectStepRefs(input, stepOutputs, renderVars)
-	return renderVariables(input, renderVars)
+	return renderVariables(input, renderVars, mockCfg)
 }
 
 func normalizeConditionOperator(op string) string {

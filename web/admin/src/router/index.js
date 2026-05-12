@@ -11,10 +11,12 @@ import ApiManagement from '../views/cases/ApiManagement.vue'
 import CaseRunWorkspace from '../views/cases/CaseRunWorkspace.vue'
 import ScenarioList from '../views/scenarios/ScenarioList.vue'
 import ScriptLibraryList from '../views/scriptlib/ScriptLibraryList.vue'
+import MockValueSetList from '../views/platform/MockValueSetList.vue'
 import TemplateReference from '../views/platform/TemplateReference.vue'
 import UserList from '../views/rbac/UserList.vue'
 import RoleList from '../views/rbac/RoleList.vue'
 import PermissionList from '../views/rbac/PermissionList.vue'
+import ApiKeyList from '../views/rbac/ApiKeyList.vue'
 
 export const menuRoutes = [
   { path: '/', redirect: '/dashboard' },
@@ -64,6 +66,7 @@ export const menuRoutes = [
     meta: { title: '平台资源' },
     children: [
       { path: '/script-library', component: ScriptLibraryList, meta: { title: '脚本库', permission: 'cases:read' } },
+      { path: '/mock-value-sets', component: MockValueSetList, meta: { title: '命名值集合', permission: 'projects:read' } },
       { path: '/template-reference', component: TemplateReference, meta: { title: '模板与变量参考' } }
     ]
   },
@@ -78,7 +81,8 @@ export const menuRoutes = [
     children: [
       { path: '/users', component: UserList, meta: { title: '用户管理', permission: 'users:manage' } },
       { path: '/roles', component: RoleList, meta: { title: '角色管理', permission: 'roles:manage' } },
-      { path: '/permissions', component: PermissionList, meta: { title: '权限菜单', permission: 'permissions:manage' } }
+      { path: '/permissions', component: PermissionList, meta: { title: '权限菜单', permission: 'permissions:manage' } },
+      { path: '/api-keys', component: ApiKeyList, meta: { title: 'API Key', permission: 'apikeys:manage' } }
     ]
   }
 ]

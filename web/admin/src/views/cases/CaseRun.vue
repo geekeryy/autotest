@@ -80,7 +80,17 @@
         <el-input v-model="request.path" class="path-input" placeholder="/api/users/{id}" />
         <div class="send-actions">
           <el-button :loading="generating" @click="generateParams">生成参数</el-button>
-          <el-button :loading="aiParamsLoading" :disabled="aiParamsLoading" @click="openAIParamsDialog">AI 生成</el-button>
+            <el-button
+              type="primary"
+              plain
+              class="ai-sparkle-btn"
+              :loading="aiParamsLoading"
+              :disabled="aiParamsLoading"
+              :aria-label="'AI 生成请求参数'"
+              @click="openAIParamsDialog"
+            >
+              <AiSparkleIcon v-if="!aiParamsLoading" />
+            </el-button>
           <el-tooltip content="将当前请求参数保存为一条测试用例（数据库持久化，可在路径右侧 Tab 切换并被场景编排引用）" placement="top">
             <el-button :loading="savingCase" @click="saveCurrentRequest">保存用例</el-button>
           </el-tooltip>
@@ -93,7 +103,7 @@
 
       <el-tabs v-model="activeTab" class="request-tabs">
         <el-tab-pane label="Params" name="params">
-          <div class="params-section">
+          <div v-if="showPathParamsSection" class="params-section">
             <div class="params-section-title">路径参数（Path Params）</div>
             <el-table :data="pathRows" border class="kv-table">
               <el-table-column width="70" label="启用"><template #default="{ row }"><el-checkbox
@@ -114,15 +124,23 @@
           <div class="params-section">
             <div class="params-section-title">Query</div>
             <el-table :data="queryRows" border class="kv-table">
-              <el-table-column width="70" label="启用"><template #default="{ row }"><el-checkbox
-                    v-model="row.enabled" /></template></el-table-column>
-              <el-table-column label="参数名" min-width="180"><template #default="{ row }"><el-input v-model="row.key"
-                    placeholder="参数名" /></template></el-table-column>
+              <el-table-column width="70" label="启用">
+                <template #default="{ row }">
+                  <el-checkbox v-model="row.enabled" :disabled="row.authInherited && !row.authOverridden"
+                    @change="markRowOverridden(row)" />
+                </template>
+              </el-table-column>
+              <el-table-column label="参数名" min-width="180">
+                <template #default="{ row }">
+                  <el-input v-model="row.key" placeholder="参数名" @input="markRowOverridden(row)" />
+                </template>
+              </el-table-column>
               <el-table-column label="参数值" min-width="260">
                 <template #default="{ row }">
                   <div class="query-value-cell">
-                    <el-input v-model="row.value" placeholder="参数值" />
+                    <el-input v-model="row.value" placeholder="参数值 / {{变量}}" @input="markRowOverridden(row)" />
                     <span v-if="row.required" class="required-star" aria-label="必填">*</span>
+                    <el-tag v-if="row.authInherited && !row.authOverridden" size="small" type="info">环境认证</el-tag>
                   </div>
                 </template>
               </el-table-column>
@@ -131,27 +149,48 @@
                   <span class="param-comment">{{ parameterComment(row, 'query') }}</span>
                 </template>
               </el-table-column>
-              <el-table-column width="90" label="操作"><template #default="{ $index }"><el-button link type="danger"
-                    @click="removeRow(queryRows, $index)">删除</el-button></template></el-table-column>
+              <el-table-column width="90" label="操作">
+                <template #default="{ row, $index }">
+                  <el-button link type="danger" :disabled="row.authInherited && !row.authOverridden"
+                    @click="removeRow(queryRows, $index)">删除</el-button>
+                </template>
+              </el-table-column>
             </el-table>
             <el-button class="add-row" @click="addRow(queryRows)">新增一行</el-button>
           </div>
         </el-tab-pane>
         <el-tab-pane label="Headers" name="headers">
           <el-table :data="headerRows" border class="kv-table">
-            <el-table-column width="70" label="启用"><template #default="{ row }"><el-checkbox
-                  v-model="row.enabled" /></template></el-table-column>
-            <el-table-column label="Header" min-width="180"><template #default="{ row }"><el-input v-model="row.key"
-                  placeholder="Header" /></template></el-table-column>
-            <el-table-column label="Value" min-width="260"><template #default="{ row }"><el-input v-model="row.value"
-                  placeholder="Value" /></template></el-table-column>
+            <el-table-column width="70" label="启用">
+              <template #default="{ row }">
+                <el-checkbox v-model="row.enabled" :disabled="row.authInherited && !row.authOverridden"
+                  @change="markRowOverridden(row)" />
+              </template>
+            </el-table-column>
+            <el-table-column label="Header" min-width="180">
+              <template #default="{ row }">
+                <el-input v-model="row.key" placeholder="Header" @input="markRowOverridden(row)" />
+              </template>
+            </el-table-column>
+            <el-table-column label="Value" min-width="260">
+              <template #default="{ row }">
+                <div class="auth-value-cell">
+                  <el-input v-model="row.value" placeholder="支持 {{变量名}}" @input="markRowOverridden(row)" />
+                  <el-tag v-if="row.authInherited && !row.authOverridden" size="small" type="info">环境认证</el-tag>
+                </div>
+              </template>
+            </el-table-column>
             <el-table-column label="字段注释" min-width="220">
               <template #default="{ row }">
                 <span class="param-comment">{{ parameterComment(row, 'header') }}</span>
               </template>
             </el-table-column>
-            <el-table-column width="90" label="操作"><template #default="{ $index }"><el-button link type="danger"
-                  @click="removeRow(headerRows, $index)">删除</el-button></template></el-table-column>
+            <el-table-column width="90" label="操作">
+              <template #default="{ row, $index }">
+                <el-button link type="danger" :disabled="row.authInherited && !row.authOverridden"
+                  @click="removeRow(headerRows, $index)">删除</el-button>
+              </template>
+            </el-table-column>
           </el-table>
           <el-button class="add-row" @click="addRow(headerRows)">新增一行</el-button>
         </el-tab-pane>
@@ -268,6 +307,19 @@
             <el-tag v-if="result?.error" effect="plain" type="danger" size="small" class="response-msg-tag">
               <span class="response-msg-tag-text">{{ result.error }}</span>
             </el-tag>
+            <el-tooltip v-if="canAnalyzeRunFailure" content="基于本次请求/响应/断言失败结果调用 AI 分析失败原因" placement="top">
+              <el-button
+                class="ai-failure-analysis-btn"
+                size="small"
+                type="warning"
+                plain
+                :loading="aiAnalysisLoading"
+                @click="openAIFailureAnalysis"
+              >
+                <AiSparkleIcon class="ai-failure-analysis-icon" />
+                <span>AI 分析</span>
+              </el-button>
+            </el-tooltip>
           </div>
         </div>
       </div>
@@ -562,6 +614,18 @@
       @generation-settled="aiParamsLoading = false"
     />
 
+    <AIAnalysisDialog
+      v-model="aiAnalysisDialogVisible"
+      title="AI 分析失败原因"
+      :loading="aiAnalysisLoading"
+      :text="aiAnalysisText"
+      :model="aiAnalysisModel"
+      :elapsed-millis="aiAnalysisElapsed"
+      :error="aiAnalysisError"
+      :info="aiAnalysisInfo"
+      @retry="runAIFailureAnalysis"
+    />
+
   </div>
 </template>
 
@@ -580,9 +644,18 @@ import {
   updateServiceEnvironment
 } from '../../api'
 import { buildCurlFromRequestSnapshot } from '../../utils/curl'
+import {
+  AUTH_INHERITED_ROW_COMMENT,
+  computeInheritedAuthRows,
+  markAuthRowOverridden,
+  mergeInheritedAuthRows
+} from '../../utils/authInheritance.js'
 import AssertionEditor from '../../components/AssertionEditor.vue'
 import AIGenerateDialog from '../../components/AIGenerateDialog.vue'
+import AIAnalysisDialog from '../../components/AIAnalysisDialog.vue'
+import AiSparkleIcon from '../../components/icons/AiSparkleIcon.vue'
 import JsonBodyEditor from '../../components/JsonBodyEditor.vue'
+import { analyzeRunFailure } from '../../api'
 
 const ASSERTION_TYPE_LABELS = {
   status_code: '状态码',
@@ -736,7 +809,7 @@ function normalizeDraftRows(rows) {
 
 export default {
   name: 'CaseRun',
-  components: { AssertionEditor, AIGenerateDialog, JsonBodyEditor },
+  components: { AssertionEditor, AIGenerateDialog, AIAnalysisDialog, AiSparkleIcon, JsonBodyEditor },
   props: {
     caseId: {
       type: String,
@@ -791,6 +864,13 @@ export default {
       requestBodyJsonCollapsed: {},
       aiParamsDialogVisible: false,
       aiParamsLoading: false,
+      aiAnalysisDialogVisible: false,
+      aiAnalysisLoading: false,
+      aiAnalysisText: '',
+      aiAnalysisModel: '',
+      aiAnalysisElapsed: 0,
+      aiAnalysisError: '',
+      aiAnalysisInfo: '',
       responseBodyCollapsed: {},
       responseJsonCollapsed: {},
       requestSnapshotJsonCollapsed: {},
@@ -834,6 +914,18 @@ export default {
       if (code >= 400) return 'danger'
       return 'warning'
     },
+    /**
+     * 显示「AI 分析」入口的条件：本次运行存在结果，且属于失败/错误情形——
+     * 状态码标签判定为 danger（HTTP 4xx/5xx 或运行 error 兜底）、底层错误存在，
+     * 或任意断言未通过。runRecord.id 用作 analyzeRunFailure 接口入参。
+     */
+    canAnalyzeRunFailure() {
+      if (!this.runRecord?.id) return false
+      if (this.responseStatusType === 'danger') return true
+      if (this.result?.error) return true
+      if (this.result?.status && this.result.status !== 'passed') return true
+      return this.assertions.some((item) => item && item.passed === false)
+    },
     requestCurlCommand() {
       return buildCurlFromRequestSnapshot(this.requestSnapshot)
     },
@@ -862,6 +954,7 @@ export default {
         const out = {}
         for (const row of rows) {
           if (!row || row.enabled === false) continue
+          if (row.authInherited && !row.authOverridden) continue
           const key = String(row.key || '').trim()
           if (!key) continue
           out[key] = row.value == null ? '' : String(row.value)
@@ -896,6 +989,14 @@ export default {
     },
     requestSchema() {
       return this.normalizeRequest(this.endpoint?.requestSchema)
+    },
+    // Path 子区显隐：当前路径里只要存在 {xxx} 占位符就一定显示；
+    // 若路径无占位符，则仅对手工模板（source!=='auto'）保留空表格便于临时补占位符，
+    // 自动生成模板（来自 OpenAPI 导入，source==='auto'）直接隐藏，避免无意义的空区干扰。
+    showPathParamsSection() {
+      const path = this.request?.path || this.testCase?.path || ''
+      if (Object.keys(this.pathVariables(path)).length > 0) return true
+      return this.testCase?.source !== 'auto'
     },
     responseSchema() {
       return this.normalizeRequest(this.endpoint?.responseSchema)
@@ -981,6 +1082,7 @@ export default {
       this.pathRows = this.objectToRows(forPath)
       this.variableRows = this.objectToRows(forRest)
       this.request.variables = { ...forPath, ...forRest }
+      this.refreshEnvironmentAuthRows()
       this.schedulePersistDraft()
     },
     runName() {
@@ -1030,6 +1132,18 @@ export default {
     },
     aiParamsDialogVisible(val) {
       if (!val) this.aiParamsLoading = false
+    },
+    environmentId() {
+      this.refreshEnvironmentAuthRows()
+    },
+    environments() {
+      this.refreshEnvironmentAuthRows()
+    },
+    'request.security': {
+      handler() {
+        this.refreshEnvironmentAuthRows()
+      },
+      deep: true
     }
   },
   methods: {
@@ -1166,6 +1280,7 @@ export default {
       }
       this.payload = null
       this.emitRunSummary({ running: false, runStatus: '', resultStatus: '', durationMillis: null })
+      this.refreshEnvironmentAuthRows()
       return true
     },
     startBodySchemaResize(event) {
@@ -1356,6 +1471,7 @@ export default {
       this.variableRows = this.objectToRows(forRest)
       this.setBodyText(raw.body == null ? '' : this.formatJSON(raw.body))
       this.activeTab = this.defaultTab()
+      this.refreshEnvironmentAuthRows()
     },
     async generateParams() {
       if (!this.testCase) return
@@ -1398,6 +1514,41 @@ export default {
     openAIParamsDialog() {
       this.aiParamsLoading = true
       this.aiParamsDialogVisible = true
+    },
+    /**
+     * 打开 AI 失败分析弹窗：先打开弹窗再发起接口请求，弹窗内根据 loading
+     * 状态展示进度。即使请求失败也保留弹窗以便用户重试或复制错误。
+     */
+    async openAIFailureAnalysis() {
+      if (!this.runRecord?.id) {
+        this.$message.warning('暂无可分析的运行记录')
+        return
+      }
+      this.aiAnalysisDialogVisible = true
+      await this.runAIFailureAnalysis()
+    },
+    async runAIFailureAnalysis() {
+      const runId = this.runRecord?.id
+      if (!runId) return
+      this.aiAnalysisLoading = true
+      this.aiAnalysisText = ''
+      this.aiAnalysisModel = ''
+      this.aiAnalysisElapsed = 0
+      this.aiAnalysisError = ''
+      this.aiAnalysisInfo = ''
+      try {
+        const resp = await analyzeRunFailure(runId)
+        this.aiAnalysisText = resp?.text || ''
+        this.aiAnalysisModel = resp?.model || ''
+        this.aiAnalysisElapsed = Number(resp?.elapsedMillis) || 0
+        if (!this.aiAnalysisText) {
+          this.aiAnalysisError = 'AI 未返回任何分析内容'
+        }
+      } catch (error) {
+        this.aiAnalysisError = error?.response?.data?.error || error?.message || 'AI 分析失败，请稍后重试'
+      } finally {
+        this.aiAnalysisLoading = false
+      }
     },
     onAIParamsApply(payload) {
       const generated = payload?.parsed
@@ -1595,22 +1746,43 @@ export default {
       rows.push({ enabled: true, key: '', value: '', required: false })
     },
     removeRow(rows, index) {
-      rows.splice(index, 1)
+      const removed = rows.splice(index, 1)
+      // 用户主动删掉一条继承认证行（无论是否已 override）后，按所选环境立即重新派生一遍，
+      // 让仍然适用的环境继承认证以提示行的形式回到表格里，避免误删后无法恢复。
+      if (removed[0]?.authInherited) this.refreshEnvironmentAuthRows()
+    },
+    markRowOverridden(row) {
+      markAuthRowOverridden(row)
+    },
+    refreshEnvironmentAuthRows() {
+      const inherited = computeInheritedAuthRows({
+        environment: this.currentEnvironment,
+        security: this.request?.security,
+        paths: [
+          this.request?.path,
+          this.testCase?.path
+        ]
+      })
+      this.headerRows = mergeInheritedAuthRows(this.headerRows, inherited.headers, { headerMode: true })
+      this.queryRows = mergeInheritedAuthRows(this.queryRows, inherited.query, { headerMode: false })
     },
     rowsToValueMap(rows) {
       return rows.reduce((out, row) => {
+        if (row.authInherited && !row.authOverridden) return out
         if (row.key) out[row.key] = row.value
         return out
       }, {})
     },
     rowsToEnabledMap(rows) {
       return rows.reduce((out, row) => {
+        if (row.authInherited && !row.authOverridden) return out
         if (row.key) out[row.key] = row.enabled !== false
         return out
       }, {})
     },
     rowsToRequiredMap(rows) {
       return rows.reduce((out, row) => {
+        if (row.authInherited && !row.authOverridden) return out
         if (row.key) out[row.key] = row.required === true
         return out
       }, {})
@@ -1623,8 +1795,10 @@ export default {
         required: requiredMap ? requiredMap[key] === true : false
       }))
     },
-    rowsToObject(rows) {
-      return rows.reduce((out, row) => {
+    rowsToObject(rows, options = {}) {
+      const includeInherited = options.includeInherited === true
+      return (rows || []).reduce((out, row) => {
+        if (row.authInherited && !row.authOverridden && !includeInherited) return out
         if (row.enabled && row.key) out[row.key] = row.value
         return out
       }, {})
@@ -1727,6 +1901,9 @@ export default {
       return request
     },
     parameterComment(row, location) {
+      if (row?.authInherited && !row?.authOverridden) {
+        return AUTH_INHERITED_ROW_COMMENT
+      }
       const name = row?.key
       if (!name) return '-'
       const parameters = Array.isArray(this.requestSchema?.parameters) ? this.requestSchema.parameters : []
@@ -2333,6 +2510,7 @@ export default {
       this.setBodyText(saved.bodyText || '')
       if (saved.label) this.runName = saved.label
       this.activeTab = this.defaultTab()
+      this.refreshEnvironmentAuthRows()
       this.activeSavedIndex = index
       this.payload = saved.payload ? JSON.parse(JSON.stringify(saved.payload)) : null
       if (this.payload) {
@@ -2494,7 +2672,7 @@ export default {
 
 .body-view-toggle span {
   padding: 2px 10px;
-  font-size: 12px;
+  font-size: var(--app-font-size-small);
   color: var(--app-secondary-text);
   cursor: pointer;
   user-select: none;
@@ -2571,6 +2749,20 @@ export default {
   overflow: hidden;
   text-overflow: ellipsis;
   vertical-align: bottom;
+}
+
+.ai-failure-analysis-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding-left: 8px;
+  padding-right: 8px;
+  height: 24px;
+  font-size: var(--app-font-size-small);
+}
+
+.ai-failure-analysis-icon {
+  font-size: 14px;
 }
 
 .metric-chip {
@@ -2659,6 +2851,11 @@ export default {
   flex: 0 0 auto;
 }
 
+.ai-sparkle-btn {
+  padding-left: 8px;
+  padding-right: 8px;
+}
+
 .send-button {
   min-width: 88px;
   min-height: 42px;
@@ -2682,7 +2879,7 @@ export default {
   background: transparent;
   border: 1px solid transparent;
   color: var(--el-text-color-secondary, #909399);
-  font-size: 12px;
+  font-size: var(--app-font-size-small);
   cursor: pointer;
   white-space: nowrap;
   transition: background 0.15s, color 0.15s;
@@ -2713,7 +2910,7 @@ export default {
   border: 1px solid var(--el-color-primary);
   border-radius: 3px;
   outline: none;
-  font-size: 12px;
+  font-size: var(--app-font-size-small);
   font-family: inherit;
   line-height: 18px;
   background: #fff;
@@ -2732,7 +2929,7 @@ export default {
   padding: 0;
   cursor: pointer;
   color: var(--el-text-color-placeholder, #c0c4cc);
-  font-size: 14px;
+  font-size: var(--app-font-size-base);
   line-height: 1;
   flex-shrink: 0;
   border-radius: 50%;
@@ -2803,7 +3000,7 @@ export default {
 .required-star {
   flex: 0 0 auto;
   color: var(--el-color-danger);
-  font-size: 16px;
+  font-size: var(--app-font-size-title);
   font-weight: 700;
   line-height: 1;
 }
@@ -2913,7 +3110,7 @@ export default {
 .schema-field-count {
   flex: 0 0 auto;
   color: var(--app-secondary-text);
-  font-size: 12px;
+  font-size: var(--app-font-size-small);
 }
 
 .schema-field-table {
@@ -2936,7 +3133,7 @@ export default {
   padding: 0 10px;
   background: #f8fafc;
   color: var(--app-secondary-text);
-  font-size: 12px;
+  font-size: var(--app-font-size-small);
   font-weight: 600;
 }
 
@@ -2957,7 +3154,7 @@ export default {
   overflow: auto;
   padding: 10px 0;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 12.5px;
+  font-size: var(--app-font-size-small);
   line-height: 1.7;
 }
 
@@ -3068,7 +3265,7 @@ export default {
   overflow: hidden;
   color: var(--el-text-color-primary);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 12px;
+  font-size: var(--app-font-size-small);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -3076,7 +3273,7 @@ export default {
 .schema-required {
   flex: 0 0 auto;
   color: var(--el-color-danger);
-  font-size: 13px;
+  font-size: var(--app-font-size-small);
   font-weight: 700;
 }
 
@@ -3089,7 +3286,7 @@ export default {
   background: #f1f5f9;
   color: #64748b;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 11px;
+  font-size: var(--app-font-size-small);
   line-height: 18px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3099,7 +3296,7 @@ export default {
   overflow: hidden;
   color: #475569;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 11px;
+  font-size: var(--app-font-size-small);
   line-height: 1.4;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3144,7 +3341,7 @@ export default {
   height: 30px;
   padding: 0 10px;
   color: var(--app-secondary-text);
-  font-size: 12px;
+  font-size: var(--app-font-size-small);
   line-height: 30px;
 }
 
@@ -3179,7 +3376,7 @@ export default {
 
 .assertion-path {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 12px;
+  font-size: var(--app-font-size-small);
   color: var(--app-secondary-text);
 }
 
@@ -3272,7 +3469,7 @@ export default {
 
 :global(.json-help-content) {
   line-height: 1.55;
-  font-size: 12px;
+  font-size: var(--app-font-size-small);
 }
 
 :global(.json-help-content p) {
@@ -3300,7 +3497,7 @@ export default {
   border-radius: 3px;
   background: rgba(255, 255, 255, 0.14);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 11px;
+  font-size: var(--app-font-size-small);
 }
 
 :global(.json-help-code) {
@@ -3309,7 +3506,7 @@ export default {
   border-radius: 6px;
   background: rgba(0, 0, 0, 0.28);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 11px;
+  font-size: var(--app-font-size-small);
   line-height: 1.45;
   white-space: pre;
   overflow-x: auto;
@@ -3389,7 +3586,7 @@ export default {
 }
 
 .environment-select-dropdown .env-option-edit-btn .el-icon {
-  font-size: 16px;
+  font-size: var(--app-font-size-title);
 }
 
 .environment-select-dropdown .el-select-dropdown__item:hover .env-option-edit-btn {

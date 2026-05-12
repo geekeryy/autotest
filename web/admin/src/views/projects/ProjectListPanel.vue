@@ -401,7 +401,7 @@ export default {
 }
 
 .sidebar-item-meta {
-  font-size: 12px;
+  font-size: var(--app-font-size-small);
   color: var(--el-text-color-placeholder);
   margin-bottom: 6px;
 }
@@ -416,7 +416,7 @@ export default {
 }
 
 .role-admin-hint {
-  font-size: 12px;
+  font-size: var(--app-font-size-small);
   color: var(--app-secondary-text);
 }
 

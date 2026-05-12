@@ -196,7 +196,7 @@ export default {
 }
 
 .sql-editor-hint {
-  font-size: 12px;
+  font-size: var(--app-font-size-small);
   color: var(--el-text-color-secondary);
 }
 

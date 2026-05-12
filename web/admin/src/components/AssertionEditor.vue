@@ -114,17 +114,20 @@
         <template v-else-if="row.type === 'script'">
           <span class="script-hint">JavaScript (Postman 兼容 pm API)</span>
           <ScriptLibraryPicker variant="assertion" class="script-library-inline" @append="appendScriptSnippet(row, $event)" />
-          <el-button
-            size="small"
-            type="primary"
-            plain
-            class="script-library-inline"
-            :loading="aiBusyRow === row"
-            :disabled="!!aiBusyRow && aiBusyRow !== row"
-            @click="openAIGenerator(row)"
-          >
-            AI 生成
-          </el-button>
+          <el-tooltip content="AI 生成断言脚本" placement="top">
+            <el-button
+              size="small"
+              type="primary"
+              plain
+              class="script-library-inline ai-sparkle-btn"
+              :loading="aiBusyRow === row"
+              :disabled="!!aiBusyRow && aiBusyRow !== row"
+              :aria-label="'AI 生成断言脚本'"
+              @click="openAIGenerator(row)"
+            >
+              <AiSparkleIcon v-if="aiBusyRow !== row" />
+            </el-button>
+          </el-tooltip>
         </template>
 
         <el-button
@@ -173,6 +176,7 @@ pm.test('业务码为 0', () => {
 <script>
 import ScriptLibraryPicker from './ScriptLibraryPicker.vue'
 import AIGenerateDialog from './AIGenerateDialog.vue'
+import AiSparkleIcon from './icons/AiSparkleIcon.vue'
 
 const NO_EXPECTED_OPS = new Set([
   'exists', 'not_exists', 'is_null', 'is_not_null', 'is_empty', 'is_not_empty'
@@ -308,7 +312,7 @@ function specToRow(spec) {
 
 export default {
   name: 'AssertionEditor',
-  components: { ScriptLibraryPicker, AIGenerateDialog },
+  components: { ScriptLibraryPicker, AIGenerateDialog, AiSparkleIcon },
   props: {
     modelValue: {
       type: Array,
@@ -479,6 +483,8 @@ export default {
   flex-shrink: 0;
 }
 
+/* AI 生成按钮 .ai-sparkle-btn 已在 styles/global.css 统一管理样式，本文件不再重复 */
+
 .delete-btn {
   margin-left: auto;
   flex-shrink: 0;
@@ -492,12 +498,12 @@ export default {
 
 .script-editor :deep(textarea) {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 12px;
+  font-size: var(--app-font-size-small);
   line-height: 1.55;
 }
 
 .script-api-tip {
-  font-size: 11px;
+  font-size: var(--app-font-size-small);
   color: var(--app-secondary-text, #909399);
   line-height: 1.4;
 }
@@ -506,7 +512,7 @@ export default {
   padding: 1px 5px;
   border-radius: 3px;
   background: rgba(64, 158, 255, 0.08);
-  font-size: 11px;
+  font-size: var(--app-font-size-small);
   color: var(--el-color-primary, #409eff);
 }
 

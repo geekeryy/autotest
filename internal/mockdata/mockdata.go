@@ -10,6 +10,7 @@
 package mockdata
 
 import (
+	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
@@ -108,6 +109,16 @@ func Eval(name string, args []string) (string, bool) {
 		return formatTime(gofakeit.Date().UTC(), firstArg(args, time.RFC3339)), true
 	case "pick", "oneof", "choice":
 		return pickHelper(args), true
+	case "idcard", "id_card":
+		return chineseIDCard(), true
+	case "platenumber", "plate_number", "plate":
+		return chinesePlateNumber(), true
+	case "bankcard", "bank_card", "bankcardnumber":
+		return bankCard(args), true
+	case "unifiedsocialcreditcode", "unified_social_credit_code", "uscc":
+		return unifiedSocialCreditCode(), true
+	case "sku":
+		return skuHelper(args), true
 	}
 	return "", false
 }
@@ -233,6 +244,229 @@ func pickHelper(args []string) string {
 		return ""
 	}
 	return args[gofakeit.IntRange(0, len(args)-1)]
+}
+
+// ── 业务身份与编码 helper ──────────────────────────────────────────────
+//
+// 这些 helper 仅生成「形式合法」的样本数据用于自动化测试场景，**不**对应
+// 任何真实人员、车辆或法人实体；校验位算法严格遵循国家标准（GB 11643 /
+// Luhn / GB 32100），便于业务系统在前端表单或服务端做格式校验时通过。
+
+// chineseIDCard 生成一个 18 位中国二代身份证号样本：
+//   - 前 6 位行政区划码：从 chineseIDCardAreaCodes 中随机取一项；
+//   - 中间 8 位生日：1960-01-01 到 2010-12-31 之间合法日期；
+//   - 第 15-17 位顺序码：随机 000-999；
+//   - 第 18 位校验位：按 GB 11643-1999 ISO 7064 MOD 11-2 算法。
+func chineseIDCard() string {
+	area := chineseIDCardAreaCodes[gofakeit.IntRange(0, len(chineseIDCardAreaCodes)-1)]
+	year := gofakeit.IntRange(1960, 2010)
+	month := gofakeit.IntRange(1, 12)
+	day := gofakeit.IntRange(1, daysInMonth(year, month))
+	birthday := fmt.Sprintf("%04d%02d%02d", year, month, day)
+	sequence := fmt.Sprintf("%03d", gofakeit.IntRange(0, 999))
+	body := area + birthday + sequence
+	return body + idCardCheckDigit(body)
+}
+
+// idCardWeights 与 idCardCheckChars 是 GB 11643-1999 中规定的常量。
+var (
+	idCardWeights    = []int{7, 9, 10, 5, 8, 4, 2, 1, 6, 3, 7, 9, 10, 5, 8, 4, 2}
+	idCardCheckChars = []string{"1", "0", "X", "9", "8", "7", "6", "5", "4", "3", "2"}
+)
+
+func idCardCheckDigit(body17 string) string {
+	sum := 0
+	for i := 0; i < 17; i++ {
+		// 严格断言每位都是数字，避免越界 panic 在生产环境难以排查。
+		digit := int(body17[i] - '0')
+		if digit < 0 || digit > 9 {
+			return "0"
+		}
+		sum += digit * idCardWeights[i]
+	}
+	return idCardCheckChars[sum%11]
+}
+
+// daysInMonth 不依赖完整时区计算，避免边界月份生成无效日期（如 2 月 30）。
+func daysInMonth(year, month int) int {
+	switch month {
+	case 1, 3, 5, 7, 8, 10, 12:
+		return 31
+	case 4, 6, 9, 11:
+		return 30
+	case 2:
+		if (year%4 == 0 && year%100 != 0) || year%400 == 0 {
+			return 29
+		}
+		return 28
+	}
+	return 28
+}
+
+// chinesePlateNumber 生成一个普通中国车牌号样本：
+// 「省份简称 + · + 字母 1 位 + 字母数字 5 位」，例如 `京·B12AB3`。
+//
+// 不覆盖新能源（绿牌）、警车、军车等特殊车牌；如需扩展请添加专用 helper。
+func chinesePlateNumber() string {
+	prefix := chinesePlateProvinces[gofakeit.IntRange(0, len(chinesePlateProvinces)-1)]
+	letter := string('A' + byte(gofakeit.IntRange(0, 25)))
+	tail := make([]byte, 5)
+	for i := range tail {
+		// 0-9 占索引 0-9, A-Z 占索引 10-35。
+		idx := gofakeit.IntRange(0, 35)
+		if idx < 10 {
+			tail[i] = byte('0' + idx)
+		} else {
+			tail[i] = byte('A' + idx - 10)
+		}
+	}
+	return prefix + "·" + letter + string(tail)
+}
+
+// bankCard 生成一个 16-19 位 Luhn 合法的银行卡号：
+//   - 长度可由 args[0] 指定（限制在 [16,19]，默认 19）；
+//   - 首位从 4/5/6 中随机选取（覆盖最常见的 Visa/Master/UnionPay 起始位）；
+//   - 中间位随机数字；
+//   - 末位为 Luhn 校验位。
+func bankCard(args []string) string {
+	length := intArg(args, 0, 19)
+	if length < 16 {
+		length = 16
+	}
+	if length > 19 {
+		length = 19
+	}
+	prefixOptions := []byte{'4', '5', '6'}
+	digits := make([]byte, length)
+	digits[0] = prefixOptions[gofakeit.IntRange(0, len(prefixOptions)-1)]
+	for i := 1; i < length-1; i++ {
+		digits[i] = byte('0' + gofakeit.IntRange(0, 9))
+	}
+	digits[length-1] = byte('0' + luhnCheckDigit(digits[:length-1]))
+	return string(digits)
+}
+
+// luhnCheckDigit 计算给定数字串的 Luhn 校验位（0-9）。
+// 要求 prefix 的每个字节都在 '0'-'9' 之间。
+func luhnCheckDigit(prefix []byte) int {
+	sum := 0
+	// 末位为校验位，prefix 长度即校验位之前的位数；从右往左每隔一位 ×2。
+	double := true
+	for i := len(prefix) - 1; i >= 0; i-- {
+		d := int(prefix[i] - '0')
+		if double {
+			d *= 2
+			if d > 9 {
+				d -= 9
+			}
+		}
+		sum += d
+		double = !double
+	}
+	return (10 - (sum % 10)) % 10
+}
+
+// unifiedSocialCreditCode 生成 18 位「统一社会信用代码」样本：
+//   - 第 1 位登记管理部门码（GB 32100，常用 1/5/9 之一）；
+//   - 第 2 位机构类别码（按管理部门派生，0-9/A-Z）；
+//   - 第 3-8 位行政区划码（取自 chineseIDCardAreaCodes 的 6 位前缀）；
+//   - 第 9-17 位主体识别码（业务上由组织机构代码派生，本 helper 用 9 位
+//     随机字母数字代替）；
+//   - 第 18 位校验位（GB 32100 ISO 7064 MOD 31-3）。
+func unifiedSocialCreditCode() string {
+	// 登记管理部门 + 机构类别常用组合：
+	//   91 — 工商 / 企业, 51 — 民政 / 社会团体, 92 — 工商 / 个体工商户, 12 — 编办 / 机关。
+	deptCategoryPairs := []string{"91", "92", "93", "51", "12", "11", "31", "52", "53", "59"}
+	pair := deptCategoryPairs[gofakeit.IntRange(0, len(deptCategoryPairs)-1)]
+	area := chineseIDCardAreaCodes[gofakeit.IntRange(0, len(chineseIDCardAreaCodes)-1)]
+	body := pair + area
+	for i := 0; i < 9; i++ {
+		body += string(usccCharSet[gofakeit.IntRange(0, len(usccCharSet)-1)])
+	}
+	return body + usccCheckDigit(body)
+}
+
+// usccCharSet：GB 32100 允许的字符集（数字 + 大写字母去掉 I/O/S/V/Z），共 31 个。
+var usccCharSet = []byte("0123456789ABCDEFGHJKLMNPQRTUWXY")
+
+var usccWeights = []int{1, 3, 9, 27, 19, 26, 16, 17, 20, 29, 25, 13, 8, 24, 10, 30, 28}
+
+// usccCheckDigit 计算 17 位主体码的校验位（GB 32100 ISO 7064 MOD 31-3）。
+func usccCheckDigit(body17 string) string {
+	indexOf := func(b byte) int {
+		for i, c := range usccCharSet {
+			if c == b {
+				return i
+			}
+		}
+		return -1
+	}
+	sum := 0
+	for i := 0; i < 17 && i < len(body17); i++ {
+		val := indexOf(body17[i])
+		if val < 0 {
+			return "0"
+		}
+		sum += val * usccWeights[i]
+	}
+	check := 31 - (sum % 31)
+	if check == 31 {
+		check = 0
+	}
+	return string(usccCharSet[check])
+}
+
+// skuHelper 生成 SKU 样本，默认 `[A-Z]{2}-\d{6}`；
+//   - args[0]：可选总长度（含分隔符 `-`），范围 [4, 32]；超出则截到默认长度。
+//
+// 长度 < 4 时无法保证 `<字母前缀>-<数字尾缀>` 结构，会被忽略并回落到默认。
+func skuHelper(args []string) string {
+	length := intArg(args, 0, 9)
+	if length < 4 || length > 32 {
+		length = 9
+	}
+	letters := length / 3
+	if letters < 1 {
+		letters = 1
+	}
+	if letters > 6 {
+		letters = 6
+	}
+	digits := length - letters - 1
+	if digits < 1 {
+		digits = 1
+	}
+	var b strings.Builder
+	for i := 0; i < letters; i++ {
+		b.WriteByte(byte('A' + gofakeit.IntRange(0, 25)))
+	}
+	b.WriteByte('-')
+	for i := 0; i < digits; i++ {
+		b.WriteByte(byte('0' + gofakeit.IntRange(0, 9)))
+	}
+	return b.String()
+}
+
+// chineseIDCardAreaCodes：常用省/市/区 6 位行政区划码（来自 GB/T 2260）。
+// 仅保留覆盖度高的城市样本，避免硬编码全国所有区县；测试场景下足够。
+var chineseIDCardAreaCodes = []string{
+	"110101", "110102", "110105", "110106", "110108", // 北京 东城 / 西城 / 朝阳 / 丰台 / 海淀
+	"120101", "120102", "120103", "120104", "120105", // 天津 和平 / 河东 / 河西 / 南开 / 河北
+	"310101", "310104", "310105", "310106", "310115", // 上海 黄浦 / 徐汇 / 长宁 / 静安 / 浦东
+	"500101", "500103", "500104", "500106", "500108", // 重庆 万州 / 渝中 / 大渡口 / 沙坪坝 / 南岸
+	"320102", "320104", "320106", "320111", "320114", // 南京 玄武 / 秦淮 / 鼓楼 / 浦口 / 雨花
+	"330102", "330104", "330105", "330106", "330108", // 杭州 上城 / 江干 / 拱墅 / 西湖 / 滨江
+	"440103", "440104", "440105", "440106", "440111", // 广州 荔湾 / 越秀 / 海珠 / 天河 / 白云
+	"440303", "440304", "440305", "440306", "440307", // 深圳 罗湖 / 福田 / 南山 / 宝安 / 龙岗
+	"510104", "510105", "510106", "510107", "510108", // 成都 锦江 / 金牛 / 武侯 / 成华 / 青羊
+	"420102", "420103", "420104", "420105", "420106", // 武汉 江岸 / 江汉 / 硚口 / 汉阳 / 武昌
+}
+
+// chinesePlateProvinces：中国大陆 31 个省/直辖市/自治区车牌简称。
+var chinesePlateProvinces = []string{
+	"京", "津", "沪", "渝", "冀", "豫", "云", "辽", "黑", "湘",
+	"皖", "鲁", "新", "苏", "浙", "赣", "鄂", "桂", "甘", "晋",
+	"蒙", "陕", "吉", "闽", "贵", "粤", "青", "藏", "川", "宁", "琼",
 }
 
 var chineseSurnames = []string{
@@ -430,6 +664,11 @@ func ListHelpers() []HelperInfo {
 		{Name: "date", Example: "{{$mock.date}}", Description: "随机日期 yyyy-MM-dd（可自定义布局）"},
 		{Name: "dateTime", Example: "{{$mock.dateTime}}", Description: "随机日期时间 RFC3339（可自定义布局）"},
 		{Name: "pick", Example: "{{$mock.pick(a,b,c)}}", Description: "从参数列表随机挑一个，oneOf 是别名"},
+		{Name: "idCard", Example: "{{$mock.idCard}}", Description: "中国二代身份证 18 位（含 GB 11643 校验位，仅供测试用）"},
+		{Name: "plateNumber", Example: "{{$mock.plateNumber}}", Description: "中国车牌号（省份简称 + · + 1 字母 + 5 位字母数字）"},
+		{Name: "bankCard", Example: "{{$mock.bankCard}} / {{$mock.bankCard(16)}}", Description: "16-19 位 Luhn 合法银行卡号，默认 19 位"},
+		{Name: "unifiedSocialCreditCode", Example: "{{$mock.unifiedSocialCreditCode}}", Description: "统一社会信用代码 18 位（GB 32100，校验位合法）"},
+		{Name: "sku", Example: "{{$mock.sku}} / {{$mock.sku(12)}}", Description: "SKU 编号，默认 `[A-Z]{2}-\\d{6}`，可指定总长"},
 	}
 }
 

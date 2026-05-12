@@ -46,6 +46,18 @@
               <el-tag :type="isRunning(row) ? 'success' : 'info'" size="small">{{ serverStatusLabel(row) }}</el-tag>
             </template>
           </el-table-column>
+          <el-table-column label="默认启动" width="140">
+            <template #default="{ row }">
+              <el-button
+                :type="isAutoStart(row) ? 'warning' : 'primary'"
+                link
+                :loading="autoStartTogglingId === row.id"
+                @click.stop="toggleAutoStart(row)"
+              >
+                {{ isAutoStart(row) ? '取消默认启动' : '设为默认启动' }}
+              </el-button>
+            </template>
+          </el-table-column>
           <el-table-column label="访问地址" min-width="190" show-overflow-tooltip>
             <template #default="{ row }">{{ accessAddress(row) }}</template>
           </el-table-column>
@@ -139,6 +151,10 @@
       <el-form :model="serverForm" label-width="90px">
         <el-form-item label="名称"><el-input v-model="serverForm.name" placeholder="例如：订单服务 Mock" /></el-form-item>
         <el-form-item label="端口"><el-input v-model="serverForm.port" placeholder="例如：18080" /></el-form-item>
+        <el-form-item label="默认启动">
+          <el-switch v-model="serverForm.autoStart" />
+          <span class="form-hint">勾选后 API 进程启动时会自动拉起此 Mock Server。</span>
+        </el-form-item>
         <el-form-item label="描述"><el-input v-model="serverForm.description" type="textarea" :rows="3" placeholder="可选，说明用途" /></el-form-item>
       </el-form>
       <template #footer>
@@ -226,7 +242,7 @@
         <el-form-item label="响应体">
           <div class="json-field">
             <div class="json-toolbar json-toolbar-stack">
-              <span>可引用请求参数，例如 &#123;&#123;request.pathvar.id&#125;&#125;、&#123;&#123;request.query.name&#125;&#125;、&#123;&#123;request.body.user.id&#125;&#125;。</span>
+              <span>可引用请求参数，例如 &#123;&#123;$req.pathvar.id&#125;&#125;、&#123;&#123;$req.query.name&#125;&#125;、&#123;&#123;$req.body.user.id&#125;&#125;（兼容历史 &#123;&#123;request.*&#125;&#125; 形式）。</span>
               <span>支持运行时模拟数据标签 &#123;&#123;$mock.uuid&#125;&#125;、&#123;&#123;$mock.now&#125;&#125;、&#123;&#123;$mock.email&#125;&#125;、&#123;&#123;$mock.int(1,100)&#125;&#125;、&#123;&#123;$mock.pick(a,b,c)&#125;&#125; 等，每次请求实时生成新值。</span>
             </div>
             <el-input v-model="routeForm.responseBody" class="body-editor" type="textarea" :autosize="{ minRows: 8, maxRows: 18 }" @blur="formatRouteResponseBody" />
@@ -339,6 +355,7 @@ export default {
       loadingServers: false,
       loadingRoutes: false,
       togglingServerId: '',
+      autoStartTogglingId: '',
       deletingServerId: '',
       deletingRouteId: '',
       savingServer: false,
@@ -419,7 +436,8 @@ export default {
       return {
         name: '',
         description: '',
-        port: ''
+        port: '',
+        autoStart: false
       }
     },
     emptyRouteForm() {
@@ -457,6 +475,11 @@ export default {
     },
     serverPort(row) {
       return row?.port ?? row?.listenPort ?? row?.listen_port ?? ''
+    },
+    isAutoStart(row) {
+      if (typeof row?.autoStart === 'boolean') return row.autoStart
+      if (typeof row?.auto_start === 'boolean') return row.auto_start
+      return false
     },
     isRunning(row) {
       if (typeof row?.status?.running === 'boolean') return row.status.running
@@ -547,35 +570,45 @@ export default {
       if (!input || !input.includes('{{')) return input
       return input.replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (placeholder, rawExpr) => {
         const expr = rawExpr.trim()
-        if (!expr.startsWith('request.')) return placeholder
-        const resolved = this.resolveMockRequestTemplateValue(expr, finalURL, headers)
+        // Accept the new `$req.*` alias alongside the historical `request.*`
+        // form; both resolve identically to keep mock rules saved before the
+        // alias was introduced working unchanged.
+        const key = this.normalizeMockRequestKey(expr)
+        if (key == null) return placeholder
+        const resolved = this.resolveMockRequestTemplateValue(key, finalURL, headers)
         return resolved == null ? placeholder : this.mockTemplateValueString(resolved)
       })
     },
-    resolveMockRequestTemplateValue(expr, finalURL, headers) {
+    normalizeMockRequestKey(expr) {
+      if (expr === 'request' || expr === '$req') return ''
+      if (expr.startsWith('request.')) return expr.slice('request.'.length)
+      if (expr.startsWith('$req.')) return expr.slice('$req.'.length)
+      return null
+    },
+    resolveMockRequestTemplateValue(key, finalURL, headers) {
       const url = this.parseTestURL(finalURL)
       const requestPath = url?.pathname || ''
       const requestURL = url ? `${url.pathname}${url.search}` : finalURL
-      if (expr === 'request.method') return this.testForm.method
-      if (expr === 'request.path') return requestPath
-      if (expr === 'request.url') return requestURL
-      if (expr === 'request.body' || expr === 'request.bodyRaw') return this.testForm.body
-      if (expr.startsWith('request.query.')) {
-        return url?.searchParams.get(expr.slice('request.query.'.length))
+      if (key === 'method') return this.testForm.method
+      if (key === 'path') return requestPath
+      if (key === 'url') return requestURL
+      if (key === 'body' || key === 'bodyRaw') return this.testForm.body
+      if (key.startsWith('query.')) {
+        return url?.searchParams.get(key.slice('query.'.length))
       }
-      if (expr.startsWith('request.header.')) {
-        return this.lookupHeader(headers, expr.slice('request.header.'.length))
+      if (key.startsWith('header.')) {
+        return this.lookupHeader(headers, key.slice('header.'.length))
       }
-      if (expr.startsWith('request.pathvar.')) {
-        return this.lookupPathVar(expr.slice('request.pathvar.'.length), requestPath)
+      if (key.startsWith('pathvar.')) {
+        return this.lookupPathVar(key.slice('pathvar.'.length), requestPath)
       }
-      if (expr.startsWith('request.path.')) {
-        return this.lookupPathVar(expr.slice('request.path.'.length), requestPath)
+      if (key.startsWith('path.')) {
+        return this.lookupPathVar(key.slice('path.'.length), requestPath)
       }
-      if (expr.startsWith('request.body.')) {
+      if (key.startsWith('body.')) {
         const parsedBody = this.parseJSONSilently(this.testForm.body)
         if (!parsedBody.ok) return null
-        return this.lookupJSONValue(parsedBody.value, expr.slice('request.body.'.length))
+        return this.lookupJSONValue(parsedBody.value, key.slice('body.'.length))
       }
       return null
     },
@@ -704,7 +737,8 @@ export default {
       this.serverForm = {
         name: row.name || '',
         description: row.description || '',
-        port: String(this.serverPort(row) || '')
+        port: String(this.serverPort(row) || ''),
+        autoStart: this.isAutoStart(row)
       }
       this.serverDialogVisible = true
     },
@@ -727,7 +761,8 @@ export default {
       return {
         name,
         description: this.serverForm.description,
-        port
+        port,
+        autoStart: !!this.serverForm.autoStart
       }
     },
     async submitServer() {
@@ -778,6 +813,33 @@ export default {
         await this.loadServers()
       } finally {
         this.togglingServerId = ''
+      }
+    },
+    // 列表中切换「默认启动」字段：复用 update 接口，仅改 autoStart 一项，
+    // 其他字段保持当前 row 的值，避免清空名称、端口、描述。
+    async toggleAutoStart(row) {
+      if (!row?.id || !this.projectId) return
+      const next = !this.isAutoStart(row)
+      this.autoStartTogglingId = row.id
+      try {
+        const payload = {
+          name: row.name || '',
+          description: row.description || '',
+          port: Number(this.serverPort(row)) || 0,
+          autoStart: next
+        }
+        if (!payload.port) {
+          this.$message.error('当前 Mock Server 缺少端口配置，请先编辑补全后再切换默认启动')
+          return
+        }
+        const saved = await updateMockServer(this.projectId, row.id, payload)
+        const idx = this.servers.findIndex((item) => item.id === row.id)
+        if (idx !== -1 && saved) {
+          this.servers.splice(idx, 1, { ...this.servers[idx], ...saved })
+        }
+        this.$message.success(next ? '已设为默认启动' : '已取消默认启动')
+      } finally {
+        this.autoStartTogglingId = ''
       }
     },
     async copySelectedAddress() {
@@ -1105,7 +1167,8 @@ export default {
 
 .panel-title {
   margin: 0;
-  font-size: 16px;
+  font-size: var(--app-font-size-title);
+  line-height: var(--app-line-height-base);
   font-weight: 600;
 }
 
@@ -1144,7 +1207,8 @@ export default {
 
 .test-title {
   margin: 0;
-  font-size: 15px;
+  font-size: calc(var(--app-font-size-base) + 1px);
+  line-height: var(--app-line-height-base);
   font-weight: 600;
 }
 
@@ -1205,6 +1269,12 @@ export default {
 .full-width,
 .json-field {
   width: 100%;
+}
+
+.form-hint {
+  margin-left: 8px;
+  color: var(--app-secondary-text);
+  font-size: var(--app-font-size-small);
 }
 
 .form-section-header {

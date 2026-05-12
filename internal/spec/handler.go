@@ -18,10 +18,17 @@ func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
 }
 
+// Register 挂载只读接口（list specs / list endpoints）。
+// 导入接口由 RegisterImport 单独挂载，以便外层在不同的认证守卫（如允许 API Key）下注册。
 func (h *Handler) Register(r chi.Router) {
 	r.Get("/projects/{projectID}/services/{serviceID}/specs", h.listSpecs)
-	r.Post("/projects/{projectID}/services/{serviceID}/specs/import", h.importSpec)
 	r.Get("/projects/{projectID}/services/{serviceID}/endpoints", h.listEndpoints)
+}
+
+// RegisterImport 单独挂载 OpenAPI/Swagger 导入路由。
+// 调用方负责在路由组级别添加 specs:import 作用域或权限校验。
+func (h *Handler) RegisterImport(r chi.Router) {
+	r.Post("/projects/{projectID}/services/{serviceID}/specs/import", h.importSpec)
 }
 
 func (h *Handler) listSpecs(w http.ResponseWriter, r *http.Request) {

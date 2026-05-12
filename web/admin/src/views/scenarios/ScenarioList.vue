@@ -116,7 +116,10 @@ import {
 } from '../../api'
 import { loadGlobalProjects, projectState } from '../../utils/currentProject'
 import {
+  SCENARIO_STEP_WORKSPACE_KEY,
   SCENARIO_WORKSPACE_KEY,
+  buildScopeKey,
+  clearTabStateByScopeKey,
   readTabState,
   writeTabState
 } from '../../utils/workspaceTabs'
@@ -300,7 +303,20 @@ export default {
         this.activeTabId = next?.id || ''
         this.syncRoute(this.activeTabId)
       }
+      this.clearStepTabsForScenario(scenarioId)
       this.persistTabsForScope()
+    },
+
+    // 关闭场景 Tab 或删除场景时，必须清掉该场景在浏览器本地保存的步骤 Tab 列表，
+    // 否则下次再次打开同一场景时会还原已被用户主动关闭的旧步骤 Tab。
+    // ScenarioEditor 在 beforeUnmount 还会做一次兜底持久化，这里用 nextTick 延后到卸载之后再清。
+    clearStepTabsForScenario(scenarioId) {
+      if (!scenarioId) return
+      const scopeKey = buildScopeKey(this.projectId, this.serviceId, scenarioId)
+      if (!scopeKey) return
+      this.$nextTick(() => {
+        clearTabStateByScopeKey(SCENARIO_STEP_WORKSPACE_KEY, scopeKey)
+      })
     },
 
     onTabChange(activeId) {
@@ -372,6 +388,8 @@ export default {
           this.scenarios = this.scenarios.filter((s) => s.id !== sc.id)
           if (this.tabs.some((t) => t.id === sc.id)) {
             this.closeTab(sc.id)
+          } else {
+            this.clearStepTabsForScenario(sc.id)
           }
         }).catch(() => {})
       }
@@ -474,7 +492,7 @@ export default {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 13px;
+  font-size: var(--app-font-size-base);
 }
 
 .scenario-action {
@@ -530,7 +548,7 @@ export default {
 .empty-tip {
   text-align: center;
   color: var(--el-text-color-secondary);
-  font-size: 13px;
+  font-size: var(--app-font-size-small);
   padding: 24px;
 }
 

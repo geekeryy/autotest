@@ -69,7 +69,9 @@ select {
 .el-form-item__label,
 .el-form-item__content,
 .el-table,
+.el-table th .cell,
 .el-table .cell,
+.el-table__empty-text,
 .el-menu,
 .el-menu-item,
 .el-sub-menu__title,
@@ -79,19 +81,63 @@ select {
 .el-tabs__item,
 .el-radio,
 .el-checkbox,
+.el-checkbox__label,
 .el-radio-button__inner,
 .el-card,
+.el-card__header,
+.el-card__body,
 .el-tag,
 .el-empty,
+.el-empty__description,
 .el-pagination,
+.el-pagination__total,
+.el-pagination__jump,
 .el-dialog,
+.el-dialog__header,
+.el-dialog__body,
+.el-dialog__footer,
 .el-message,
 .el-message-box,
 .el-notification,
 .el-cascader-panel,
-.el-cascader-node {
+.el-cascader-node,
+.el-collapse,
+.el-collapse-item__header,
+.el-collapse-item__content,
+.el-tooltip__popper,
+.el-alert,
+.el-alert__title,
+.el-alert__description,
+.el-descriptions,
+.el-descriptions__label,
+.el-descriptions__content,
+.el-link,
+.el-result,
+.el-segmented {
   font-size: var(--app-font-size-base);
   line-height: var(--app-line-height-base);
+}
+
+/* 小号 / 极小号统一拉到 token，避免硬编码 12px / 11px 不跟随外观字号变化。 */
+.el-tag--small,
+.el-button--small,
+.el-input--small,
+.el-radio--small,
+.el-checkbox--small,
+.el-pagination--small,
+.el-form-item--small .el-form-item__label,
+.el-form-item--small .el-form-item__content {
+  font-size: var(--app-font-size-small);
+}
+
+.el-tag--mini,
+.el-tag--large {
+  font-size: var(--app-font-size-base);
+}
+
+.el-tooltip__popper,
+.el-popper__arrow {
+  font-size: var(--app-font-size-small);
 }
 
 .el-input__inner,
@@ -172,7 +218,112 @@ select {
   font-family: Menlo, Monaco, Consolas, monospace;
 }
 
+/* 业务页面通用：标题与说明文字统一使用 token，跟随外观字号联动。 */
+.app-section-title,
+.app-panel-title {
+  font-size: var(--app-font-size-title);
+  line-height: var(--app-line-height-base);
+  font-weight: 600;
+  margin: 0;
+  color: var(--app-text-color);
+}
+
+.app-text-hint,
+.text-hint,
+.form-hint {
+  font-size: var(--app-font-size-small);
+  color: var(--app-secondary-text);
+  line-height: var(--app-line-height-base);
+}
+
+.app-text-secondary,
+.text-secondary {
+  color: var(--app-secondary-text);
+  font-size: var(--app-font-size-base);
+}
+
+/* 等宽代码片段保持稍小字号但仍跟随 token，方便外观字号同比缩放。 */
+.app-code,
+.code-snippet,
+.snippet-pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  font-size: var(--app-font-size-small);
+  line-height: 1.55;
+}
+
 /* 场景编排：接口下拉 teleport 到 body，避免被主区 stacking/overflow 遮挡 */
 .scenario-case-select-dropdown.el-popper {
   z-index: 5000 !important;
+}
+
+/*
+  AI 生成入口按钮（.ai-sparkle-btn）全局样式。
+  设计参考 Notion AI / Linear AI / Apple Intelligence / Vercel AI 的极简风格：
+  - 极淡紫蓝渐变背景（默认约 ~4% 透明度，hover 约 ~11%）
+  - 无边框（替换 element-plus plain 按钮的硬边框）
+  - 较大圆角（10px），轻盈感
+  - hover 微微抬起 + 渐变阴影
+  - 不再使用 type="primary" 的强调色，保持次要操作的克制感
+  - emoji ✨ 默认 1.5em，有明确视觉锚点
+  - 使用 !important 确保覆盖各处历史局部样式与 element-plus 默认填充
+*/
+.ai-sparkle-btn,
+.el-button.ai-sparkle-btn {
+  --ai-grad-start: rgba(139, 92, 246, 0.04);
+  --ai-grad-end: rgba(59, 130, 246, 0.04);
+  --ai-grad-start-hover: rgba(139, 92, 246, 0.11);
+  --ai-grad-end-hover: rgba(59, 130, 246, 0.11);
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+  background: linear-gradient(135deg, var(--ai-grad-start), var(--ai-grad-end)) !important;
+  color: #7c3aed !important;
+  padding: 6px 10px !important;
+  height: auto !important;
+  min-height: 28px !important;
+  border-radius: 10px !important;
+  font-weight: 500 !important;
+  transition: background 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease !important;
+}
+
+.ai-sparkle-btn:hover,
+.el-button.ai-sparkle-btn:hover,
+.ai-sparkle-btn:focus,
+.el-button.ai-sparkle-btn:focus {
+  background: linear-gradient(135deg, var(--ai-grad-start-hover), var(--ai-grad-end-hover)) !important;
+  color: #6d28d9 !important;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 10px rgba(124, 58, 237, 0.18) !important;
+}
+
+.ai-sparkle-btn:active,
+.el-button.ai-sparkle-btn:active {
+  transform: translateY(0);
+  box-shadow: 0 1px 4px rgba(124, 58, 237, 0.12) !important;
+}
+
+.ai-sparkle-btn.is-disabled,
+.el-button.ai-sparkle-btn.is-disabled,
+.ai-sparkle-btn.is-disabled:hover,
+.el-button.ai-sparkle-btn.is-disabled:hover {
+  background: rgba(139, 92, 246, 0.025) !important;
+  color: #a78bfa !important;
+  opacity: 0.6 !important;
+  transform: none;
+  box-shadow: none !important;
+  cursor: not-allowed;
+}
+
+/* 暗色主题：背景略淡，hover 仍可读 */
+:root[data-theme='dark'] .ai-sparkle-btn,
+:root[data-theme='dark'] .el-button.ai-sparkle-btn {
+  --ai-grad-start: rgba(167, 139, 250, 0.1);
+  --ai-grad-end: rgba(96, 165, 250, 0.1);
+  --ai-grad-start-hover: rgba(167, 139, 250, 0.2);
+  --ai-grad-end-hover: rgba(96, 165, 250, 0.2);
+  color: #c4b5fd !important;
+}
+:root[data-theme='dark'] .ai-sparkle-btn:hover,
+:root[data-theme='dark'] .el-button.ai-sparkle-btn:hover {
+  color: #ddd6fe !important;
 }

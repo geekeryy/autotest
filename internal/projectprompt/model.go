@@ -12,18 +12,22 @@ var ErrNotFound = errors.New("project ai prompt not found")
 
 // Supported action values (must match the DB CHECK constraint).
 const (
-	ActionGenerateParams    = "generate_params"
-	ActionGenerateAssertion = "generate_assertion"
-	ActionGenerateCaseData  = "generate_case_data"
-	ActionRaw               = "raw"
+	ActionGenerateParams     = "generate_params"
+	ActionGenerateAssertion  = "generate_assertion"
+	ActionGenerateCaseData   = "generate_case_data"
+	ActionAnalyzeFailure     = "analyze_failure"
+	ActionAnalyzeSpecChanges = "analyze_spec_changes"
+	ActionRaw                = "raw"
 )
 
 // ActionLabels maps each action value to a human-readable Chinese label.
 var ActionLabels = map[string]string{
-	ActionGenerateParams:    "生成请求参数",
-	ActionGenerateAssertion: "生成断言脚本",
-	ActionGenerateCaseData:  "生成用例数据",
-	ActionRaw:               "通用对话",
+	ActionGenerateParams:     "生成请求参数",
+	ActionGenerateAssertion:  "生成断言脚本",
+	ActionGenerateCaseData:   "生成用例数据",
+	ActionAnalyzeFailure:     "AI 分析失败原因",
+	ActionAnalyzeSpecChanges: "AI 分析 Spec 变更",
+	ActionRaw:                "通用对话",
 }
 
 // ProjectPrompt is the API-facing representation of a per-project prompt override.

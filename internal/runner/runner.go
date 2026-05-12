@@ -15,6 +15,7 @@ import (
 	testcase "autotest/internal/case"
 	"autotest/internal/project"
 	"autotest/internal/report"
+	"autotest/internal/templating"
 
 	"github.com/google/uuid"
 )
@@ -53,16 +54,20 @@ func New(client *http.Client, engine *assertion.Engine, results ResultStore) *Ru
 // ExecuteCase runs a historical test_cases row. In product terms, SourceAuto
 // and SourceManual rows are request templates, while SourceDerived rows are
 // saved test case snapshots.
-func (r *Runner) ExecuteCase(ctx context.Context, runID uuid.UUID, tc testcase.TestCase, env project.Environment, vars map[string]string, parameterSourceSnapshots json.RawMessage) (*report.Result, error) {
-	return r.executeCase(ctx, runID, nil, tc, env, vars, parameterSourceSnapshots)
+//
+// mockCfg is optional: when non-nil it enables `{{$mock.set.*}}` expansion
+// against the project-scoped value sets and the run-shared cursor map. Pass
+// nil to use the standard mockdata helpers only.
+func (r *Runner) ExecuteCase(ctx context.Context, runID uuid.UUID, tc testcase.TestCase, env project.Environment, vars map[string]string, parameterSourceSnapshots json.RawMessage, mockCfg *templating.MockExpanderConfig) (*report.Result, error) {
+	return r.executeCase(ctx, runID, nil, tc, env, vars, parameterSourceSnapshots, mockCfg)
 }
 
 // ExecuteCaseWithStepID is ExecuteCase with an attached scenario step result.
-func (r *Runner) ExecuteCaseWithStepID(ctx context.Context, runID uuid.UUID, stepID uuid.UUID, tc testcase.TestCase, env project.Environment, vars map[string]string, parameterSourceSnapshots json.RawMessage) (*report.Result, error) {
-	return r.executeCase(ctx, runID, &stepID, tc, env, vars, parameterSourceSnapshots)
+func (r *Runner) ExecuteCaseWithStepID(ctx context.Context, runID uuid.UUID, stepID uuid.UUID, tc testcase.TestCase, env project.Environment, vars map[string]string, parameterSourceSnapshots json.RawMessage, mockCfg *templating.MockExpanderConfig) (*report.Result, error) {
+	return r.executeCase(ctx, runID, &stepID, tc, env, vars, parameterSourceSnapshots, mockCfg)
 }
 
-func (r *Runner) executeCase(ctx context.Context, runID uuid.UUID, stepID *uuid.UUID, tc testcase.TestCase, env project.Environment, vars map[string]string, parameterSourceSnapshots json.RawMessage) (*report.Result, error) {
+func (r *Runner) executeCase(ctx context.Context, runID uuid.UUID, stepID *uuid.UUID, tc testcase.TestCase, env project.Environment, vars map[string]string, parameterSourceSnapshots json.RawMessage, mockCfg *templating.MockExpanderConfig) (*report.Result, error) {
 	start := time.Now()
 	reqDef, err := decodeRequest(tc.Request)
 	if err != nil {
@@ -83,7 +88,7 @@ func (r *Runner) executeCase(ctx context.Context, runID uuid.UUID, stepID *uuid.
 		reqDef.Path = tc.Path
 	}
 
-	httpReq, requestSnapshot, err := buildHTTPRequest(ctx, reqDef, env, vars)
+	httpReq, requestSnapshot, err := buildHTTPRequest(ctx, reqDef, env, vars, mockCfg)
 	if err != nil {
 		return r.finish(ctx, report.Result{
 			RunID:                    runID,
@@ -174,12 +179,12 @@ func decodeRequest(raw json.RawMessage) (RequestDefinition, error) {
 	return req, nil
 }
 
-func buildHTTPRequest(ctx context.Context, def RequestDefinition, env project.Environment, vars map[string]string) (*http.Request, json.RawMessage, error) {
+func buildHTTPRequest(ctx context.Context, def RequestDefinition, env project.Environment, vars map[string]string, mockCfg *templating.MockExpanderConfig) (*http.Request, json.RawMessage, error) {
 	effectiveVars := mergeRequestVariables(def.Variables, vars)
-	target := renderVariables(def.URL, effectiveVars)
+	target := renderVariables(def.URL, effectiveVars, mockCfg)
 	if target == "" {
 		base := strings.TrimRight(env.BaseURL, "/")
-		path := "/" + strings.TrimLeft(renderPathVariables(def.Path, effectiveVars), "/")
+		path := "/" + strings.TrimLeft(renderPathVariables(def.Path, effectiveVars, mockCfg), "/")
 		target = base + path
 	}
 
@@ -188,12 +193,12 @@ func buildHTTPRequest(ctx context.Context, def RequestDefinition, env project.En
 		return nil, nil, fmt.Errorf("parse request url: %w", err)
 	}
 	query := parsed.Query()
-	for key, value := range renderMap(def.Query, effectiveVars) {
+	for key, value := range renderMap(def.Query, effectiveVars, mockCfg) {
 		query.Set(key, value)
 	}
 	parsed.RawQuery = query.Encode()
 
-	renderedBody := renderAny(def.Body, effectiveVars)
+	renderedBody := renderAny(def.Body, effectiveVars, mockCfg)
 	body, err := json.Marshal(renderedBody)
 	if err != nil {
 		return nil, nil, fmt.Errorf("marshal request body: %w", err)
@@ -202,15 +207,15 @@ func buildHTTPRequest(ctx context.Context, def RequestDefinition, env project.En
 		body = nil
 	}
 
-	method := strings.ToUpper(renderVariables(def.Method, effectiveVars))
+	method := strings.ToUpper(renderVariables(def.Method, effectiveVars, mockCfg))
 	req, err := http.NewRequestWithContext(ctx, method, parsed.String(), bytes.NewReader(body))
 	if err != nil {
 		return nil, nil, fmt.Errorf("create request: %w", err)
 	}
-	for key, value := range renderMap(def.Headers, effectiveVars) {
+	for key, value := range renderMap(def.Headers, effectiveVars, mockCfg) {
 		req.Header.Set(key, value)
 	}
-	if err := applyEnvironmentAuth(req, env.Auth, def, effectiveVars); err != nil {
+	if err := applyEnvironmentAuth(req, env.Auth, def, effectiveVars, mockCfg); err != nil {
 		return nil, nil, err
 	}
 
@@ -274,22 +279,22 @@ type authPathRule struct {
 	Profile string `json:"profile"`
 }
 
-func applyEnvironmentAuth(req *http.Request, rawAuth json.RawMessage, def RequestDefinition, vars map[string]string) error {
+func applyEnvironmentAuth(req *http.Request, rawAuth json.RawMessage, def RequestDefinition, vars map[string]string, mockCfg *templating.MockExpanderConfig) error {
 	if len(rawAuth) == 0 {
 		return nil
 	}
 
-	auth, err := selectEnvironmentAuth(rawAuth, def, req.URL.Path, vars)
+	auth, err := selectEnvironmentAuth(rawAuth, def, req.URL.Path, vars, mockCfg)
 	if err != nil {
 		return err
 	}
 	if auth == nil {
 		return nil
 	}
-	return applyAuthDefinition(req, *auth, vars)
+	return applyAuthDefinition(req, *auth, vars, mockCfg)
 }
 
-func selectEnvironmentAuth(rawAuth json.RawMessage, def RequestDefinition, requestPath string, vars map[string]string) (*authDefinition, error) {
+func selectEnvironmentAuth(rawAuth json.RawMessage, def RequestDefinition, requestPath string, vars map[string]string, mockCfg *templating.MockExpanderConfig) (*authDefinition, error) {
 	var cfg environmentAuthConfig
 	if err := json.Unmarshal(rawAuth, &cfg); err != nil {
 		return nil, fmt.Errorf("decode environment auth: %w", err)
@@ -314,7 +319,7 @@ func selectEnvironmentAuth(rawAuth json.RawMessage, def RequestDefinition, reque
 		}
 	}
 
-	pathCandidates := []string{requestPath, renderPathVariables(def.Path, vars)}
+	pathCandidates := []string{requestPath, renderPathVariables(def.Path, vars, mockCfg)}
 	if profileName := profileNameForPathRules(cfg, pathCandidates); profileName != "" {
 		return authProfile(cfg, profileName)
 	}
@@ -408,11 +413,11 @@ func authProfile(cfg environmentAuthConfig, profileName string) (*authDefinition
 	return &auth, nil
 }
 
-func applyAuthDefinition(req *http.Request, auth authDefinition, vars map[string]string) error {
-	for key, value := range renderMap(auth.Headers, vars) {
+func applyAuthDefinition(req *http.Request, auth authDefinition, vars map[string]string, mockCfg *templating.MockExpanderConfig) error {
+	for key, value := range renderMap(auth.Headers, vars, mockCfg) {
 		setHeaderIfAbsent(req, key, value)
 	}
-	for key, value := range renderMap(auth.Query, vars) {
+	for key, value := range renderMap(auth.Query, vars, mockCfg) {
 		setQueryIfAbsent(req, key, value)
 	}
 
@@ -424,7 +429,7 @@ func applyAuthDefinition(req *http.Request, auth authDefinition, vars map[string
 		if tokenTemplate == "" {
 			tokenTemplate = auth.Value
 		}
-		token := strings.TrimSpace(renderVariables(tokenTemplate, vars))
+		token := strings.TrimSpace(renderVariables(tokenTemplate, vars, mockCfg))
 		if token == "" {
 			return nil
 		}
@@ -436,14 +441,14 @@ func applyAuthDefinition(req *http.Request, auth authDefinition, vars map[string
 		if req.Header.Get("Authorization") != "" {
 			return nil
 		}
-		req.SetBasicAuth(renderVariables(auth.Username, vars), renderVariables(auth.Password, vars))
+		req.SetBasicAuth(renderVariables(auth.Username, vars, mockCfg), renderVariables(auth.Password, vars, mockCfg))
 	case "api_key", "apikey", "api-key":
-		name := strings.TrimSpace(renderVariables(auth.Name, vars))
+		name := strings.TrimSpace(renderVariables(auth.Name, vars, mockCfg))
 		valueTemplate := auth.Value
 		if valueTemplate == "" {
 			valueTemplate = auth.Token
 		}
-		value := renderVariables(valueTemplate, vars)
+		value := renderVariables(valueTemplate, vars, mockCfg)
 		if name == "" {
 			return nil
 		}
@@ -453,14 +458,14 @@ func applyAuthDefinition(req *http.Request, auth authDefinition, vars map[string
 			setHeaderIfAbsent(req, name, value)
 		}
 	case "header":
-		name := strings.TrimSpace(renderVariables(auth.Name, vars))
+		name := strings.TrimSpace(renderVariables(auth.Name, vars, mockCfg))
 		if name != "" {
-			setHeaderIfAbsent(req, name, renderVariables(auth.Value, vars))
+			setHeaderIfAbsent(req, name, renderVariables(auth.Value, vars, mockCfg))
 		}
 	case "query":
-		name := strings.TrimSpace(renderVariables(auth.Name, vars))
+		name := strings.TrimSpace(renderVariables(auth.Name, vars, mockCfg))
 		if name != "" {
-			setQueryIfAbsent(req, name, renderVariables(auth.Value, vars))
+			setQueryIfAbsent(req, name, renderVariables(auth.Value, vars, mockCfg))
 		}
 	default:
 		return fmt.Errorf("unsupported environment auth type %q", auth.Type)

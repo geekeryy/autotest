@@ -23,26 +23,26 @@ API 自动化测试平台，支持接口请求模板管理、场景编排、Mock
 └──────────────────────────┬───────────────────────────────────┘
                            │ /api/v1/*
 ┌──────────────────────────┴───────────────────────────────────┐
-│                       Backend (Go)                            │
+│                       Backend (Go)                           │
 │  ┌─────────────────────────────────────────────────────────┐ │
-│  │                    HTTP Layer (Gin)                      │ │
+│  │                    HTTP Layer (Gin)                     │ │
 │  │   auth middleware · JWT · RBAC permission check         │ │
 │  └─────────────────────────┬───────────────────────────────┘ │
-│                            │                                  │
+│                            │                                 │
 │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────────┐ │
 │  │   spec   │ │ request  │ │ scenario │ │   mockserver     │ │
 │  │ importer │ │ template │ │  runner  │ │  matcher/runtime │ │
 │  └────┬─────┘ └────┬─────┘ └────┬─────┘ └────┬─────────────┘ │
-│       │            │            │             │               │
-│  ┌────┴────────────┴────────────┴─────────────┴─────────────┐ │
-│  │              Shared Services & Utils                     │ │
-│  │  httpx · assertion · sampler · generator · paramsource   │ │
-│  │  aiprovider · scriptlibrary · projectprompt · report     │ │
-│  └──────────────────────────┬───────────────────────────────┘ │
-│                             │                                  │
-│  ┌──────────────────────────┴───────────────────────────────┐ │
-│  │                    Store (PostgreSQL)                     │ │
-│  └──────────────────────────────────────────────────────────┘ │
+│       │            │            │             │              │
+│  ┌────┴────────────┴────────────┴─────────────┴────────────┐ │
+│  │              Shared Services & Utils                    │ │
+│  │  httpx · assertion · sampler · generator · paramsource  │ │
+│  │  aiprovider · scriptlibrary · projectprompt · report    │ │
+│  └──────────────────────────┬──────────────────────────────┘ │
+│                             │                                │
+│  ┌──────────────────────────┴──────────────────────────────┐ │
+│  │                    Store (PostgreSQL)                   │ │
+│  └─────────────────────────────────────────────────────────┘ │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -107,18 +107,43 @@ JWT_SECRET=autotest-dev-secret-change-me
 
 > `DB_MANAGED=external` 使用外部 PostgreSQL；设为 `docker` 则通过 `docker compose up -d postgres` 启动容器。
 
+## API Key (CI/CD)
+
+平台支持通过 API Key 让 CI/CD 流水线以非交互方式调用后端开放接口。
+
+- 管理后台「系统管理 → API Key」生成令牌，明文仅在创建时弹窗一次性展示；数据库只保存 SHA-256 哈希与前后缀掩码（形如 `at-7vqj2…2yag`）。
+- 令牌带 `at-` 前缀，可禁用、可设过期时间、自动记录最近使用时间用于审计。
+- 当前阶段 API Key 仅获得 `specs:import` 作用域，**只允许调用 OpenAPI/Swagger 导入接口**。调用其他接口会被路由层 `RejectAPIKey` 守卫拦截并返回 403。
+- 仅拥有 `apikeys:manage` 权限的角色（默认 `admin`）可创建、编辑、删除 API Key。
+
+导入 OpenAPI/Swagger 示例：
+
+```bash
+curl -X POST "http://localhost:8080/api/v1/projects/$PROJ/services/$SVC/specs/import" \
+  -H "Authorization: Bearer at-7vqj2k9xm3t8p4nrh5w6cs8d1bf2yzag" \
+  -H "Content-Type: application/yaml" \
+  --data-binary @openapi.yaml
+```
+
 ## TODO
-- 测试数据管理
-- CI/CD 集成与自动化触发
 - 基于 OpenAPI Spec 自动生成完整测试场景
 - 自动生成正向、反向用例
+- 右下角新增一个全局AI助理浮窗，用于协助使用系统和填写参数
+    - 支持通过查询系统当前情况的方式（AI的查询权限取决于使用者的权限），添加上下文来完成用户的提问
+- 需求整合：为了优化cursor的上下文，将需求文档分层，requirements.md 只保留需求的索引，具体的需求在 docs/requirements/ 目录下，按功能模块分文件存储稍微具体的需求内容
+- 代码整合：检查系统架构设计，将重复的代码和功能进行整合，减少代码的冗余，提高代码的复用性
+- AI 智能分析（测试失败、接口变更的影响分析）
+    - AI 分析 Spec 变更影响支持Markdown预览
+    - 支持通过查询系统当前情况的方式补充上下文（AI的查询权限取决于使用者的权限），来检查哪些测试用例或场景受到了影响
+- 在页面右上角新增一个通知消息功能，后续会有部分异步操作的功能，需要在web端通知用户
+- API Key 新增导入 OpenAPI/Swagger 示例，支持选择项目和服务并填充，生成一个可运行的示例
 - 集成通知（飞书/钉钉/Slack webhook）
-- 认证方式扩展、API Key 认证（供 CI/CD 调用）
+- 认证方式扩展（OAuth2 等）
+- 变量引用与函数计算增强
 - 审计日志
 - API 文档页面
+- CI/CD 集成与自动化触发
 - 测试报告与统计分析
-- AI 智能分析（测试失败、接口变更的影响分析）
-- 变量引用与函数计算增强
 - 断言能力增强
 - gRPC / WebSocket / TCP 协议支持
 - 性能测试能力

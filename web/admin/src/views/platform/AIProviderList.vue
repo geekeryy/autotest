@@ -408,7 +408,7 @@ export default {
 
 .ai-secret {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
-  font-size: 12px;
+  font-size: var(--app-font-size-small);
   letter-spacing: 0.4px;
 }
 
@@ -427,6 +427,6 @@ export default {
 
 .extra-input :deep(textarea) {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
-  font-size: 12px;
+  font-size: var(--app-font-size-small);
 }
 </style>

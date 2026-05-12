@@ -401,12 +401,12 @@ export default {
 
 .text-secondary {
   color: var(--app-secondary-text, #909399);
-  font-size: 12px;
+  font-size: var(--app-font-size-small);
 }
 
 .prompt-textarea :deep(textarea) {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
-  font-size: 12px;
+  font-size: var(--app-font-size-small);
   line-height: 1.6;
 }
 </style>

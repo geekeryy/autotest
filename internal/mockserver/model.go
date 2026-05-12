@@ -35,8 +35,10 @@ type MockServer struct {
 	Name        string    `json:"name"`
 	Description string    `json:"description,omitempty"`
 	Port        int       `json:"port"`
-	CreatedAt   time.Time `json:"createdAt"`
-	UpdatedAt   time.Time `json:"updatedAt"`
+	// AutoStart 表示 API 进程启动时是否自动拉起该 Mock Server。
+	AutoStart bool      `json:"autoStart"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 // MockServerInput is the payload used to create or update a mock server.
@@ -44,6 +46,8 @@ type MockServerInput struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Port        int    `json:"port"`
+	// AutoStart 控制是否在 API 进程启动时自动拉起此 Mock Server。
+	AutoStart bool `json:"autoStart"`
 }
 
 // MockRoute stores a request matcher and response definition for a mock server.

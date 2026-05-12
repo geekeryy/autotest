@@ -173,11 +173,13 @@ const icons = {
   '/run-console': 'Monitor',
   '/platform': 'Files',
   '/script-library': 'Notebook',
+  '/mock-value-sets': 'Collection',
   '/template-reference': 'Reading',
   '/system': 'Setting',
   '/users': 'User',
   '/roles': 'UserFilled',
-  '/permissions': 'Key'
+  '/permissions': 'Key',
+  '/api-keys': 'Postcard'
 }
 
 function buildVisibleMenus(routes) {

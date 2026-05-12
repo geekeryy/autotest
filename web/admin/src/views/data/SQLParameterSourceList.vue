@@ -17,41 +17,7 @@
       title="请先在顶部选择项目后再管理 SQL 参数源。"
     />
 
-    <el-alert
-      v-if="projectId"
-      class="sql-usage-alert"
-      type="info"
-      show-icon
-      :closable="false"
-    >
-      <template #title>动态参数与内联引用</template>
-      <div class="sql-usage-body">
-        <p class="sql-usage-lead">
-          <strong>内联引用</strong>：在 Path、Query、Header、Body 中写 Mustache 片段，例如
-          <code class="sql-usage-code">{{ inlineExample }}</code>（默认首行）或带等值过滤的列取值；Runner 会在发请求前执行对应 SQL 参数源并替换占位符。
-        </p>
-        <p class="sql-usage-lead">
-          <strong>动态参数</strong>：<span class="sql-usage-label">入参 JSON</span>为数组，顺序与 SQL 中的位置参数
-          <code class="sql-usage-code">$1</code>、<code class="sql-usage-code">$2</code>…一一对应（PostgreSQL / pgx 位置参数）。
-        </p>
-        <ul class="sql-usage-list">
-          <li>
-            <code class="sql-usage-code">name</code>：参数名。若<strong>未</strong>配置 <code class="sql-usage-code">value</code>，运行前从<strong>合并变量</strong>中读取与 <code class="sql-usage-code">name</code> 同名的字符串；合并规则为当前环境变量 JSON 与本次运行请求变量合并，<strong>同名时以请求变量为准</strong>。
-          </li>
-          <li>
-            <code class="sql-usage-code">value</code>：可选。填写后作为默认值模板；其中可写
-            <code v-pre class="sql-usage-code">{{变量名}}</code>，运行前会用合并变量替换（可多次出现），例如
-            <code v-pre class="sql-usage-code">tenant-{{tenantId}}</code>。
-          </li>
-          <li>
-            <code class="sql-usage-code">required</code>：为 <code class="sql-usage-code">true</code> 时，若解析后该参数仍为空则执行失败。
-          </li>
-        </ul>
-        <p class="sql-usage-foot">
-          列表「预览」与编辑弹窗「测试 SQL」里的变量 JSON，仅用于预览注入；字段含义与 Runner 合并变量一致。
-        </p>
-      </div>
-    </el-alert>
+
 
     <div class="toolbar sql-source-toolbar">
       <el-select
@@ -93,7 +59,7 @@
       <el-form :model="form" label-width="110px">
         <el-form-item label="名称"><el-input v-model="form.name" placeholder="例如：查询可用用户 ID" /></el-form-item>
         <el-form-item label="Key">
-          <el-input v-model="form.key" :placeholder="'例如：userSeed，用于 {{sql.userSeed.id}}'">
+          <el-input v-model="form.key" :placeholder="'例如：userSeed，用于 {{$sql.userSeed.id}}'">
             <template #append>{{ inlineExampleForForm }}</template>
           </el-input>
           <div class="field-tip">仅支持字母、数字、下划线和中划线；同一项目服务下唯一。为空时后端会按名称生成，中文名称建议手动填写。</div>
@@ -228,11 +194,11 @@ export default {
       return projectState.currentProjectId
     },
     inlineExample() {
-      return '{{sql.userSeed[status=1].id}}'
+      return '{{$sql.userSeed[status=1].id}}'
     },
     inlineExampleForForm() {
       const key = this.form.key || 'userSeed'
-      return `{{sql.${key}.id}}`
+      return `{{$sql.${key}.id}}`
     },
     canCreate() {
       return !!this.projectId && !!this.serviceId && !!this.dataSources.length

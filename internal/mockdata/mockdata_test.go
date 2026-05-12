@@ -323,3 +323,142 @@ func abs(v int64) int64 {
 	}
 	return v
 }
+
+// ── 业务身份/编码 helper 测试 ─────────────────────────────────────────
+
+func TestExpandIDCardHelper(t *testing.T) {
+	t.Parallel()
+
+	idCardRE := regexp.MustCompile(`^\d{17}[\dX]$`)
+	seen := map[string]bool{}
+	for i := 0; i < 30; i++ {
+		got := Expand("{{$mock.idCard}}")
+		if !idCardRE.MatchString(got) {
+			t.Fatalf("expected 18-digit id card, got %q", got)
+		}
+		// 校验位算法验证：取前 17 位重新算应得到第 18 位。
+		if computed := idCardCheckDigit(got[:17]); computed != got[17:] {
+			t.Fatalf("id card check digit mismatch: %s, expected %s", got, computed)
+		}
+		// 中间 8 位日期应可被合法解析。
+		if _, err := time.Parse("20060102", got[6:14]); err != nil {
+			t.Fatalf("id card birthday %q invalid: %v", got[6:14], err)
+		}
+		seen[got] = true
+	}
+	if len(seen) < 5 {
+		t.Fatalf("expected diverse id cards, got %d unique", len(seen))
+	}
+}
+
+func TestExpandPlateNumberHelper(t *testing.T) {
+	t.Parallel()
+
+	plateRE := regexp.MustCompile(`^\p{Han}·[A-Z][A-Z0-9]{5}$`)
+	seen := map[string]bool{}
+	for i := 0; i < 30; i++ {
+		got := Expand("{{$mock.plateNumber}}")
+		if !plateRE.MatchString(got) {
+			t.Fatalf("expected plate number, got %q", got)
+		}
+		seen[got] = true
+	}
+	if len(seen) < 10 {
+		t.Fatalf("expected diverse plate numbers, got %d", len(seen))
+	}
+}
+
+func TestExpandBankCardHelperLuhnValid(t *testing.T) {
+	t.Parallel()
+
+	for _, length := range []int{16, 17, 18, 19} {
+		token := "{{$mock.bankCard(" + strconv.Itoa(length) + ")}}"
+		for i := 0; i < 10; i++ {
+			got := Expand(token)
+			if len(got) != length {
+				t.Fatalf("length=%d expected, got %q (len=%d)", length, got, len(got))
+			}
+			if !regexp.MustCompile(`^\d+$`).MatchString(got) {
+				t.Fatalf("bankCard expected all digits, got %q", got)
+			}
+			if !luhnValid(got) {
+				t.Fatalf("bankCard %q failed Luhn check", got)
+			}
+			switch got[0] {
+			case '4', '5', '6':
+			default:
+				t.Fatalf("bankCard first digit must be 4/5/6, got %q", got)
+			}
+		}
+	}
+	// Default length is 19.
+	if got := Expand("{{$mock.bankCard}}"); len(got) != 19 {
+		t.Fatalf("default bankCard length 19 expected, got %d (%q)", len(got), got)
+	}
+}
+
+func TestExpandUnifiedSocialCreditCodeHelper(t *testing.T) {
+	t.Parallel()
+
+	usccRE := regexp.MustCompile(`^[0-9A-HJ-NPQRTUWXY]{18}$`)
+	seen := map[string]bool{}
+	for i := 0; i < 30; i++ {
+		got := Expand("{{$mock.unifiedSocialCreditCode}}")
+		if !usccRE.MatchString(got) {
+			t.Fatalf("USCC format invalid: %q", got)
+		}
+		if computed := usccCheckDigit(got[:17]); computed != got[17:] {
+			t.Fatalf("USCC check digit mismatch: %s expected %s", got, computed)
+		}
+		seen[got] = true
+	}
+	if len(seen) < 10 {
+		t.Fatalf("expected diverse USCC, got %d", len(seen))
+	}
+}
+
+func TestExpandSKUHelper(t *testing.T) {
+	t.Parallel()
+
+	defaultRE := regexp.MustCompile(`^[A-Z]+-\d+$`)
+	seen := map[string]bool{}
+	for i := 0; i < 30; i++ {
+		got := Expand("{{$mock.sku}}")
+		if !defaultRE.MatchString(got) {
+			t.Fatalf("SKU default shape mismatch: %q", got)
+		}
+		seen[got] = true
+	}
+	if len(seen) < 10 {
+		t.Fatalf("expected diverse SKUs, got %d", len(seen))
+	}
+	// 自定义长度 12 → 4 字母 + `-` + 7 数字（按 length/3 取字母）。
+	got := Expand("{{$mock.sku(12)}}")
+	if len(got) != 12 {
+		t.Fatalf("custom SKU length expected 12, got %d (%q)", len(got), got)
+	}
+	if !defaultRE.MatchString(got) {
+		t.Fatalf("custom SKU shape mismatch: %q", got)
+	}
+}
+
+// luhnValid 是测试用辅助函数，保持与生产 helper 隔离。
+func luhnValid(card string) bool {
+	sum := 0
+	double := false
+	for i := len(card) - 1; i >= 0; i-- {
+		d := int(card[i] - '0')
+		if d < 0 || d > 9 {
+			return false
+		}
+		if double {
+			d *= 2
+			if d > 9 {
+				d -= 9
+			}
+		}
+		sum += d
+		double = !double
+	}
+	return sum%10 == 0
+}

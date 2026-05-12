@@ -72,11 +72,47 @@ func TestGenerateParamsSystemContainsCriticalGuards(t *testing.T) {
 		"不要使用三个反引号",
 		"仅对字符串字段",
 		"requestSchema.body.properties",
+		"availableMockSets",
+		"{{$mock.set.<key>}}",
 	}
 	for _, fragment := range guards {
 		if !strings.Contains(generateParamsSystem, fragment) {
 			t.Errorf("generateParamsSystem missing critical guard %q", fragment)
 		}
+	}
+}
+
+// TestMergeAvailableMockSetsInjectsField 锁定 availableMockSets 注入逻辑：
+//   - 当 raw 为空对象 / nil 时仍能挂载字段；
+//   - 当 raw 已包含字段时不会丢失原有字段；
+//   - summaries 为空数组直接返回原 raw（避免噪声）。
+func TestMergeAvailableMockSetsInjectsField(t *testing.T) {
+	t.Parallel()
+
+	summaries := []MockSetSummary{{
+		Key:            "colors",
+		Name:           "Colors",
+		ValuesPreview:  []string{"red", "green", "blue"},
+		HasWeights:     true,
+		TotalValueSize: 3,
+	}}
+
+	got := mergeAvailableMockSets(nil, summaries)
+	if !strings.Contains(string(got), "availableMockSets") || !strings.Contains(string(got), "\"key\":\"colors\"") {
+		t.Fatalf("expected nil context to gain availableMockSets, got %s", got)
+	}
+
+	original := json.RawMessage(`{"method":"GET","path":"/api/v1/users"}`)
+	merged := mergeAvailableMockSets(original, summaries)
+	if !strings.Contains(string(merged), "\"method\":\"GET\"") {
+		t.Fatalf("expected original fields preserved, got %s", merged)
+	}
+	if !strings.Contains(string(merged), "availableMockSets") {
+		t.Fatalf("expected availableMockSets to be injected, got %s", merged)
+	}
+
+	if got := mergeAvailableMockSets(original, nil); string(got) != string(original) {
+		t.Fatalf("expected empty summaries to leave context untouched, got %s", got)
 	}
 }
 
@@ -117,5 +153,122 @@ func TestBuildMessagesEmptyContextStillIncludesPreamble(t *testing.T) {
 	user := messages[1].Content
 	if !strings.Contains(user, "请基于下方上下文生成请求参数 JSON") {
 		t.Errorf("preamble missing for empty context: %q", user)
+	}
+}
+
+// TestBuildMessagesAnalyzeFailureIncludesContext locks the basic shape of the
+// `analyze_failure` user message: action-specific preamble + context block,
+// plus the system prompt's three-section guard so the model's output remains
+// stable even when callers bring different fields in `context`.
+func TestBuildMessagesAnalyzeFailureIncludesContext(t *testing.T) {
+	t.Parallel()
+
+	ctx := json.RawMessage(`{
+		"run": {"id": "abcd", "status": "failed"},
+		"result": {
+			"requestSnapshot": {"method": "POST", "url": "/api/orders"},
+			"responseSnapshot": {"statusCode": 500, "body": {"error": "boom"}},
+			"assertions": [{"type": "status_code", "passed": false, "message": "expected 200 got 500"}]
+		}
+	}`)
+	messages, jsonOnly := buildMessages(ActionAnalyzeFailure, "", ctx, "")
+	if jsonOnly {
+		t.Fatalf("analyze_failure should NOT enable jsonOnly")
+	}
+	if len(messages) != 2 || messages[0].Role != "system" || messages[1].Role != "user" {
+		t.Fatalf("unexpected messages shape: %+v", messages)
+	}
+	user := messages[1].Content
+	for _, fragment := range []string{
+		"请基于下方运行失败上下文",
+		"上下文（JSON）",
+		"\"statusCode\": 500",
+		"\"method\": \"POST\"",
+	} {
+		if !strings.Contains(user, fragment) {
+			t.Errorf("analyze_failure user message missing %q\n----\n%s", fragment, user)
+		}
+	}
+}
+
+// TestAnalyzeFailureSystemContainsCriticalGuards locks the high-leverage
+// constraints so future edits cannot quietly drop the three-section structure
+// or the "no fabrication" requirement.
+func TestAnalyzeFailureSystemContainsCriticalGuards(t *testing.T) {
+	t.Parallel()
+
+	guards := []string{
+		"测试失败分析助手",
+		"## 失败原因",
+		"## 关键证据",
+		"## 修复建议",
+		"禁止虚构",
+		"requestSnapshot",
+		"responseSnapshot",
+		"assertions",
+		"中文 markdown",
+	}
+	for _, fragment := range guards {
+		if !strings.Contains(analyzeFailureSystem, fragment) {
+			t.Errorf("analyzeFailureSystem missing critical guard %q", fragment)
+		}
+	}
+}
+
+func TestBuildMessagesAnalyzeSpecChangesIncludesContext(t *testing.T) {
+	t.Parallel()
+
+	ctx := json.RawMessage(`{
+		"diff": {
+			"addedEndpoints": [{"method": "POST", "path": "/api/orders/v2"}],
+			"removedEndpoints": [],
+			"modifiedEndpoints": [
+				{"method": "GET", "path": "/api/users/{id}", "changes": [
+					{"fieldPath": "responseBody.email", "kind": "remove"}
+				]}
+			]
+		},
+		"affectedTemplates": [
+			{"caseId": "c1", "name": "Get user", "method": "GET", "path": "/api/users/{id}"}
+		],
+		"affectedScenarioSteps": []
+	}`)
+	messages, jsonOnly := buildMessages(ActionAnalyzeSpecChanges, "", ctx, "")
+	if jsonOnly {
+		t.Fatalf("analyze_spec_changes should NOT enable jsonOnly")
+	}
+	user := messages[1].Content
+	for _, fragment := range []string{
+		"请基于下方 spec 结构化 diff",
+		"上下文（JSON）",
+		"addedEndpoints",
+		"affectedTemplates",
+		"\"path\": \"/api/users/{id}\"",
+	} {
+		if !strings.Contains(user, fragment) {
+			t.Errorf("analyze_spec_changes user message missing %q\n----\n%s", fragment, user)
+		}
+	}
+}
+
+func TestAnalyzeSpecChangesSystemContainsCriticalGuards(t *testing.T) {
+	t.Parallel()
+
+	guards := []string{
+		"OpenAPI/Swagger 变更影响分析助手",
+		"## 变更概览",
+		"## 详细变更清单",
+		"## 对现有资产影响",
+		"## 建议动作",
+		"继续可用",
+		"需调整",
+		"应废弃",
+		"affectedTemplates",
+		"affectedScenarioSteps",
+	}
+	for _, fragment := range guards {
+		if !strings.Contains(analyzeSpecChangesSystem, fragment) {
+			t.Errorf("analyzeSpecChangesSystem missing critical guard %q", fragment)
+		}
 	}
 }

@@ -2,24 +2,21 @@
   <div class="run-workspace">
     <aside class="api-sidebar" :style="sidebarStyle">
       <div class="sidebar-header">
-        <div>
-          <h2>API 列表</h2>
-        </div>
+        <h2 class="sidebar-title">API 列表</h2>
+        <el-select
+          v-model="selectedServiceId"
+          class="workspace-service-select"
+          filterable
+          placeholder="选择服务"
+          :disabled="!projectId || !services.length || treeLoading"
+          @change="onWorkspaceServiceChange"
+        >
+          <el-option v-for="s in services" :key="s.id" :label="s.name" :value="s.id" />
+        </el-select>
         <el-button :loading="treeLoading" circle text title="刷新 API 列表" @click="loadTree">
           <el-icon><Refresh /></el-icon>
         </el-button>
       </div>
-
-      <el-select
-        v-model="selectedServiceId"
-        class="workspace-service-select"
-        filterable
-        placeholder="选择服务"
-        :disabled="!projectId || !services.length || treeLoading"
-        @change="onWorkspaceServiceChange"
-      >
-        <el-option v-for="s in services" :key="s.id" :label="s.name" :value="s.id" />
-      </el-select>
 
       <el-input v-model="treeKeyword" class="tree-search" clearable placeholder="搜索接口名称或路径" prefix-icon="Search" />
 
@@ -188,7 +185,7 @@ export default {
       return project?.name || '未选择项目'
     },
     inlineSQLExample() {
-      return '{{sql.userSeed.id}}'
+      return '{{$sql.userSeed.id}}'
     },
     filteredTreeData() {
       const keyword = this.treeKeyword.trim().toLowerCase()
@@ -745,6 +742,10 @@ export default {
   gap: 12px;
 }
 
+.sidebar-header {
+  align-items: center;
+}
+
 .console-controls {
   display: flex;
   min-height: 32px;
@@ -759,6 +760,12 @@ export default {
   font-size: var(--app-font-size-title);
 }
 
+.sidebar-header .sidebar-title {
+  margin: 0;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
 .sidebar-header p,
 .console-header p {
   margin: 0;
@@ -767,7 +774,8 @@ export default {
 }
 
 .workspace-service-select {
-  width: 100%;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .tree-search {

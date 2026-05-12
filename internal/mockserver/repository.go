@@ -27,12 +27,12 @@ func (r *Repository) CreateServer(ctx context.Context, projectID uuid.UUID, inpu
 		return nil, fmt.Errorf("database unavailable")
 	}
 	row := r.DB.QueryRow(ctx, `
-		insert into mock_servers (project_id, name, description, port)
-		select p.id, $2, $3, $4
+		insert into mock_servers (project_id, name, description, port, auto_start)
+		select p.id, $2, $3, $4, $5
 		from projects p
 		where p.id = $1 and p.deleted_at is null
-		returning id, project_id, name, description, port, created_at, updated_at
-	`, projectID, input.Name, input.Description, input.Port)
+		returning id, project_id, name, description, port, auto_start, created_at, updated_at
+	`, projectID, input.Name, input.Description, input.Port, input.AutoStart)
 	server, err := scanServer(row)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -49,7 +49,7 @@ func (r *Repository) ListServers(ctx context.Context, projectID uuid.UUID) ([]Mo
 		return nil, fmt.Errorf("database unavailable")
 	}
 	rows, err := r.DB.Query(ctx, `
-		select ms.id, ms.project_id, ms.name, ms.description, ms.port, ms.created_at, ms.updated_at
+		select ms.id, ms.project_id, ms.name, ms.description, ms.port, ms.auto_start, ms.created_at, ms.updated_at
 		from mock_servers ms
 		join projects p on p.id = ms.project_id and p.deleted_at is null
 		where ms.project_id = $1 and ms.deleted_at is null
@@ -62,17 +62,61 @@ func (r *Repository) ListServers(ctx context.Context, projectID uuid.UUID) ([]Mo
 	return scanServers(rows)
 }
 
+// ListAutoStartServers 返回所有未删除且启用了「默认启动」的 Mock Server，跨项目。
+// 用于 API 进程启动时按持久化配置恢复 Mock Server 运行。
+func (r *Repository) ListAutoStartServers(ctx context.Context) ([]MockServer, error) {
+	if r.DB == nil {
+		return nil, fmt.Errorf("database unavailable")
+	}
+	rows, err := r.DB.Query(ctx, `
+		select ms.id, ms.project_id, ms.name, ms.description, ms.port, ms.auto_start, ms.created_at, ms.updated_at
+		from mock_servers ms
+		join projects p on p.id = ms.project_id and p.deleted_at is null
+		where ms.deleted_at is null and ms.auto_start = true
+		order by ms.created_at asc
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("list auto-start mock servers: %w", err)
+	}
+	defer rows.Close()
+	return scanServers(rows)
+}
+
 // GetServer returns a mock server by project and server ID.
 func (r *Repository) GetServer(ctx context.Context, projectID, serverID uuid.UUID) (*MockServer, error) {
 	if r.DB == nil {
 		return nil, fmt.Errorf("database unavailable")
 	}
 	row := r.DB.QueryRow(ctx, `
-		select ms.id, ms.project_id, ms.name, ms.description, ms.port, ms.created_at, ms.updated_at
+		select ms.id, ms.project_id, ms.name, ms.description, ms.port, ms.auto_start, ms.created_at, ms.updated_at
 		from mock_servers ms
 		join projects p on p.id = ms.project_id and p.deleted_at is null
 		where ms.project_id = $1 and ms.id = $2 and ms.deleted_at is null
 	`, projectID, serverID)
+	server, err := scanServer(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrMockServerNotFound
+		}
+		return nil, err
+	}
+	return server, nil
+}
+
+// GetServerByID looks up a mock server only by its ID. The mock runtime uses
+// it inside the request handler to discover the owning project so it can
+// build a project-scoped MockExpander without forcing the caller to pre-bind
+// projectID into the http.Handler.
+func (r *Repository) GetServerByID(ctx context.Context, serverID uuid.UUID) (*MockServer, error) {
+	if r.DB == nil {
+		return nil, fmt.Errorf("database unavailable")
+	}
+	row := r.DB.QueryRow(ctx, `
+		select ms.id, ms.project_id, ms.name, ms.description, ms.port, ms.auto_start, ms.created_at, ms.updated_at
+		from mock_servers ms
+		join projects p on p.id = ms.project_id and p.deleted_at is null
+		where ms.id = $1 and ms.deleted_at is null
+	`, serverID)
 	server, err := scanServer(row)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -93,6 +137,7 @@ func (r *Repository) UpdateServer(ctx context.Context, projectID, serverID uuid.
 		set name = $3,
 			description = $4,
 			port = $5,
+			auto_start = $6,
 			updated_at = now()
 		from projects p
 		where ms.project_id = $1
@@ -100,8 +145,8 @@ func (r *Repository) UpdateServer(ctx context.Context, projectID, serverID uuid.
 		  and p.id = ms.project_id
 		  and p.deleted_at is null
 		  and ms.deleted_at is null
-		returning ms.id, ms.project_id, ms.name, ms.description, ms.port, ms.created_at, ms.updated_at
-	`, projectID, serverID, input.Name, input.Description, input.Port)
+		returning ms.id, ms.project_id, ms.name, ms.description, ms.port, ms.auto_start, ms.created_at, ms.updated_at
+	`, projectID, serverID, input.Name, input.Description, input.Port, input.AutoStart)
 	server, err := scanServer(row)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -282,7 +327,7 @@ func scanServer(row rowScanner) (*MockServer, error) {
 	var server MockServer
 	if err := row.Scan(
 		&server.ID, &server.ProjectID, &server.Name, &server.Description,
-		&server.Port, &server.CreatedAt, &server.UpdatedAt,
+		&server.Port, &server.AutoStart, &server.CreatedAt, &server.UpdatedAt,
 	); err != nil {
 		return nil, err
 	}

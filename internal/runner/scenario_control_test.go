@@ -23,7 +23,7 @@ func TestEvaluateConditionRendersVariablesAndStepRefs(t *testing.T) {
 		Left:     "{{$steps[1].status}}",
 		Operator: "greater_or_equal",
 		Right:    "{{minStatus}}",
-	}, map[string]string{"minStatus": "200"}, stepOutputs)
+	}, map[string]string{"minStatus": "200"}, stepOutputs, nil)
 	if err != nil {
 		t.Fatalf("evaluate condition: %v", err)
 	}
@@ -35,7 +35,7 @@ func TestEvaluateConditionRendersVariablesAndStepRefs(t *testing.T) {
 		Left:     "{{$steps[1].body.count}}",
 		Operator: "less_than",
 		Right:    "3",
-	}, nil, stepOutputs)
+	}, nil, stepOutputs, nil)
 	if err != nil {
 		t.Fatalf("evaluate numeric condition: %v", err)
 	}
@@ -67,7 +67,7 @@ func TestConditionConfigSupportsOrderedBranches(t *testing.T) {
 			Left:     br.Left,
 			Operator: br.Operator,
 			Right:    br.Right,
-		}, map[string]string{"status": "200"}, nil)
+		}, map[string]string{"status": "200"}, nil, nil)
 		if err != nil {
 			t.Fatalf("evaluate branch %d: %v", i, err)
 		}
@@ -94,7 +94,7 @@ func TestBuildLoopItemsSupportsCountAndArrayExpressions(t *testing.T) {
 		Mode:            "count",
 		CountExpression: "{{count}}",
 		MaxIterations:   5,
-	}, map[string]string{"count": "3"}, nil)
+	}, map[string]string{"count": "3"}, nil, nil)
 	if err != nil {
 		t.Fatalf("build count loop: %v", err)
 	}
@@ -116,7 +116,7 @@ func TestBuildLoopItemsSupportsCountAndArrayExpressions(t *testing.T) {
 		Mode:            "array",
 		ItemsExpression: "{{$steps[1].body.items}}",
 		MaxIterations:   5,
-	}, nil, stepOutputs)
+	}, nil, stepOutputs, nil)
 	if err != nil {
 		t.Fatalf("build array loop: %v", err)
 	}
@@ -136,7 +136,7 @@ func TestBuildLoopItemsUnwrapsCommonObjectArrayFields(t *testing.T) {
 		Mode:            "array",
 		ItemsExpression: `{"data":[{"id":"u1"},{"id":"u2"}],"total":2}`,
 		MaxIterations:   5,
-	}, nil, nil)
+	}, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("build wrapped array loop: %v", err)
 	}
@@ -156,7 +156,7 @@ func TestBuildLoopItemsRejectsTooManyIterations(t *testing.T) {
 		Mode:          "count",
 		Count:         3,
 		MaxIterations: 2,
-	}, nil, nil)
+	}, nil, nil, nil)
 	if err == nil {
 		t.Fatalf("expected loop limit error")
 	}

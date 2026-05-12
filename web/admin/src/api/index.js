@@ -85,6 +85,14 @@ export const previewSQLParameterSource = (id, data = {}) => request.post(`/sql-p
 /** 新增/编辑弹窗内根据当前表单测试 SQL（无需已保存的记录） */
 export const previewSQLParameterSourceDraft = (data) => request.post('/sql-parameter-sources/preview', data)
 
+// 项目级命名值集合（mock value sets）— 与脚本库、AI 提供商同级，
+// 服务于 `{{$mock.set.<key>}}` 模板族。viewer 可读，developer 可写，
+// 后端通过 RequireProjectRole 控制。
+export const listMockValueSets = (projectId) => request.get(`/projects/${projectId}/mock-value-sets`).then(asList)
+export const createMockValueSet = (projectId, data) => request.post(`/projects/${projectId}/mock-value-sets`, data)
+export const updateMockValueSet = (projectId, setId, data) => request.put(`/projects/${projectId}/mock-value-sets/${setId}`, data)
+export const deleteMockValueSet = (projectId, setId) => request.delete(`/projects/${projectId}/mock-value-sets/${setId}`)
+
 export const listMockServers = (projectId) => request.get(`/projects/${projectId}/mock-servers`).then(asList)
 export const createMockServer = (projectId, data) => request.post(`/projects/${projectId}/mock-servers`, data)
 export const updateMockServer = (projectId, serverId, data) => request.put(`/projects/${projectId}/mock-servers/${serverId}`, data)
@@ -125,6 +133,18 @@ export const testAIProvider = (projectId, providerId) =>
 export const aiChat = (projectId, data) =>
   request.post(`/projects/${projectId}/ai/chat`, data, { timeout: 120000 })
 
+// AI 智能分析：基于一次运行的请求/响应/断言失败结果调用 AI 分析失败原因
+export const analyzeRunFailure = (runId) =>
+  request.post(`/runs/${runId}/ai/analyze-failure`, {}, { timeout: 120000 })
+
+// AI 智能分析：基于本次 spec 与同 service 上一版本的结构化 diff，结合受影响的接口模板/场景步骤，调用 AI 分析变更影响
+export const analyzeSpecChanges = (projectId, serviceId, specId) =>
+  request.post(
+    `/projects/${projectId}/services/${serviceId}/specs/${specId}/ai/analyze-changes`,
+    {},
+    { timeout: 120000 }
+  )
+
 // Project AI Prompts (per-project prompt config)
 export const listProjectAIPrompts = (projectId) =>
   request.get(`/projects/${projectId}/ai-prompts`).then(asList)
@@ -155,6 +175,13 @@ export const setRolePermissions = (id, data) => request.put(`/roles/${id}/permis
 
 export const listPermissions = () => request.get('/permissions')
 export const createPermission = (data) => request.post('/permissions', data)
+
+// API Keys（仅 admin/具备 apikeys:manage 权限可用；明文 token 仅在创建响应里返回一次）
+export const listApiKeys = () => request.get('/api-keys').then(asList)
+export const createApiKey = (data) => request.post('/api-keys', data)
+export const updateApiKey = (id, data) => request.patch(`/api-keys/${id}`, data)
+export const rotateApiKey = (id) => request.post(`/api-keys/${id}/rotate`)
+export const deleteApiKey = (id) => request.delete(`/api-keys/${id}`)
 
 export const listTestDataTables = (projectId) =>
   request.get(`/projects/${projectId}/test-data-tables`).then(asList)

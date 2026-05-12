@@ -13,14 +13,39 @@ import (
 	"github.com/google/uuid"
 )
 
+// MockSetSummaryProvider 是 aiprovider 用来为 `generate_params` 注入项目级
+// 命名值集合摘要的可选依赖。返回的 summary 仅供模型参考；任何错误都被静默
+// 忽略以避免 AI 生成因为附属信息缺失而失败。
+type MockSetSummaryProvider interface {
+	SummariesForProject(ctx context.Context, projectID uuid.UUID) []MockSetSummary
+}
+
+// MockSetSummary 是单个命名值集合的精简描述（key + name + 前 10 条 values
+// + 是否含 weights），用于嵌入 `generate_params` 的 user context。
+type MockSetSummary struct {
+	Key            string   `json:"key"`
+	Name           string   `json:"name"`
+	ValuesPreview  []string `json:"valuesPreview"`
+	HasWeights     bool     `json:"hasWeights"`
+	TotalValueSize int      `json:"totalValueSize"`
+}
+
 // Service applies validation, defaulting and orchestrates client-side AI calls.
 type Service struct {
-	repo *Repository
+	repo     *Repository
+	mockSets MockSetSummaryProvider
 }
 
 // NewService constructs a Service.
 func NewService(repo *Repository) *Service {
 	return &Service{repo: repo}
+}
+
+// WithMockSets 注入项目级命名值集合摘要源（fluent 风格），便于 main.go
+// 在所有依赖构造完毕后再连接二者，避免循环 import。
+func (s *Service) WithMockSets(provider MockSetSummaryProvider) *Service {
+	s.mockSets = provider
+	return s
 }
 
 // SupportedTypes returns metadata about each provider type for the frontend create form.
@@ -208,7 +233,18 @@ func (s *Service) Chat(ctx context.Context, projectID uuid.UUID, req ChatRequest
 		return nil, err
 	}
 
-	messages, jsonOnly := buildMessages(action, req.Prompt, req.Context, req.SystemPromptOverride)
+	contextPayload := req.Context
+	// 仅 `generate_params` 注入 availableMockSets：避免污染其它 action 的
+	// context（例如 generate_assertion 不需要这些数据）。注入失败被静默
+	// 忽略，保证主流程不被附属信息阻塞。
+	if action == ActionGenerateParams && s.mockSets != nil {
+		summaries := s.mockSets.SummariesForProject(ctx, projectID)
+		if len(summaries) > 0 {
+			contextPayload = mergeAvailableMockSets(req.Context, summaries)
+		}
+	}
+
+	messages, jsonOnly := buildMessages(action, req.Prompt, contextPayload, req.SystemPromptOverride)
 	opts := client.Options{
 		Model:       req.Model,
 		Temperature: req.Temperature,
@@ -330,7 +366,8 @@ func validProviderType(t string) bool {
 
 func validAction(action string) bool {
 	switch action {
-	case ActionGenerateParams, ActionGenerateAssertion, ActionGenerateCaseData, ActionRaw:
+	case ActionGenerateParams, ActionGenerateAssertion, ActionGenerateCaseData,
+		ActionAnalyzeFailure, ActionAnalyzeSpecChanges, ActionRaw:
 		return true
 	default:
 		return false
@@ -346,4 +383,29 @@ func validateExtra(raw json.RawMessage) error {
 		return fmt.Errorf("extraConfig must be a JSON object: %w", err)
 	}
 	return nil
+}
+
+// mergeAvailableMockSets 把 summaries 写入 raw context 的 `availableMockSets`
+// 字段。若 raw 不是 JSON 对象（比如数组、null、空），构造一个新对象只承载
+// availableMockSets。所有 marshal/unmarshal 错误都退回原始 raw，绝不中断
+// 主流程。
+func mergeAvailableMockSets(raw json.RawMessage, summaries []MockSetSummary) json.RawMessage {
+	if len(summaries) == 0 {
+		return raw
+	}
+	var ctxObj map[string]any
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &ctxObj); err != nil || ctxObj == nil {
+			ctxObj = nil
+		}
+	}
+	if ctxObj == nil {
+		ctxObj = map[string]any{}
+	}
+	ctxObj["availableMockSets"] = summaries
+	out, err := json.Marshal(ctxObj)
+	if err != nil {
+		return raw
+	}
+	return out
 }

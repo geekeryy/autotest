@@ -9,8 +9,20 @@ import (
 	"strconv"
 	"strings"
 
-	"autotest/internal/mockdata"
+	"autotest/internal/templating"
 )
+
+// mockHook returns the templating.Resolver.Mock function for the current
+// rendering pass. When mockCfg is nil callers fall back to the standard
+// mockdata catalogue (no mock value set support); otherwise the hook also
+// resolves `{{$mock.set.<key>}}` family tokens through the configured
+// MockSetResolver.
+func mockHook(mockCfg *templating.MockExpanderConfig) func(templating.Token) (string, bool) {
+	if mockCfg == nil {
+		return templating.ExpandMock
+	}
+	return templating.NewMockExpander(*mockCfg)
+}
 
 // renderVariables substitutes Mustache placeholders in the input string.
 //
@@ -24,36 +36,25 @@ import (
 // re-expanded each pass so values produced by chained substitutions remain
 // fully rendered while still emitting a fresh random value at the moment
 // they first appear.
-func renderVariables(input string, vars map[string]string) string {
-	rendered := input
-	for i := 0; i < 5; i++ {
-		before := rendered
-		rendered = mockdata.Expand(rendered)
-		for key, value := range vars {
-			if key == "" {
-				continue
-			}
-			pattern := regexp.MustCompile(`\{\{+` + regexp.QuoteMeta(key) + `\}\}+`)
-			rendered = pattern.ReplaceAllStringFunc(rendered, func(string) string {
-				return value
-			})
-		}
-		if rendered == before {
-			break
-		}
-	}
-	return rendered
+//
+// mockCfg is optional: when non-nil it enables `{{$mock.set.*}}` resolution
+// against the project-scoped value sets and the run-shared cursor map.
+func renderVariables(input string, vars map[string]string, mockCfg *templating.MockExpanderConfig) string {
+	return templating.Render(input, templating.Resolver{
+		Mock: mockHook(mockCfg),
+		Var:  templating.VarsResolver(vars),
+	})
 }
 
 // renderPathVariables substitutes both Mustache-style variables and OpenAPI
 // path variables like {id}. Path parameter values may themselves contain
 // runtime templates, so each substituted value is rendered before use.
-func renderPathVariables(input string, vars map[string]string) string {
-	rendered := renderVariables(input, vars)
+func renderPathVariables(input string, vars map[string]string, mockCfg *templating.MockExpanderConfig) string {
+	rendered := renderVariables(input, vars, mockCfg)
 	for i := 0; i < 5; i++ {
 		before := rendered
-		rendered = renderOpenAPIPathVariables(rendered, vars)
-		rendered = renderVariables(rendered, vars)
+		rendered = renderOpenAPIPathVariables(rendered, vars, mockCfg)
+		rendered = renderVariables(rendered, vars, mockCfg)
 		if rendered == before {
 			break
 		}
@@ -61,7 +62,7 @@ func renderPathVariables(input string, vars map[string]string) string {
 	return rendered
 }
 
-func renderOpenAPIPathVariables(input string, vars map[string]string) string {
+func renderOpenAPIPathVariables(input string, vars map[string]string, mockCfg *templating.MockExpanderConfig) string {
 	var b strings.Builder
 	for i := 0; i < len(input); {
 		if input[i] == '{' && (i+1 >= len(input) || input[i+1] != '{') {
@@ -70,7 +71,7 @@ func renderOpenAPIPathVariables(input string, vars map[string]string) string {
 				name := strings.TrimSpace(input[i+1 : end])
 				if pathVarIdentRE.MatchString(name) {
 					if value, ok := vars[name]; ok {
-						b.WriteString(renderVariables(value, vars))
+						b.WriteString(renderVariables(value, vars, mockCfg))
 						i = end + 1
 						continue
 					}
@@ -83,37 +84,37 @@ func renderOpenAPIPathVariables(input string, vars map[string]string) string {
 	return b.String()
 }
 
-func renderMap(input map[string]string, vars map[string]string) map[string]string {
+func renderMap(input map[string]string, vars map[string]string, mockCfg *templating.MockExpanderConfig) map[string]string {
 	out := make(map[string]string, len(input))
 	for key, value := range input {
-		out[renderVariables(key, vars)] = renderVariables(value, vars)
+		out[renderVariables(key, vars, mockCfg)] = renderVariables(value, vars, mockCfg)
 	}
 	return out
 }
 
-func renderAny(input any, vars map[string]string) any {
+func renderAny(input any, vars map[string]string, mockCfg *templating.MockExpanderConfig) any {
 	switch value := input.(type) {
 	case string:
-		return renderVariables(value, vars)
+		return renderVariables(value, vars, mockCfg)
 	case []any:
 		out := make([]any, len(value))
 		for idx, item := range value {
-			out[idx] = renderAny(item, vars)
+			out[idx] = renderAny(item, vars, mockCfg)
 		}
 		return out
 	case map[string]any:
 		if token, ok := bareTemplateToken(value); ok {
-			return renderBareTemplateValue(token, vars)
+			return renderBareTemplateValue(token, vars, mockCfg)
 		}
 		out := make(map[string]any, len(value))
 		for key, item := range value {
-			out[renderVariables(key, vars)] = renderAny(item, vars)
+			out[renderVariables(key, vars, mockCfg)] = renderAny(item, vars, mockCfg)
 		}
 		return out
 	case map[string]string:
 		out := make(map[string]any, len(value))
 		for key, item := range value {
-			out[renderVariables(key, vars)] = renderVariables(item, vars)
+			out[renderVariables(key, vars, mockCfg)] = renderVariables(item, vars, mockCfg)
 		}
 		return out
 	default:
@@ -121,8 +122,22 @@ func renderAny(input any, vars map[string]string) any {
 	}
 }
 
-var exactMockValuePattern = regexp.MustCompile(`^\s*\{\{\s*\$mock\s*\.\s*([A-Za-z][A-Za-z0-9_]*)\s*(?:\([^()]*\))?\s*\}\}\s*$`)
-var exactStepValuePattern = regexp.MustCompile(`^\s*\{\{\s*\$steps\[\d+\][^{}]*?\s*\}\}\s*$`)
+// exactBareTemplateToken classifies a string that is wholly a single
+// placeholder so the JSON-body marshaller can restore the rendered value's
+// native scalar type (mirroring the historical behaviour of the
+// exactMockValuePattern / exactStepValuePattern regexes).
+func exactBareTemplateToken(input string) (templating.Token, bool) {
+	trimmed := strings.TrimSpace(input)
+	tokens := templating.Tokenize(trimmed)
+	if len(tokens) != 1 {
+		return templating.Token{}, false
+	}
+	switch tokens[0].Kind {
+	case templating.KindMock, templating.KindStep:
+		return tokens[0], true
+	}
+	return templating.Token{}, false
+}
 
 func bareTemplateToken(input map[string]any) (string, bool) {
 	if len(input) != 1 {
@@ -132,19 +147,19 @@ func bareTemplateToken(input map[string]any) (string, bool) {
 	return token, ok && token != ""
 }
 
-func renderBareTemplateValue(input string, vars map[string]string) any {
-	rendered := renderVariables(input, vars)
-	if exactStepValuePattern.MatchString(input) {
+func renderBareTemplateValue(input string, vars map[string]string, mockCfg *templating.MockExpanderConfig) any {
+	rendered := renderVariables(input, vars, mockCfg)
+	tok, ok := exactBareTemplateToken(input)
+	if !ok {
+		return rendered
+	}
+	if tok.Kind == templating.KindStep {
 		if value, ok := parseBareTemplateScalar(rendered); ok {
 			return value
 		}
 		return rendered
 	}
-	matches := exactMockValuePattern.FindStringSubmatch(input)
-	if len(matches) < 2 {
-		return rendered
-	}
-	switch strings.ToLower(strings.TrimSpace(matches[1])) {
+	switch strings.ToLower(strings.TrimSpace(tok.Mock.Helper)) {
 	case "int", "integer", "timestamp":
 		if n, err := strconv.ParseInt(rendered, 10, 64); err == nil {
 			return n
@@ -233,38 +248,20 @@ func parseBareTemplateScalar(input string) (any, bool) {
 // Callers must create a per-step copy of the vars map before calling this
 // function so the injected keys do not leak into subsequent steps.
 
-var stepRefScanRE = regexp.MustCompile(`\{+\s*(\$steps\[\d+\][^{}]*?)\s*\}+`)
-var stepRefKeyRE = regexp.MustCompile(`^\$steps\[(\d+)\](.*)$`)
-
 func injectStepRefs(text string, stepOutputs map[int]any, vars map[string]string) {
-	if len(stepOutputs) == 0 || !strings.Contains(text, "$steps[") {
+	if len(stepOutputs) == 0 {
 		return
 	}
-	for _, m := range stepRefScanRE.FindAllStringSubmatch(text, -1) {
-		key := m[1]
-		if _, exists := vars[key]; exists {
-			continue
-		}
-		if val, ok := resolveStepRef(key, stepOutputs); ok {
-			vars[key] = val
-		}
-	}
+	templating.StepRefs(text, vars, func(seq int, path string) (string, bool) {
+		return resolveStepRef(seq, path, stepOutputs)
+	})
 }
 
-func resolveStepRef(key string, stepOutputs map[int]any) (string, bool) {
-	m := stepRefKeyRE.FindStringSubmatch(key)
-	if m == nil {
-		return "", false
-	}
-	n, err := strconv.Atoi(m[1])
-	if err != nil {
-		return "", false
-	}
-	output, ok := stepOutputs[n]
+func resolveStepRef(seq int, path string, stepOutputs map[int]any) (string, bool) {
+	output, ok := stepOutputs[seq]
 	if !ok {
 		return "", false
 	}
-	path := strings.TrimPrefix(m[2], ".")
 	if path == "" {
 		b, _ := json.Marshal(output)
 		return string(b), true
@@ -341,20 +338,23 @@ func parseOutputSegment(segment string) (field string, indices []int, err error)
 	return field, indices, nil
 }
 
-// pathVarNameRE matches {{varName}} placeholders (2+ braces) used in path templates.
-var pathVarNameRE = regexp.MustCompile(`\{\{+([^{}]+)\}\}+`)
-
 var pathVarIdentRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_-]*$`)
 
 // extractPathVarNames returns the unique variable names referenced in a path
 // template. Both {{varName}} (runner style) and {varName} (OpenAPI style) are
 // recognised so the function works whether or not the path has been converted
-// by the frontend before being stored.
+// by the frontend before being stored. Token kinds that carry their own
+// semantics (step refs, $mock helpers, SQL/DS references) are intentionally
+// ignored: they are resolved by the runner's render pipeline rather than the
+// path-parameter table.
 func extractPathVarNames(path string) []string {
 	seen := make(map[string]bool)
 	var names []string
-	for _, m := range pathVarNameRE.FindAllStringSubmatch(path, -1) {
-		name := strings.TrimSpace(m[1])
+	for _, tok := range templating.Tokenize(path) {
+		if tok.Kind != templating.KindVar {
+			continue
+		}
+		name := strings.TrimSpace(tok.Var.Name)
 		if pathVarIdentRE.MatchString(name) && !seen[name] {
 			seen[name] = true
 			names = append(names, name)

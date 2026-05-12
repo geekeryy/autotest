@@ -78,13 +78,30 @@
           </el-checkbox-group>
         </el-form-item>
         <el-form-item label="脚本内容" required>
-          <el-input
-            v-model="form.code"
-            type="textarea"
-            :autosize="{ minRows: 12, maxRows: 28 }"
-            placeholder="Postman 风格 pm.test / pm.variables / console …"
-            class="script-code-input"
-          />
+          <div class="script-code-block">
+            <div class="script-code-toolbar">
+              <span class="script-code-hint">Postman 风格 pm.test / pm.variables / console …</span>
+                <el-button
+                  size="small"
+                  type="primary"
+                  plain
+                  class="ai-sparkle-btn"
+                  :disabled="!projectId || aiGenerating"
+                  :loading="aiGenerating"
+                  :aria-label="'AI 生成脚本'"
+                  @click="openAIGenerator"
+                >
+                  <AiSparkleIcon v-if="!aiGenerating" />
+                </el-button>
+            </div>
+            <el-input
+              v-model="form.code"
+              type="textarea"
+              :autosize="{ minRows: 12, maxRows: 28 }"
+              placeholder="Postman 风格 pm.test / pm.variables / console …"
+              class="script-code-input"
+            />
+          </div>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -92,6 +109,15 @@
         <el-button type="primary" :loading="saving" @click="submit">保存</el-button>
       </template>
     </el-dialog>
+
+    <AIGenerateDialog
+      v-model="aiDialogVisible"
+      action="generate_assertion"
+      title="AI 生成脚本"
+      :context="aiContext"
+      @apply="onAIApply"
+      @generation-settled="aiGenerating = false"
+    />
   </div>
 </template>
 
@@ -103,6 +129,8 @@ import {
   updateScriptLibraryTemplate
 } from '../../api'
 import { loadGlobalProjects, projectState } from '../../utils/currentProject'
+import AIGenerateDialog from '../../components/AIGenerateDialog.vue'
+import AiSparkleIcon from '../../components/icons/AiSparkleIcon.vue'
 
 function pad2(n) {
   return String(n).padStart(2, '0')
@@ -110,6 +138,7 @@ function pad2(n) {
 
 export default {
   name: 'ScriptLibraryList',
+  components: { AIGenerateDialog, AiSparkleIcon },
   data() {
     return {
       projectState,
@@ -120,6 +149,8 @@ export default {
       saving: false,
       deletingId: null,
       editingBuiltin: false,
+      aiDialogVisible: false,
+      aiGenerating: false,
       form: {
         name: '',
         category: '',
@@ -137,6 +168,20 @@ export default {
       if (this.editingId && this.editingBuiltin) return '编辑内置脚本模板'
       if (this.editingId) return '编辑脚本模板'
       return '新增脚本模板'
+    },
+    /**
+     * 传给 AIGenerateDialog 的上下文：模板名称/描述/分类/适用范围与已有脚本草稿，
+     * 帮助 AI 适配输出风格（assertion 范围倾向 pm.response 校验；scenario 范围只用 pm.variables / console）。
+     */
+    aiContext() {
+      return {
+        target: 'script_library_template',
+        name: (this.form.name || '').trim(),
+        category: (this.form.category || '').trim(),
+        description: (this.form.description || '').trim(),
+        scopes: Array.isArray(this.form.scopes) ? this.form.scopes.slice() : [],
+        currentCode: this.form.code || ''
+      }
     }
   },
   watch: {
@@ -236,6 +281,24 @@ export default {
         this.saving = false
       }
     },
+    openAIGenerator() {
+      if (!this.projectId) {
+        this.$message.warning('请先在顶部选择项目')
+        return
+      }
+      this.aiGenerating = true
+      this.aiDialogVisible = true
+    },
+    onAIApply(payload) {
+      const text = (payload?.text || '').trim()
+      if (!text) {
+        this.$message.warning('AI 未返回有效脚本内容')
+        return
+      }
+      const existing = (this.form.code || '').trimEnd()
+      this.form.code = existing ? `${existing}\n\n${text}\n` : `${text}\n`
+      this.$message.success('已追加 AI 生成的脚本，请按需调整占位参数')
+    },
     async remove(row) {
       try {
         await this.$confirm(`确定删除模板「${row.name}」？`, '删除确认', { type: 'warning' })
@@ -270,7 +333,23 @@ export default {
 
 .script-code-input :deep(textarea) {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
-  font-size: 13px;
+  font-size: var(--app-font-size-small);
   line-height: 1.45;
 }
+
+.script-code-block {
+  width: 100%;
+}
+.script-code-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.script-code-hint {
+  color: var(--app-secondary-text, #909399);
+  font-size: var(--app-font-size-small);
+}
+/* AI 生成按钮 .ai-sparkle-btn 已在 styles/global.css 统一管理样式，本文件不再重复 */
 </style>

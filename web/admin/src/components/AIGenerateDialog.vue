@@ -292,7 +292,7 @@ export default {
 }
 
 .ai-intent-label {
-  font-size: 13px;
+  font-size: var(--app-font-size-base);
   font-weight: 500;
   color: var(--el-text-color-primary, #303133);
   margin-bottom: 6px;
@@ -304,7 +304,7 @@ export default {
 
 .ai-intent-hint {
   margin: 0 0 8px;
-  font-size: 12px;
+  font-size: var(--app-font-size-small);
   color: var(--app-secondary-text, #909399);
   line-height: 1.5;
 }
@@ -329,11 +329,11 @@ export default {
   padding: 32px 0;
   justify-content: center;
   color: var(--app-secondary-text, #909399);
-  font-size: 14px;
+  font-size: var(--app-font-size-base);
 }
 
 .ai-spin {
-  font-size: 22px;
+  font-size: calc(var(--app-font-size-base) + 8px);
   animation: ai-rotating 1s linear infinite;
 }
 
@@ -344,7 +344,7 @@ export default {
 
 .ai-result-text :deep(textarea) {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
-  font-size: 12px;
+  font-size: var(--app-font-size-small);
   line-height: 1.55;
 }
 
@@ -356,7 +356,7 @@ export default {
 }
 
 .ai-result-meta {
-  font-size: 12px;
+  font-size: var(--app-font-size-small);
   color: var(--app-secondary-text, #909399);
   display: flex;
   align-items: center;

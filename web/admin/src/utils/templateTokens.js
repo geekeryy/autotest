@@ -32,7 +32,32 @@ export const mockHelperList = [
   { name: 'color', example: '{{$mock.color}}', description: '随机颜色（colour 是别名）' },
   { name: 'date', example: '{{$mock.date}}', description: '随机日期 yyyy-MM-dd' },
   { name: 'dateTime', example: '{{$mock.dateTime}}', description: '随机日期时间 RFC3339' },
-  { name: 'pick', example: '{{$mock.pick(a,b,c)}}', description: '从参数列表随机挑一个（oneOf/choice 是别名）' }
+  { name: 'pick', example: '{{$mock.pick(a,b,c)}}', description: '从参数列表随机挑一个（oneOf/choice 是别名）' },
+  { name: 'idCard', example: '{{$mock.idCard}}', description: '中国二代身份证 18 位（含 GB 11643 校验位，仅供测试用）' },
+  { name: 'plateNumber', example: '{{$mock.plateNumber}}', description: '中国车牌号（省份简称 + · + 1 字母 + 5 位字母数字）' },
+  { name: 'bankCard', example: '{{$mock.bankCard}} / {{$mock.bankCard(16)}}', description: '16-19 位 Luhn 合法银行卡号，默认 19 位，可指定长度' },
+  { name: 'unifiedSocialCreditCode', example: '{{$mock.unifiedSocialCreditCode}}', description: '统一社会信用代码 18 位（GB 32100，校验位合法）' },
+  { name: 'sku', example: '{{$mock.sku}} / {{$mock.sku(12)}}', description: 'SKU 编号，默认 `[A-Z]{2}-\\d{6}`，可指定总长' }
+]
+
+// 命名值集合（mock value sets）模板语法说明，与后端 internal/mockset 共同
+// 维护：示例片段也用于 TemplateReference 页面以及 MockValueSetList 顶部说明区。
+export const mockSetSyntax = [
+  {
+    name: '{{$mock.set.<key>}}',
+    example: '{{$mock.set.colors}}',
+    description: '按权重随机抽样（无权重时均匀随机），用于业务字段不要编造取值'
+  },
+  {
+    name: '{{$mock.set.<key>[N]}}',
+    example: '{{$mock.set.colors[1]}}',
+    description: '按 0-based 索引取值；越界时 Runner 报明确中文错误'
+  },
+  {
+    name: '{{$mock.set.<key>[*]}}',
+    example: '{{$mock.set.colors[*]}}',
+    description: '同一次 run 内按顺序循环遍历（不同 run 互不影响；mockserver 按请求维度独立）'
+  }
 ]
 
 export const stepRefFields = [
@@ -50,14 +75,14 @@ export const stepRefFields = [
 
 export const sqlInlineFields = [
   {
-    name: '{{sql.<sourceKey>.<column>}}',
-    example: '{{sql.userSeed.id}}',
-    description: '取 SQL 参数源结果第一行的指定列值'
+    name: '{{$sql.<sourceKey>.<column>}}',
+    example: '{{$sql.userSeed.id}}',
+    description: '取 SQL 参数源结果第一行的指定列值（兼容历史 `{{sql.*}}`）'
   },
   {
-    name: '{{sql.<sourceKey>[<filterColumn>=<filterValue>].<column>}}',
-    example: '{{sql.userSeed[status=active].id}}',
-    description: '在结果中按等值过滤后取第一条匹配行的列值'
+    name: '{{$sql.<sourceKey>[<filterColumn>=<filterValue>].<column>}}',
+    example: '{{$sql.userSeed[status=active].id}}',
+    description: '在结果中按等值过滤后取第一条匹配行的列值（兼容历史 `{{sql.*}}`）'
   }
 ]
 
@@ -75,19 +100,19 @@ export const testDataInlineFields = [
 ]
 
 export const mockResponseFields = [
-  { name: 'request.method', example: '{{request.method}}', description: '当前请求方法' },
-  { name: 'request.path', example: '{{request.path}}', description: '请求 URL 的路径部分' },
-  { name: 'request.url', example: '{{request.url}}', description: '请求 URL 的完整 RequestURI（含 query）' },
-  { name: 'request.bodyRaw', example: '{{request.bodyRaw}}', description: '原始请求体字符串（未解析）' },
-  { name: 'request.pathvar.<name>', example: '{{request.pathvar.id}}', description: '路径参数占位符的值，需在规则路径中声明 {id}（兼容历史 pathvar 语法）' },
-  { name: 'request.query.<name>', example: '{{request.query.tenant}}', description: '查询参数取值' },
-  { name: 'request.header.<Name>', example: '{{request.header.X-Trace}}', description: '请求头取值（大小写不敏感）' },
-  { name: 'request.body.<path>', example: '{{request.body.user.id}}', description: '请求体 JSON 字段，支持点路径' }
+  { name: '$req.method', example: '{{$req.method}}', description: '当前请求方法（兼容历史 `{{request.method}}`）' },
+  { name: '$req.path', example: '{{$req.path}}', description: '请求 URL 的路径部分（兼容历史 `{{request.path}}`）' },
+  { name: '$req.url', example: '{{$req.url}}', description: '请求 URL 的完整 RequestURI（含 query；兼容历史 `{{request.url}}`）' },
+  { name: '$req.bodyRaw', example: '{{$req.bodyRaw}}', description: '原始请求体字符串（兼容历史 `{{request.bodyRaw}}`）' },
+  { name: '$req.pathvar.<name>', example: '{{$req.pathvar.id}}', description: '路径参数占位符的值，需在规则路径中声明 {id}（兼容历史 `{{request.pathvar.*}}`）' },
+  { name: '$req.query.<name>', example: '{{$req.query.tenant}}', description: '查询参数取值（兼容历史 `{{request.query.*}}`）' },
+  { name: '$req.header.<Name>', example: '{{$req.header.X-Trace}}', description: '请求头取值，大小写不敏感（兼容历史 `{{request.header.*}}`）' },
+  { name: '$req.body.<path>', example: '{{$req.body.user.id}}', description: '请求体 JSON 字段，支持点路径（兼容历史 `{{request.body.*}}`）' }
 ]
 
 export const renderingPipeline = [
   { stage: '1', label: '$mock.* 模拟标签', detail: '每次请求实时生成新值；多次出现互不相同；未识别 helper 保留字面量。' },
   { stage: '2', label: '$steps[N].* 场景步骤引用', detail: '仅在场景编排中生效；按上一步输出按 JSONPath 解析。' },
-  { stage: '3', label: '$ds.* / sql.* 测试数据与 SQL 引用', detail: 'Runner 在发请求前解析测试数据表引用，并自动执行对应 SQL 参数源，按列名取值。' },
+  { stage: '3', label: '$ds.* / $sql.* 测试数据与 SQL 引用', detail: 'Runner 在发请求前解析测试数据表引用，并自动执行对应 SQL 参数源，按列名取值；继续兼容历史 `{{sql.*}}`。' },
   { stage: '4', label: '{{varName}} 普通变量', detail: '从环境变量、场景变量、运行覆盖变量、模板默认变量合并取值。' }
 ]

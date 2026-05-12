@@ -82,10 +82,11 @@
       <!-- 3. SQL 内联引用 -->
       <el-tab-pane name="sql" label="SQL 内联引用">
         <section class="ref-section">
-          <h3 class="ref-section-title"><code v-pre>{{sql.&lt;sourceKey&gt;.&lt;column&gt;}}</code></h3>
+          <h3 class="ref-section-title"><code v-pre>{{$sql.&lt;sourceKey&gt;.&lt;column&gt;}}</code></h3>
           <p class="ref-section-desc">
             从「测试数据 / SQL 参数源」管理的查询里取值。Runner 在发请求前会自动扫描请求并执行用到的参数源，无需绑定式配置。
             <code>sourceKey</code> 在同项目同服务下唯一；按 ID 或历史名称引用作为兜底。
+            历史 <code v-pre>{{sql.*}}</code> 形式继续兼容（视为 deprecated），新页面与文档统一使用带 <code>$</code> 的形式。
           </p>
           <el-table :data="sqlInlineFields" border class="ref-table" :show-header="true">
             <el-table-column label="语法" min-width="320">
@@ -105,10 +106,13 @@
             </ul>
           </div>
           <pre v-pre class="ref-code">// 默认取首行
-GET /api/v1/users/{{sql.userSeed.id}}
+GET /api/v1/users/{{$sql.userSeed.id}}
 
 // 等值过滤：从结果里挑出 status=active 的第一行
-GET /api/v1/users/{{sql.userSeed[status=active].id}}</pre>
+GET /api/v1/users/{{$sql.userSeed[status=active].id}}
+
+// 历史 {{sql.*}} 形式仍兼容
+GET /api/v1/users/{{sql.userSeed.id}}</pre>
         </section>
       </el-tab-pane>
 
@@ -217,16 +221,48 @@ POST /api/v1/users
   "createdAt": "{{$mock.now}}",
   "role": "{{$mock.pick(admin,tester,viewer)}}"
 }</pre>
+
+          <h3 class="ref-section-title ref-section-subtitle">
+            <code v-pre>{{$mock.set.&lt;key&gt;}}</code>
+            <span class="ref-section-title-aux">/</span>
+            <code v-pre>{{$mock.set.&lt;key&gt;[N]}}</code>
+            <span class="ref-section-title-aux">/</span>
+            <code v-pre>{{$mock.set.&lt;key&gt;[*]}}</code>
+          </h3>
+          <p class="ref-section-desc">
+            「<router-link to="/mock-value-sets">命名值集合</router-link>」让团队按业务语义维护可复用的离散取值池：默认按权重随机抽样、按 0-based 索引取值，或在<strong>同一次运行（run）</strong>内按顺序循环遍历不重复。
+            mockserver 的请求渲染按 request 维度独立计数；不同 run / 不同请求互不影响。
+          </p>
+          <el-table :data="mockSetSyntax" border class="ref-table">
+            <el-table-column label="语法" min-width="240">
+              <template #default="{ row }"><code class="ref-token">{{ row.name }}</code></template>
+            </el-table-column>
+            <el-table-column label="示例" min-width="240">
+              <template #default="{ row }">
+                <div class="ref-token-wrap">
+                  <code class="ref-token">{{ row.example }}</code>
+                  <el-button type="primary" link size="small" @click="copy(row.example)">复制</el-button>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column label="说明" min-width="320" prop="description" />
+          </el-table>
+          <p class="ref-tip">
+            <strong>提示：</strong>set 仅一维数组语义，<strong>不支持</strong> <code>[?col=val]</code> 过滤；
+            <code>$ds</code> / <code>$sql</code> 的 <code>[col=val]</code> 等值过滤语法保持不变。
+            建议在「<router-link to="/mock-value-sets">命名值集合</router-link>」管理页里维护取值池后引用，AI 生成参数时也会自动把项目内可用的集合摘要带给模型，避免编造取值。
+          </p>
         </section>
       </el-tab-pane>
 
       <!-- 7. Mock 响应模板 -->
       <el-tab-pane name="mockresp" label="Mock 响应模板">
         <section class="ref-section">
-          <h3 class="ref-section-title"><code v-pre>{{request.xxx}}</code></h3>
+          <h3 class="ref-section-title"><code v-pre>{{$req.xxx}}</code></h3>
           <p class="ref-section-desc">
             仅在 <strong>Mock Server 规则的响应体</strong>中生效，用于把当前 mock 请求的方法、路径参数、查询参数、请求头与 JSON 请求体回显到响应中。
             如果引用的字段不存在或请求体不是合法 JSON，Mock 会返回 500 并提示出错的占位符。
+            历史 <code v-pre>{{request.*}}</code> 形式继续兼容（视为 deprecated），新页面与文档统一使用带 <code>$</code> 的形式。
           </p>
           <el-table :data="mockResponseFields" border class="ref-table">
             <el-table-column label="字段" min-width="220">
@@ -238,7 +274,7 @@ POST /api/v1/users
             <el-table-column label="说明" min-width="320" prop="description" />
           </el-table>
           <p class="ref-tip">
-            <strong>组合用法：</strong>响应体内可以同时使用 <code v-pre>{{request.*}}</code> 与 <code v-pre>{{$mock.*}}</code>，例如返回 <code v-pre>{"requestId":"{{$mock.uuid}}","echoId":"{{request.pathvar.id}}"}</code>，前者每次请求新生成、后者来自当前请求。
+            <strong>组合用法：</strong>响应体内可以同时使用 <code v-pre>{{$req.*}}</code> 与 <code v-pre>{{$mock.*}}</code>，例如返回 <code v-pre>{"requestId":"{{$mock.uuid}}","echoId":"{{$req.pathvar.id}}"}</code>，前者每次请求新生成、后者来自当前请求。
           </p>
         </section>
       </el-tab-pane>
@@ -249,6 +285,7 @@ POST /api/v1/users
 <script>
 import {
   mockHelperList,
+  mockSetSyntax,
   stepRefFields,
   sqlInlineFields,
   testDataInlineFields,
@@ -266,7 +303,8 @@ export default {
       sqlInlineFields,
       testDataInlineFields,
       mockResponseFields,
-      renderingPipeline
+      renderingPipeline,
+      mockSetSyntax
     }
   },
   computed: {
@@ -390,6 +428,12 @@ export default {
 
 .ref-section-title-aux {
   color: var(--app-secondary-text);
+}
+
+.ref-section-subtitle {
+  margin-top: 24px;
+  border-top: 1px dashed var(--el-border-color-lighter);
+  padding-top: 16px;
 }
 
 .ref-section-desc {

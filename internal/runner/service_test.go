@@ -19,19 +19,19 @@ func TestRenderVariablesHandlesWrappedPlaceholders(t *testing.T) {
 
 	vars := map[string]string{"id": "42", "token": "abc$123"}
 
-	if got := renderVariables("/api/v1/users/{{id}}", vars); got != "/api/v1/users/42" {
+	if got := renderVariables("/api/v1/users/{{id}}", vars, nil); got != "/api/v1/users/42" {
 		t.Fatalf("expected normal placeholder to render, got %q", got)
 	}
-	if got := renderVariables("/api/v1/users/{{{{id}}}}", vars); got != "/api/v1/users/42" {
+	if got := renderVariables("/api/v1/users/{{{{id}}}}", vars, nil); got != "/api/v1/users/42" {
 		t.Fatalf("expected over-wrapped placeholder to render, got %q", got)
 	}
-	if got := renderVariables("Bearer {{token}}", vars); got != "Bearer abc$123" {
+	if got := renderVariables("Bearer {{token}}", vars, nil); got != "Bearer abc$123" {
 		t.Fatalf("expected replacement value to be used literally, got %q", got)
 	}
 	if got := renderVariables("/api/v1/users/{{id}}", map[string]string{
 		"id":              "{{sql.userSeed.id}}",
 		"sql.userSeed.id": "99",
-	}); got != "/api/v1/users/99" {
+	}, nil); got != "/api/v1/users/99" {
 		t.Fatalf("expected nested inline placeholder to render, got %q", got)
 	}
 }
@@ -122,7 +122,7 @@ func TestBuildHTTPRequestRendersNestedBodyVariables(t *testing.T) {
 		"email":           "u@example.test",
 		"tenantId":        "acme",
 		"sql.userSeed.id": "99",
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("build request: %v", err)
 	}
@@ -146,7 +146,7 @@ func TestBuildHTTPRequestRendersOpenAPIPathVariablesAtRuntime(t *testing.T) {
 	}, project.Environment{BaseURL: "https://example.test"}, map[string]string{
 		"$steps[11].body.data.id": "site-42",
 		"coach_id":                "coach-7",
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("build request: %v", err)
 	}
@@ -182,7 +182,7 @@ func TestBuildAPIRequestParamsRendersStepRefPathVariables(t *testing.T) {
 			"method":"GET",
 			"path":"/api/admin/v1/sites/{id}/coaches",
 			"variables":{"id":"{{$steps[11].body.data.id}}"}
-		}`), "", vars)
+		}`), "", vars, nil)
 		if got := reqParams["pathvar"].(map[string]any)["id"]; got != "site-42" {
 			t.Fatalf("expected rendered pathvar id, got %#v", got)
 		}
@@ -194,7 +194,7 @@ func TestRenderVariablesExpandsMockDataTokens(t *testing.T) {
 
 	got := renderVariables("user-{{$mock.uuid}}-{{tenant}}", map[string]string{
 		"tenant": "acme",
-	})
+	}, nil)
 	if !strings.HasSuffix(got, "-acme") {
 		t.Fatalf("expected variable to be substituted, got %q", got)
 	}
@@ -222,7 +222,7 @@ func TestBuildHTTPRequestExpandsMockTokensAcrossRequest(t *testing.T) {
 			"id":    "{{$mock.uuid}}",
 			"email": "{{$mock.email}}",
 		},
-	}, project.Environment{BaseURL: "https://example.test"}, nil)
+	}, project.Environment{BaseURL: "https://example.test"}, nil, nil)
 	if err != nil {
 		t.Fatalf("build request: %v", err)
 	}
@@ -288,7 +288,7 @@ func TestBuildHTTPRequestKeepsQuotedMockBodyValueStringTyped(t *testing.T) {
 			"enabled":  "{{$mock.bool}}",
 			"label":    "job-{{$mock.int(1,9)}}",
 		},
-	}, project.Environment{BaseURL: "https://example.test"}, nil)
+	}, project.Environment{BaseURL: "https://example.test"}, nil, nil)
 	if err != nil {
 		t.Fatalf("build request: %v", err)
 	}
@@ -324,7 +324,7 @@ func TestBuildHTTPRequestKeepsBareMockBodyValueTyped(t *testing.T) {
 			"ratio":    map[string]any{"__autotestBareTemplate": "{{$mock.float(1,2,2)}}"},
 			"enabled":  map[string]any{"__autotestBareTemplate": "{{$mock.bool}}"},
 		},
-	}, project.Environment{BaseURL: "https://example.test"}, nil)
+	}, project.Environment{BaseURL: "https://example.test"}, nil, nil)
 	if err != nil {
 		t.Fatalf("build request: %v", err)
 	}
@@ -366,7 +366,7 @@ func TestBuildHTTPRequestKeepsBareStepRefsScalarTyped(t *testing.T) {
 		"$steps[4].rows[0].enabled":      "true",
 		"$steps[4].rows[0].missingValue": "null",
 		"$steps[4].rows[0].rawText":      "order-6309",
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("build request: %v", err)
 	}
@@ -410,7 +410,7 @@ func TestBuildHTTPRequestUsesRequestVariablesAsDefaults(t *testing.T) {
 		},
 	}, project.Environment{BaseURL: "https://example.test"}, map[string]string{
 		"tenant": "override",
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("build request: %v", err)
 	}
@@ -453,6 +453,48 @@ func TestCollectInlineSQLReferencesScansRequestRecursively(t *testing.T) {
 	} {
 		if !expressions[want] {
 			t.Fatalf("expected inline reference %q in %#v", want, refs)
+		}
+	}
+}
+
+func TestCollectInlineSQLReferencesNormalisesDollarAlias(t *testing.T) {
+	t.Parallel()
+
+	legacyRefs, err := collectInlineSQLReferences(RequestDefinition{
+		Path: "/api/v1/users/{{sql.userSeed.id}}",
+		Body: map[string]any{
+			"adminEmail": "{{sql.userSeed[role=admin].email}}",
+		},
+	})
+	if err != nil {
+		t.Fatalf("collect legacy sql references: %v", err)
+	}
+
+	aliasRefs, err := collectInlineSQLReferences(RequestDefinition{
+		Path: "/api/v1/users/{{$sql.userSeed.id}}",
+		Body: map[string]any{
+			"adminEmail": "{{$sql.userSeed[role=admin].email}}",
+		},
+	})
+	if err != nil {
+		t.Fatalf("collect $sql aliased references: %v", err)
+	}
+
+	// Each form must produce identical InlineReference values so that the
+	// inline executor (`applyInlineSQLReferences`) injects the same variable
+	// keys (e.g. `sql.userSeed.id`) regardless of which spelling the user
+	// chose. That preserves backwards compatibility with saved request
+	// templates and run variables keyed on the legacy expression.
+	if len(legacyRefs) != len(aliasRefs) {
+		t.Fatalf("expected same reference count, got legacy=%d alias=%d", len(legacyRefs), len(aliasRefs))
+	}
+	legacyExpr := map[string]bool{}
+	for _, ref := range legacyRefs {
+		legacyExpr[ref.Expression] = true
+	}
+	for _, ref := range aliasRefs {
+		if !legacyExpr[ref.Expression] {
+			t.Fatalf("$sql alias reference %q absent from legacy refs (%#v)", ref.Expression, legacyRefs)
 		}
 	}
 }
@@ -567,7 +609,7 @@ func TestBuildHTTPRequestAppliesEnvironmentAuthForSecuredRequest(t *testing.T) {
 	}, project.Environment{
 		BaseURL: "https://example.test",
 		Auth:    []byte(`{"type":"bearer","token":"{{token}}"}`),
-	}, map[string]string{"token": "env-token"})
+	}, map[string]string{"token": "env-token"}, nil)
 	if err != nil {
 		t.Fatalf("build request: %v", err)
 	}
@@ -587,7 +629,7 @@ func TestBuildHTTPRequestRequestHeaderOverridesEnvironmentAuth(t *testing.T) {
 	}, project.Environment{
 		BaseURL: "https://example.test",
 		Auth:    []byte(`{"type":"bearer","token":"{{envToken}}"}`),
-	}, map[string]string{"envToken": "env-token", "stepToken": "step-token"})
+	}, map[string]string{"envToken": "env-token", "stepToken": "step-token"}, nil)
 	if err != nil {
 		t.Fatalf("build request: %v", err)
 	}
@@ -614,7 +656,7 @@ func TestBuildHTTPRequestSelectsAuthProfileBySecurityScheme(t *testing.T) {
 			"securitySchemes":{"UserAuth":"user","AdminAuth":"admin"},
 			"pathRules":[{"prefix":"/api/v1/user","profile":"user"}]
 		}`),
-	}, map[string]string{"userToken": "user-token", "adminToken": "admin-token"})
+	}, map[string]string{"userToken": "user-token", "adminToken": "admin-token"}, nil)
 	if err != nil {
 		t.Fatalf("build request: %v", err)
 	}
@@ -640,7 +682,7 @@ func TestBuildHTTPRequestSelectsAuthProfileParametersBySecurityScheme(t *testing
 			},
 			"securitySchemes":{"UserAuth":"user","AdminKey":"admin"}
 		}`),
-	}, map[string]string{"userToken": "user-token", "adminToken": "admin-token"})
+	}, map[string]string{"userToken": "user-token", "adminToken": "admin-token"}, nil)
 	if err != nil {
 		t.Fatalf("build request: %v", err)
 	}
@@ -670,7 +712,7 @@ func TestBuildHTTPRequestSelectsAuthProfileByPathRule(t *testing.T) {
 				{"prefix":"/api/v1/admin","profile":"admin"}
 			]
 		}`),
-	}, map[string]string{"userToken": "user-token", "adminToken": "admin-token"})
+	}, map[string]string{"userToken": "user-token", "adminToken": "admin-token"}, nil)
 	if err != nil {
 		t.Fatalf("build request: %v", err)
 	}
@@ -694,7 +736,7 @@ func TestBuildHTTPRequestUsesDefaultAuthProfileForUnmappedSecurity(t *testing.T)
 				"user":{"type":"bearer","token":"{{userToken}}"}
 			}
 		}`),
-	}, map[string]string{"userToken": "user-token"})
+	}, map[string]string{"userToken": "user-token"}, nil)
 	if err != nil {
 		t.Fatalf("build request: %v", err)
 	}
@@ -712,7 +754,7 @@ func TestBuildHTTPRequestSkipsEnvironmentAuthWithoutSecurity(t *testing.T) {
 	}, project.Environment{
 		BaseURL: "https://example.test",
 		Auth:    []byte(`{"type":"bearer","token":"env-token"}`),
-	}, nil)
+	}, nil, nil)
 	if err != nil {
 		t.Fatalf("build request: %v", err)
 	}
@@ -737,7 +779,7 @@ func TestBuildHTTPRequestFallsBackToDefaultProfileWhenSecurityMissing(t *testing
 			},
 			"securitySchemes":{"BearerAuth":"user","AdminBearerAuth":"admin"}
 		}`),
-	}, map[string]string{"userToken": "user-token", "adminToken": "admin-token"})
+	}, map[string]string{"userToken": "user-token", "adminToken": "admin-token"}, nil)
 	if err != nil {
 		t.Fatalf("build request: %v", err)
 	}
@@ -759,7 +801,7 @@ func TestBuildHTTPRequestSkipsAuthWhenDefaultProfileAbsent(t *testing.T) {
 				"user":{"type":"bearer","token":"{{userToken}}"}
 			}
 		}`),
-	}, map[string]string{"userToken": "user-token"})
+	}, map[string]string{"userToken": "user-token"}, nil)
 	if err != nil {
 		t.Fatalf("build request: %v", err)
 	}

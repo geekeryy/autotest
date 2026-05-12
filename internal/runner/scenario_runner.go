@@ -12,6 +12,7 @@ import (
 	"autotest/internal/project"
 	"autotest/internal/report"
 	"autotest/internal/scenario"
+	"autotest/internal/templating"
 	"autotest/internal/testdata"
 
 	"github.com/google/uuid"
@@ -100,7 +101,8 @@ func (s *Service) RunScenario(ctx context.Context, scenarioRepo scenarioReposito
 		return nil, fmt.Errorf("create scenario run: %w", err)
 	}
 
-	executor := newScenarioExecution(s, run.ID, *env, baseVars, steps)
+	mockCfg := s.buildRunMockConfig(sc.ProjectID)
+	executor := newScenarioExecution(s, run.ID, *env, baseVars, steps, mockCfg)
 	overallStatus := executor.run(ctx)
 	stepResults := executor.stepResults
 
@@ -119,14 +121,15 @@ func (s *Service) executeScenarioStep(
 	env project.Environment,
 	baseVars map[string]string,
 	stepOutputs map[int]any,
+	mockCfg *templating.MockExpanderConfig,
 ) (*report.Result, map[string]any, error) {
 	switch step.StepType {
 	case "", scenario.StepTypeAPI:
-		return s.executeAPIScenarioStep(ctx, runID, step, env, baseVars, stepOutputs)
+		return s.executeAPIScenarioStep(ctx, runID, step, env, baseVars, stepOutputs, mockCfg)
 	case scenario.StepTypeDatabase:
-		return s.executeDatabaseScenarioStep(ctx, runID, step, env, baseVars, stepOutputs)
+		return s.executeDatabaseScenarioStep(ctx, runID, step, env, baseVars, stepOutputs, mockCfg)
 	case scenario.StepTypeScript:
-		return s.executeScriptScenarioStep(ctx, runID, step, baseVars, stepOutputs)
+		return s.executeScriptScenarioStep(ctx, runID, step, baseVars, stepOutputs, mockCfg)
 	default:
 		return nil, nil, fmt.Errorf("step %d: unsupported step type %q", step.StepOrder, step.StepType)
 	}
@@ -145,6 +148,7 @@ func (s *Service) executeAPIScenarioStep(
 	env project.Environment,
 	baseVars map[string]string,
 	stepOutputs map[int]any,
+	mockCfg *templating.MockExpanderConfig,
 ) (*report.Result, map[string]any, error) {
 	tc, err := s.cases.Get(ctx, step.TestCaseID)
 	if err != nil {
@@ -218,12 +222,13 @@ func (s *Service) executeAPIScenarioStep(
 		ctx, runID, step.ID, effectiveCase, env,
 		variants[0].Variables,
 		paramsource.MarshalSnapshots(variants[0].ParameterSourceSnapshots),
+		mockCfg,
 	)
 	if err != nil {
 		return result, nil, fmt.Errorf("step %d execute: %w", step.StepOrder, err)
 	}
 
-	reqParams := buildAPIRequestParams(effectiveRequest, tc.Path, variants[0].Variables)
+	reqParams := buildAPIRequestParams(effectiveRequest, tc.Path, variants[0].Variables, mockCfg)
 	stepOutput := buildAPIStepOutput(result, reqParams)
 	return result, stepOutput, nil
 }
@@ -272,7 +277,7 @@ func buildAPIStepOutput(result *report.Result, reqParams map[string]any) map[str
 //
 // fallbackPath is tc.Path (OpenAPI-style {varName}) and is used only when the
 // request definition does not carry its own path field.
-func buildAPIRequestParams(effectiveRequest json.RawMessage, fallbackPath string, vars map[string]string) map[string]any {
+func buildAPIRequestParams(effectiveRequest json.RawMessage, fallbackPath string, vars map[string]string, mockCfg *templating.MockExpanderConfig) map[string]any {
 	reqDef, err := decodeRequest(effectiveRequest)
 	if err != nil {
 		return nil
@@ -286,7 +291,7 @@ func buildAPIRequestParams(effectiveRequest json.RawMessage, fallbackPath string
 
 	// query
 	query := make(map[string]any, len(reqDef.Query))
-	for k, v := range renderMap(reqDef.Query, effectiveVars) {
+	for k, v := range renderMap(reqDef.Query, effectiveVars, mockCfg) {
 		query[k] = v
 	}
 
@@ -294,14 +299,14 @@ func buildAPIRequestParams(effectiveRequest json.RawMessage, fallbackPath string
 	pathvar := make(map[string]any)
 	for _, name := range extractPathVarNames(path) {
 		if val, ok := effectiveVars[name]; ok {
-			pathvar[name] = renderVariables(val, effectiveVars)
+			pathvar[name] = renderVariables(val, effectiveVars, mockCfg)
 		}
 	}
 
 	// body
 	var bodyValue any
 	if reqDef.Body != nil {
-		bodyValue = renderAny(reqDef.Body, effectiveVars)
+		bodyValue = renderAny(reqDef.Body, effectiveVars, mockCfg)
 	}
 
 	return map[string]any{

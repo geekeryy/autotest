@@ -12,6 +12,7 @@ import (
 	"autotest/internal/paramsource"
 	"autotest/internal/project"
 	"autotest/internal/report"
+	"autotest/internal/templating"
 	"autotest/internal/testdata"
 
 	"github.com/google/uuid"
@@ -24,6 +25,13 @@ type Service struct {
 	runner   *Runner
 	params   parameterSourceService
 	testData testDataService
+	mockSets mockSetService
+}
+
+// mockSetService 是 runner 解析 `{{$mock.set.<key>}}` 所需的 `mockset.Service`
+// 子集；定义在调用方以便测试时注入 fake，且避免 runner 直接依赖 mockset 包。
+type mockSetService interface {
+	Lookup(ctx context.Context, projectID uuid.UUID, key string) (values []string, weights []float64, ok bool)
 }
 
 type parameterSourceService interface {
@@ -60,7 +68,7 @@ type RunResultOutput struct {
 	Results []report.Result `json:"results"`
 }
 
-func NewService(cases *testcase.Service, projects *project.ServiceLayer, reports *report.Repository, runner *Runner, params parameterSourceService, testData testDataService) *Service {
+func NewService(cases *testcase.Service, projects *project.ServiceLayer, reports *report.Repository, runner *Runner, params parameterSourceService, testData testDataService, mockSets mockSetService) *Service {
 	return &Service{
 		cases:    cases,
 		projects: projects,
@@ -68,6 +76,27 @@ func NewService(cases *testcase.Service, projects *project.ServiceLayer, reports
 		runner:   runner,
 		params:   params,
 		testData: testData,
+		mockSets: mockSets,
+	}
+}
+
+// buildRunMockConfig 构造每次 run（场景或单接口）所需的 mock 上下文：
+//   - Sets 通过 mockSetService 适配到当前项目；
+//   - Cursors 是 run 范围内共享的 map[string]*int，使
+//     `{{$mock.set.<key>[*]}}` 在同一 run 的多次渲染中按顺序遍历不重复，
+//     不同 run 之间互不影响（各自新建 map）。
+//
+// 当未注入 mockSetService 时返回 nil，调用方应该退化到标准 mock helper 行为。
+func (s *Service) buildRunMockConfig(projectID uuid.UUID) *templating.MockExpanderConfig {
+	if s.mockSets == nil {
+		return nil
+	}
+	resolver := templating.MockSetResolverFunc(func(key string) ([]string, []float64, bool) {
+		return s.mockSets.Lookup(context.Background(), projectID, key)
+	})
+	return &templating.MockExpanderConfig{
+		Sets:    resolver,
+		Cursors: map[string]*int{},
 	}
 }
 
@@ -180,6 +209,7 @@ func (s *Service) RunCase(ctx context.Context, testCaseID uuid.UUID, input RunCa
 		return &RunCaseOutput{Run: finished, Result: result, Results: []report.Result{*result}}, runErr
 	}
 
+	mockCfg := s.buildRunMockConfig(tc.ProjectID)
 	firstResult, results, status, firstRunErr := executeCaseRunVariants(ctx, variants, func(ctx context.Context, variant caseRunVariant) (*report.Result, error) {
 		return s.runner.ExecuteCase(
 			ctx,
@@ -188,6 +218,7 @@ func (s *Service) RunCase(ctx context.Context, testCaseID uuid.UUID, input RunCa
 			*env,
 			variant.Variables,
 			paramsource.MarshalSnapshots(variant.ParameterSourceSnapshots),
+			mockCfg,
 		)
 	})
 

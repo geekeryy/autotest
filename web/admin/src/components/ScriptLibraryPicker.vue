@@ -146,7 +146,7 @@ export default {
 }
 
 .script-library-cat {
-  font-size: 12px;
+  font-size: var(--app-font-size-small);
   font-weight: 600;
   color: var(--app-secondary-text, #909399);
   margin-bottom: 6px;
@@ -180,26 +180,26 @@ export default {
 }
 
 .script-library-item-name {
-  font-size: 13px;
+  font-size: var(--app-font-size-base);
   color: var(--el-text-color-primary, #303133);
   font-weight: 500;
 }
 
 .script-library-item-desc {
-  font-size: 12px;
+  font-size: var(--app-font-size-small);
   color: var(--app-secondary-text, #909399);
   margin-top: 4px;
   line-height: 1.45;
 }
 
 .script-library-loading {
-  font-size: 12px;
+  font-size: var(--app-font-size-small);
   color: var(--app-secondary-text, #909399);
   margin-bottom: 4px;
 }
 
 .script-library-footer {
-  font-size: 11px;
+  font-size: var(--app-font-size-small);
   color: var(--app-secondary-text, #909399);
   line-height: 1.4;
   padding-top: 4px;

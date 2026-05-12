@@ -13,6 +13,7 @@ import (
 	"autotest/internal/project"
 	"autotest/internal/report"
 	"autotest/internal/scenario"
+	"autotest/internal/templating"
 
 	"github.com/google/uuid"
 )
@@ -43,6 +44,7 @@ func (s *Service) executeDatabaseScenarioStep(
 	env project.Environment,
 	baseVars map[string]string,
 	stepOutputs map[int]any,
+	_ *templating.MockExpanderConfig,
 ) (*report.Result, map[string]any, error) {
 	start := time.Now()
 
@@ -107,6 +109,7 @@ func (s *Service) executeScriptScenarioStep(
 	step scenario.Step,
 	baseVars map[string]string,
 	stepOutputs map[int]any,
+	mockCfg *templating.MockExpanderConfig,
 ) (*report.Result, map[string]any, error) {
 	start := time.Now()
 
@@ -126,7 +129,7 @@ func (s *Service) executeScriptScenarioStep(
 	// Template pass: step refs and {{var}} in the script source.
 	stepVars := copyVars(baseVars)
 	injectStepRefs(scriptSrc, stepOutputs, stepVars)
-	rendered := renderVariables(scriptSrc, stepVars)
+	rendered := renderVariables(scriptSrc, stepVars, mockCfg)
 
 	// JS runtime variables: scenario + run input only (not temporary $steps[] keys).
 	jsVars := copyVars(baseVars)

@@ -2,15 +2,9 @@ package runner
 
 import (
 	"fmt"
-	"regexp"
-	"strings"
 
 	"autotest/internal/paramsource"
-)
-
-var (
-	inlineSQLTokenPattern = regexp.MustCompile(`\{\{sql\.[^}]+\}\}`)
-	inlineSQLPattern      = regexp.MustCompile(`^\{\{(sql\.([A-Za-z0-9_-]+)(?:\[([A-Za-z0-9_]+)=([^\]\r\n]+)\])?\.([A-Za-z0-9_]+))\}\}$`)
+	"autotest/internal/templating"
 )
 
 func collectInlineSQLReferences(def RequestDefinition) ([]paramsource.InlineReference, error) {
@@ -121,31 +115,23 @@ func collectInlineSQLReferencesFromAny(input any, refs *[]paramsource.InlineRefe
 }
 
 func parseInlineSQLReferences(input string) ([]paramsource.InlineReference, error) {
-	tokens := inlineSQLTokenPattern.FindAllString(input, -1)
-	refs := make([]paramsource.InlineReference, 0, len(tokens))
-	for _, token := range tokens {
-		match := inlineSQLPattern.FindStringSubmatch(token)
-		if match == nil {
-			return nil, fmt.Errorf("invalid sql inline reference %q, expected {{sql.<sourceKey>.<column>}} or {{sql.<sourceKey>[filterColumn=filterValue].<column>}}", token)
+	literals := templating.ScanSQLLiterals(input)
+	if len(literals) == 0 {
+		return nil, nil
+	}
+	refs := make([]paramsource.InlineReference, 0, len(literals))
+	for _, literal := range literals {
+		tok, ok := templating.ParseSQLReference(literal)
+		if !ok {
+			return nil, fmt.Errorf("invalid sql inline reference %q, expected {{sql.<sourceKey>.<column>}} or {{sql.<sourceKey>[filterColumn=filterValue].<column>}}", literal)
 		}
 		refs = append(refs, paramsource.InlineReference{
-			Expression:   match[1],
-			SourceKey:    match[2],
-			FilterColumn: match[3],
-			FilterValue:  unquoteFilterValue(match[4]),
-			Column:       match[5],
+			Expression:   tok.SQL.Expression,
+			SourceKey:    tok.SQL.SourceKey,
+			FilterColumn: tok.SQL.FilterColumn,
+			FilterValue:  tok.SQL.FilterValue,
+			Column:       tok.SQL.Column,
 		})
 	}
 	return refs, nil
-}
-
-func unquoteFilterValue(value string) string {
-	value = strings.TrimSpace(value)
-	if len(value) < 2 {
-		return value
-	}
-	if (value[0] == '\'' && value[len(value)-1] == '\'') || (value[0] == '"' && value[len(value)-1] == '"') {
-		return value[1 : len(value)-1]
-	}
-	return value
 }

@@ -935,7 +935,8 @@ export default {
 
 .panel-title {
   margin: 0;
-  font-size: 16px;
+  font-size: var(--app-font-size-title);
+  line-height: var(--app-line-height-base);
   font-weight: 600;
 }
 
@@ -969,6 +970,31 @@ export default {
   flex: 2 1 320px;
 }
 
+/*
+  inline 模式下 el-form-item 默认 inline-block，label 通过 line-height 与 input 居中；
+  项目支持自定义字号会让 input 高度变化，导致 label 文字不再垂直居中。
+  改为 flex + align-items: center 让 label 与 input 始终垂直居中对齐。
+*/
+.detail-header-form :deep(.el-form-item) {
+  display: flex;
+  align-items: center;
+  margin: 0 0 8px 0;
+}
+.detail-header-form :deep(.el-form-item__label) {
+  display: inline-flex;
+  align-items: center;
+  height: auto;
+  line-height: 1.5;
+  padding: 0 8px 0 0;
+}
+.detail-header-form :deep(.el-form-item__content) {
+  display: flex;
+  align-items: center;
+  flex: 1 1 auto;
+  line-height: normal;
+  margin-left: 0 !important;
+}
+
 .detail-header-actions {
   display: inline-flex;
   gap: 8px;
@@ -999,7 +1025,8 @@ export default {
 
 .section-title {
   margin: 0;
-  font-size: 15px;
+  font-size: calc(var(--app-font-size-base) + 1px);
+  line-height: var(--app-line-height-base);
   font-weight: 600;
 }
 

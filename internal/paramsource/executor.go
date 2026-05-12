@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"autotest/internal/templating"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -501,14 +503,13 @@ func (e *Executor) IntrospectSchema(ctx context.Context, ds DataSource) ([]Schem
 	return result, nil
 }
 
+// renderTemplate performs plain `{{varName}}` substitution against vars.
+// Mock helpers (`{{$mock.*}}`) and other namespaced placeholders are
+// intentionally NOT expanded here so that the historical behaviour of SQL
+// input-parameter rendering is preserved (helper expansion happens in the
+// runner's request-rendering pipeline, not while binding SQL args).
 func renderTemplate(input string, vars map[string]string) string {
-	rendered := input
-	for key, value := range vars {
-		if key == "" {
-			continue
-		}
-		pattern := regexp.MustCompile(`\{\{+` + regexp.QuoteMeta(key) + `\}\}+`)
-		rendered = pattern.ReplaceAllString(rendered, value)
-	}
-	return rendered
+	return templating.Render(input, templating.Resolver{
+		Var: templating.VarsResolver(vars),
+	})
 }

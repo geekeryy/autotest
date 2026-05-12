@@ -5,14 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"regexp"
 	"strconv"
 	"strings"
 
-	"autotest/internal/mockdata"
+	"autotest/internal/templating"
 )
-
-var mockResponseTemplateRE = regexp.MustCompile(`\{\{\s*([^{}]+?)\s*\}\}`)
 
 type mockResponseTemplateContext struct {
 	route          MockRoute
@@ -23,18 +20,8 @@ type mockResponseTemplateContext struct {
 	bodyJSONErr    error
 }
 
-func renderMockResponseBody(input string, route MockRoute, r *http.Request, body []byte) (string, error) {
+func renderMockResponseBody(input string, route MockRoute, r *http.Request, body []byte, mockCfg *templating.MockExpanderConfig) (string, error) {
 	if input == "" || !strings.Contains(input, "{{") {
-		return input, nil
-	}
-
-	// Expand runtime mock-data tokens (e.g. {{$mock.uuid}}) first so each
-	// occurrence emits an independent random value before the request.*
-	// reference resolver runs over the remaining placeholders.
-	input = mockdata.Expand(input)
-
-	matches := mockResponseTemplateRE.FindAllStringSubmatchIndex(input, -1)
-	if len(matches) == 0 {
 		return input, nil
 	}
 
@@ -43,48 +30,66 @@ func renderMockResponseBody(input string, route MockRoute, r *http.Request, body
 		request: r,
 		body:    body,
 	}
-	var out strings.Builder
-	out.Grow(len(input))
-	last := 0
-	for _, match := range matches {
-		out.WriteString(input[last:match[0]])
-		expr := strings.TrimSpace(input[match[2]:match[3]])
-		if !strings.HasPrefix(expr, "request.") {
-			out.WriteString(input[match[0]:match[1]])
-			last = match[1]
-			continue
+	var resolveErr error
+	mockHook := templating.ExpandMock
+	if mockCfg != nil {
+		// 把 set 解析失败的中文错误也通过 resolveErr 反馈给调用方，
+		// 与 request.* 引用失败的处理保持一致：runtime 会回 500 + 详细信息。
+		cfg := *mockCfg
+		cfg.OnError = func(err error) {
+			if resolveErr == nil && err != nil {
+				resolveErr = err
+			}
 		}
-		value, err := ctx.resolve(expr)
-		if err != nil {
-			return "", err
-		}
-		out.WriteString(mockTemplateValueString(value))
-		last = match[1]
+		mockHook = templating.NewMockExpander(cfg)
 	}
-	out.WriteString(input[last:])
-	return out.String(), nil
+	rendered := templating.Render(input, templating.Resolver{
+		// Expand `{{$mock.*}}` first so each occurrence still produces an
+		// independent random value, matching the legacy two-pass pipeline
+		// (mockdata.Expand → request.* resolution).
+		Mock: mockHook,
+		Request: func(tok templating.Token) (string, bool) {
+			if resolveErr != nil {
+				return "", false
+			}
+			value, err := ctx.resolve(tok.Request.Key)
+			if err != nil {
+				resolveErr = err
+				return "", false
+			}
+			return mockTemplateValueString(value), true
+		},
+	})
+	if resolveErr != nil {
+		return "", resolveErr
+	}
+	return rendered, nil
 }
 
-func (ctx *mockResponseTemplateContext) resolve(expr string) (any, error) {
+// resolve looks up a single Mock-Server request reference. `key` is the
+// canonical body without the `request.` (or `$req.`) prefix, e.g.
+// `method`, `pathvar.id` or `body.user.name`.
+func (ctx *mockResponseTemplateContext) resolve(key string) (any, error) {
+	expr := "{{request." + key + "}}"
 	switch {
-	case expr == "request.method":
+	case key == "method":
 		return ctx.request.Method, nil
-	case expr == "request.path":
+	case key == "path":
 		return ctx.request.URL.Path, nil
-	case expr == "request.url":
+	case key == "url":
 		return ctx.request.URL.RequestURI(), nil
-	case expr == "request.body" || expr == "request.bodyRaw":
+	case key == "body" || key == "bodyRaw":
 		return string(ctx.body), nil
-	case strings.HasPrefix(expr, "request.pathvar."):
-		return ctx.resolvePathVar(strings.TrimPrefix(expr, "request.pathvar."), expr)
-	case strings.HasPrefix(expr, "request.path."):
-		return ctx.resolvePathVar(strings.TrimPrefix(expr, "request.path."), expr)
-	case strings.HasPrefix(expr, "request.query."):
-		return ctx.resolveQuery(strings.TrimPrefix(expr, "request.query."), expr)
-	case strings.HasPrefix(expr, "request.header."):
-		return ctx.resolveHeader(strings.TrimPrefix(expr, "request.header."), expr)
-	case strings.HasPrefix(expr, "request.body."):
-		return ctx.resolveBodyField(strings.TrimPrefix(expr, "request.body."), expr)
+	case strings.HasPrefix(key, "pathvar."):
+		return ctx.resolvePathVar(strings.TrimPrefix(key, "pathvar."), expr)
+	case strings.HasPrefix(key, "path."):
+		return ctx.resolvePathVar(strings.TrimPrefix(key, "path."), expr)
+	case strings.HasPrefix(key, "query."):
+		return ctx.resolveQuery(strings.TrimPrefix(key, "query."), expr)
+	case strings.HasPrefix(key, "header."):
+		return ctx.resolveHeader(strings.TrimPrefix(key, "header."), expr)
+	case strings.HasPrefix(key, "body."):
+		return ctx.resolveBodyField(strings.TrimPrefix(key, "body."), expr)
 	default:
 		return nil, fmt.Errorf("不支持的响应模板引用 %q", expr)
 	}
