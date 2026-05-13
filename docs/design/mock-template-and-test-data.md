@@ -1,0 +1,78 @@
+# Mock、模板变量与测试数据设计
+
+本文档记录 Mock Server、Mock Value Sets、运行时模拟标签、模板变量、SQL 参数源和测试数据表的业务设计。
+
+## Mock Server
+
+- 支持项目级 Mock Server。
+- 每个项目可维护多个 Mock Server 配置，按端口在主 API 进程内动态启动/停止独立 HTTP 服务。
+- Mock Server 规则包含方法、路径、优先级、启用状态、query/header/bodyContains/bodyJson 匹配条件及响应状态码、响应头、响应体、响应类型和延迟。
+- 规则响应体支持 Mustache 风格引用当前请求参数。
+- 运行中的 Mock 请求实时从数据库读取规则，以便编辑后立即生效。
+- Mock 服务提供基础 CORS 与 OPTIONS 预检支持。
+- 管理 API 读操作需项目 viewer 权限，新增、编辑、删除、启动和停止需 developer 权限。
+- Mock 规则列表提供复制、JSON 输入框失焦格式化、测试弹窗等能力。
+- 动态模板响应的自动响应校验应基于本次测试请求渲染后的期望响应执行。
+
+## Mock Value Sets
+
+- 平台支持「命名值集合（Mock Value Sets）」用于自定义运行时模拟标签取值池。
+- Mock Value Sets 为项目级管理，归「平台资源」分组。
+- 字段包含 `key`、`name`、`description`、`values: jsonb[]`、可选 `weights`。
+- `key` 项目内唯一，仅允许字母、数字、下划线、中划线。
+- 模板语法支持 `{{$mock.set.<key>}}`、`{{$mock.set.<key>[N]}}`、`{{$mock.set.<key>[*]}}`。
+- `[*]` 在 Runner 的单接口/场景一次 run 会话内顺序遍历不重复，并共享同一 run 的游标。
+- Mock Server 渲染响应时按每个 HTTP request 独立创建游标，因此同一 Mock Server 的不同请求之间不共享 `[*]` 计数。
+- `set` 仅一维数组语义，不支持过滤。
+- `$ds` / `$sql` 的过滤语法保持 `[col=val]` 不变。
+- 后端通过 `internal/mockset` 注入到 `internal/templating` 的 Mock resolver。
+- `internal/mockdata` 保持纯函数。
+- 内置业务 helper 与 set 并存，覆盖 idCard、plateNumber、bankCard、unifiedSocialCreditCode、sku 等。
+
+## 运行时模拟标签
+
+- 请求定义中的路径、查询参数、请求头、请求体字符串以及环境/请求变量值支持 Mustache 风格运行时数据模拟标签 `{{$mock.<helper>}}` 与 `{{$mock.<helper>(...)}}`。
+- Mock 标签每次请求渲染实时生成值。
+- 多次出现的 Mock 标签各自独立生成。
+- Mock 标签不写入用例快照模板。
+- helper 名大小写不敏感。
+- 参数支持单引号或双引号。
+- 未识别 helper 应保留原始标签字面量并视为错误。
+
+## 模板变量
+
+- 标签解析顺序为：模拟标签 → 步骤引用 → 测试数据/SQL 内联引用 → 普通变量。
+- 管理后台「平台资源」分组下提供「模板与变量参考」页面。
+- 模板与变量参考页集中说明环境变量、步骤引用、SQL 引用、测试数据引用、OpenAPI 路径参数、Mock 标签、Mock 响应模板等。
+- 平台内置命名空间统一约定为 `{{$<namespace>.<...>}}`。
+- 历史 `{{sql.*}}` / `{{request.*}}` 形式继续兼容但视为 deprecated。
+- 模板语法扫描、归一化与渲染由 `internal/templating` 统一负责。
+- 调用方禁止再维护各自正则。
+
+## SQL 参数源
+
+- 支持按项目维护业务数据源与 SQL 参数源。
+- 请求模板可通过 `{{$sql.<sourceKey>.<column>}}` 内联引用 SQL 查询结果。
+- 请求模板可通过过滤形式内联引用 SQL 查询结果。
+- 历史 `{{sql.*}}` 形式继续兼容但视为 deprecated，新文档和界面文案应使用 `{{$sql.*}}`。
+- Runner 执行前自动扫描并解析 SQL 引用。
+- 找不到来源、匹配行或列时返回明确错误。
+- 当前 SQL 参数源与脚本库 HTTP 接口主要依赖登录态和 `projectId` 参数区分项目，未像 Mock Server、Mock Value Sets、测试数据表一样统一挂项目角色中间件；涉及权限加固时需先确认是否改变现有访问模型。
+
+## 测试数据表
+
+- 支持项目级测试数据表。
+- 测试数据表由表、列、行组成。
+- 列生成方式包括手动输入、数据模拟函数、AI 生成。
+- 请求模板与场景 API 步骤支持 `{{$ds.<tableKey>.<col>}}` 与过滤形式内联测试数据引用。
+- Runner 执行前自动扫描并解析测试数据引用。
+- 找不到表、行或列时返回明确错误。
+- 测试数据表权限为 viewer 可读、developer 可写。
+- `GET /api/v1/test-data/mock-helpers` 复用 `internal/mockdata.ListHelpers()`。
+- 当前测试数据表页面会调用后端 helper 列表；模板与变量参考页主要使用前端静态 `templateTokens.js`，维护 helper 文案时需同步前后端。
+
+## AI 集成
+
+- `generate_params` 的 user context 自动带上当前项目所有 Mock Value Sets 摘要。
+- 系统提示要求模型对业务字段优先输出 `{{$mock.set.<key>}}`，避免编造。
+- 测试数据表的 AI 生成规则见 `docs/design/ai-capabilities.md`。

@@ -6,5 +6,10 @@ alwaysApply: true
 # Requirements Capture
 
 - Before implementing or changing project behavior, read `docs/requirements.md`.
-- When a new requirement, requirement change, or scope clarification appears, update `docs/requirements.md` in the same work before implementation continues.
-- Keep the requirements archive concise and preserve its existing structure.
+- `docs/requirements.md` is the business requirements index. Keep it concise and link to detailed design notes under `docs/design/*.md` when behavior needs more detail.
+- Capture only durable business requirements that affect product behavior, public/API contracts, permissions, persisted data, compatibility, or user-visible workflows.
+- Bug fixes, refactors, tests, implementation-detail confirmations, and temporary investigations do not automatically belong in the requirements archive; decide case by case based on whether they change durable business behavior.
+- When a new business requirement, requirement change, or scope clarification appears, update `docs/requirements.md` and the relevant `docs/design/*.md` in the same work before implementation continues.
+- If an existing requirement is deleted or changed, remove or rewrite stale/conflicting text instead of leaving obsolete requirements in place.
+- If requirements conflict or the desired behavior is ambiguous, stop and ask the user to decide before implementing.
+- Engineering conventions and agent behavior constraints belong in `.cursor/rules/*.mdc`, not in `docs/requirements.md`.
