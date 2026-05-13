@@ -39,7 +39,12 @@ func (h *Handler) Register(r chi.Router) {
 }
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
-	keys, err := h.svc.List(r.Context())
+	principal := auth.PrincipalFromContext(r.Context())
+	if principal == nil {
+		httpx.Error(w, http.StatusUnauthorized, errors.New("missing principal"))
+		return
+	}
+	keys, err := h.svc.List(r.Context(), principal.UserID)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, err)
 		return
@@ -67,6 +72,11 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
+	principal := auth.PrincipalFromContext(r.Context())
+	if principal == nil {
+		httpx.Error(w, http.StatusUnauthorized, errors.New("missing principal"))
+		return
+	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
 		httpx.Error(w, http.StatusBadRequest, err)
@@ -77,7 +87,7 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, err)
 		return
 	}
-	key, err := h.svc.Update(r.Context(), id, input)
+	key, err := h.svc.Update(r.Context(), principal.UserID, id, input)
 	if err != nil {
 		writeServiceErr(w, err)
 		return
@@ -86,12 +96,17 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) rotate(w http.ResponseWriter, r *http.Request) {
+	principal := auth.PrincipalFromContext(r.Context())
+	if principal == nil {
+		httpx.Error(w, http.StatusUnauthorized, errors.New("missing principal"))
+		return
+	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
 		httpx.Error(w, http.StatusBadRequest, err)
 		return
 	}
-	key, token, err := h.svc.Rotate(r.Context(), id)
+	key, token, err := h.svc.Rotate(r.Context(), principal.UserID, id)
 	if err != nil {
 		writeServiceErr(w, err)
 		return
@@ -100,12 +115,17 @@ func (h *Handler) rotate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
+	principal := auth.PrincipalFromContext(r.Context())
+	if principal == nil {
+		httpx.Error(w, http.StatusUnauthorized, errors.New("missing principal"))
+		return
+	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
 		httpx.Error(w, http.StatusBadRequest, err)
 		return
 	}
-	if err := h.svc.Delete(r.Context(), id); err != nil {
+	if err := h.svc.Delete(r.Context(), principal.UserID, id); err != nil {
 		writeServiceErr(w, err)
 		return
 	}

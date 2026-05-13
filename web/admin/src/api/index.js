@@ -176,7 +176,7 @@ export const setRolePermissions = (id, data) => request.put(`/roles/${id}/permis
 export const listPermissions = () => request.get('/permissions')
 export const createPermission = (data) => request.post('/permissions', data)
 
-// API Keys（仅 admin/具备 apikeys:manage 权限可用；明文 token 仅在创建响应里返回一次）
+// API Keys（需 apikeys:manage；列表与变更仅针对当前用户本人创建的 Key；明文 token 仅在创建/重置响应里返回一次）
 export const listApiKeys = () => request.get('/api-keys').then(asList)
 export const createApiKey = (data) => request.post('/api-keys', data)
 export const updateApiKey = (id, data) => request.patch(`/api-keys/${id}`, data)

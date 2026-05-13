@@ -96,8 +96,8 @@ func (r *Repository) Get(ctx context.Context, id uuid.UUID) (*record, error) {
 	return out, nil
 }
 
-// List 返回未软删的全部 API Key，最近创建在前；附带创建者展示名以便前端展示。
-func (r *Repository) List(ctx context.Context) ([]record, error) {
+// List 返回指定用户创建的、未软删的 API Key，最近创建在前；附带创建者展示名以便前端展示。
+func (r *Repository) List(ctx context.Context, createdBy uuid.UUID) ([]record, error) {
 	if r.DB == nil {
 		return nil, fmt.Errorf("database unavailable")
 	}
@@ -108,9 +108,9 @@ func (r *Repository) List(ctx context.Context) ([]record, error) {
 		       coalesce(nullif(u.display_name, ''), u.username, '')
 		from api_keys k
 		left join users u on u.id = k.created_by
-		where k.deleted_at is null
+		where k.deleted_at is null and k.created_by = $1
 		order by k.created_at desc
-	`)
+	`, createdBy)
 	if err != nil {
 		return nil, fmt.Errorf("查询 API Key 列表失败: %w", err)
 	}
@@ -150,7 +150,7 @@ type updatePatch struct {
 	ClearExpires bool
 }
 
-func (r *Repository) update(ctx context.Context, id uuid.UUID, patch updatePatch) (*record, error) {
+func (r *Repository) update(ctx context.Context, id uuid.UUID, owner uuid.UUID, patch updatePatch) (*record, error) {
 	if r.DB == nil {
 		return nil, fmt.Errorf("database unavailable")
 	}
@@ -164,11 +164,11 @@ func (r *Repository) update(ctx context.Context, id uuid.UUID, patch updatePatch
 		        else expires_at
 		    end,
 		    updated_at = now()
-		where id = $1 and deleted_at is null
+		where id = $1 and deleted_at is null and created_by = $6
 		returning id, name, token_hash, token_prefix, token_suffix,
 		          scopes, created_by, enabled, expires_at, last_used_at,
 		          created_at, updated_at
-	`, id, patch.Name, patch.Enabled, patch.ExpiresAt, patch.ClearExpires)
+	`, id, patch.Name, patch.Enabled, patch.ExpiresAt, patch.ClearExpires, owner)
 	out, err := scanRecord(row)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -185,22 +185,22 @@ func (r *Repository) update(ctx context.Context, id uuid.UUID, patch updatePatch
 // Rotate 在一次原子 UPDATE 中替换 token_hash / token_prefix / token_suffix 并清空
 // last_used_at；name / scopes / enabled / expires_at 保持不变。原 token 在 hash 被替换
 // 后立即不再匹配 GetByHash，从而失效。
-func (r *Repository) Rotate(ctx context.Context, id uuid.UUID, hash, prefix, suffix string) (*record, error) {
+func (r *Repository) Rotate(ctx context.Context, id uuid.UUID, owner uuid.UUID, hash, prefix, suffix string) (*record, error) {
 	if r.DB == nil {
 		return nil, fmt.Errorf("database unavailable")
 	}
 	row := r.DB.QueryRow(ctx, `
 		update api_keys
-		set token_hash   = $2,
-		    token_prefix = $3,
-		    token_suffix = $4,
+		set token_hash   = $3,
+		    token_prefix = $4,
+		    token_suffix = $5,
 		    last_used_at = null,
 		    updated_at   = now()
-		where id = $1 and deleted_at is null
+		where id = $1 and deleted_at is null and created_by = $2
 		returning id, name, token_hash, token_prefix, token_suffix,
 		          scopes, created_by, enabled, expires_at, last_used_at,
 		          created_at, updated_at
-	`, id, hash, prefix, suffix)
+	`, id, owner, hash, prefix, suffix)
 	out, err := scanRecord(row)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -216,15 +216,15 @@ func (r *Repository) Rotate(ctx context.Context, id uuid.UUID, hash, prefix, suf
 
 // SoftDelete 标记 deleted_at 为 now()；token_hash 唯一索引带有 where deleted_at is null，
 // 故同 hash 复用不会冲突（虽然实际上 token 是随机生成，碰撞概率可忽略）。
-func (r *Repository) SoftDelete(ctx context.Context, id uuid.UUID) error {
+func (r *Repository) SoftDelete(ctx context.Context, id uuid.UUID, owner uuid.UUID) error {
 	if r.DB == nil {
 		return fmt.Errorf("database unavailable")
 	}
 	tag, err := r.DB.Exec(ctx, `
 		update api_keys
 		set deleted_at = now(), enabled = false, updated_at = now()
-		where id = $1 and deleted_at is null
-	`, id)
+		where id = $1 and deleted_at is null and created_by = $2
+	`, id, owner)
 	if err != nil {
 		return fmt.Errorf("软删除 API Key 失败: %w", err)
 	}

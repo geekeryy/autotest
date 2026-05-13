@@ -22,10 +22,10 @@ type repositoryBackend interface {
 	Create(ctx context.Context, rec record) (*record, error)
 	GetByHash(ctx context.Context, tokenHash string) (*record, error)
 	Get(ctx context.Context, id uuid.UUID) (*record, error)
-	List(ctx context.Context) ([]record, error)
-	update(ctx context.Context, id uuid.UUID, patch updatePatch) (*record, error)
-	Rotate(ctx context.Context, id uuid.UUID, hash, prefix, suffix string) (*record, error)
-	SoftDelete(ctx context.Context, id uuid.UUID) error
+	List(ctx context.Context, createdBy uuid.UUID) ([]record, error)
+	update(ctx context.Context, id uuid.UUID, owner uuid.UUID, patch updatePatch) (*record, error)
+	Rotate(ctx context.Context, id uuid.UUID, owner uuid.UUID, hash, prefix, suffix string) (*record, error)
+	SoftDelete(ctx context.Context, id uuid.UUID, owner uuid.UUID) error
 	TouchLastUsed(ctx context.Context, id uuid.UUID, at time.Time) error
 }
 
@@ -101,9 +101,9 @@ func (s *Service) Create(ctx context.Context, createdBy uuid.UUID, input CreateI
 	return &CreateResult{APIKey: saved.toAPI(), Token: token}, nil
 }
 
-// List 返回未软删的 API Key（不含明文，仅含 mask 视图）。
-func (s *Service) List(ctx context.Context) ([]APIKey, error) {
-	rows, err := s.repo.List(ctx)
+// List 返回当前用户创建的、未软删的 API Key（不含明文，仅含 mask 视图）。
+func (s *Service) List(ctx context.Context, owner uuid.UUID) ([]APIKey, error) {
+	rows, err := s.repo.List(ctx, owner)
 	if err != nil {
 		return nil, err
 	}
@@ -116,7 +116,8 @@ func (s *Service) List(ctx context.Context) ([]APIKey, error) {
 
 // Update 修改 API Key 的名称、启用状态或过期时间；nil 字段保留原值，
 // ClearExpiresAt=true 时显式将 expires_at 置空（与 ExpiresAt nil 的"不变更"语义区分）。
-func (s *Service) Update(ctx context.Context, id uuid.UUID, input UpdateInput) (*APIKey, error) {
+// 仅允许更新 owner 本人创建的 Key，否则返回 ErrNotFound。
+func (s *Service) Update(ctx context.Context, owner uuid.UUID, id uuid.UUID, input UpdateInput) (*APIKey, error) {
 	patch := updatePatch{
 		Enabled:      input.Enabled,
 		ExpiresAt:    input.ExpiresAt,
@@ -133,7 +134,7 @@ func (s *Service) Update(ctx context.Context, id uuid.UUID, input UpdateInput) (
 		return nil, errors.New("过期时间必须晚于当前时间")
 	}
 
-	saved, err := s.repo.update(ctx, id, patch)
+	saved, err := s.repo.update(ctx, id, owner, patch)
 	if err != nil {
 		return nil, err
 	}
@@ -142,15 +143,16 @@ func (s *Service) Update(ctx context.Context, id uuid.UUID, input UpdateInput) (
 }
 
 // Delete 软删除一条 API Key，删除后即使保留 token 也无法再通过校验。
-func (s *Service) Delete(ctx context.Context, id uuid.UUID) error {
-	return s.repo.SoftDelete(ctx, id)
+// 仅允许删除 owner 本人创建的 Key，否则返回 ErrNotFound。
+func (s *Service) Delete(ctx context.Context, owner uuid.UUID, id uuid.UUID) error {
+	return s.repo.SoftDelete(ctx, id, owner)
 }
 
 // Rotate 为指定 API Key 重新生成一组 token，并使用同一次 UPDATE 替换 hash / 前后缀掩码、
 // 清空 last_used_at；name / scopes / enabled / expires_at 保持不变。
 // 明文 token 仅作为返回值一次性下发，库内仅留 SHA-256 哈希，原 token 即刻失效。
-// 找不到记录或已软删时返回 ErrNotFound（与现有 NotFound 错误风格一致，由 handler 转 404）。
-func (s *Service) Rotate(ctx context.Context, id uuid.UUID) (*APIKey, string, error) {
+// 找不到记录、已软删或非本人创建时返回 ErrNotFound（由 handler 转 404）。
+func (s *Service) Rotate(ctx context.Context, owner uuid.UUID, id uuid.UUID) (*APIKey, string, error) {
 	if id == uuid.Nil {
 		return nil, "", ErrNotFound
 	}
@@ -158,7 +160,7 @@ func (s *Service) Rotate(ctx context.Context, id uuid.UUID) (*APIKey, string, er
 	if err != nil {
 		return nil, "", err
 	}
-	saved, err := s.repo.Rotate(ctx, id, hashHex, prefix, suffix)
+	saved, err := s.repo.Rotate(ctx, id, owner, hashHex, prefix, suffix)
 	if err != nil {
 		return nil, "", err
 	}

@@ -6,9 +6,48 @@
     </div>
 
     <p class="page-hint">
-      API Key 用于 CI/CD 等外部系统调用平台接口，调用方式：<code>Authorization: Bearer at-...</code>。当前阶段仅允许调用
-      OpenAPI/Swagger 导入接口（scope = <code>specs:import</code>），其他接口拒绝。
+      API Key 归属<strong>当前登录用户</strong>：列表与编辑、重置、删除仅针对您本人创建的 Key，调用时平台以该用户权限校验（scope =
+      <code>specs:import</code>）。使用方式：<code>Authorization: Bearer at-...</code>；当前阶段仅允许 OpenAPI/Swagger 导入接口，其余接口拒绝。
     </p>
+
+    <el-card shadow="never" class="example-card">
+      <template #header>
+        <span class="example-card-title">OpenAPI/Swagger 导入调用示例</span>
+      </template>
+      <p class="example-intro">
+        下方命令中的 <code>YOUR_AT_TOKEN</code> 请替换为「新增」或「重置」后在弹窗里复制的完整 <code>at-...</code>
+        令牌（与重置弹窗分离，便于先保存令牌再对照示例）。
+      </p>
+      <div class="example-selectors">
+        <el-select
+          v-model="exampleProjectId"
+          placeholder="选择项目"
+          filterable
+          style="flex: 1"
+          @change="onExampleProjectChange"
+        >
+          <el-option v-for="p in exampleProjects" :key="p.id" :label="p.name" :value="p.id" />
+        </el-select>
+        <el-select
+          v-model="exampleServiceId"
+          placeholder="选择服务"
+          filterable
+          style="flex: 1"
+          :disabled="!exampleProjectId"
+        >
+          <el-option v-for="s in exampleServices" :key="s.id" :label="s.name" :value="s.id" />
+        </el-select>
+      </div>
+      <div class="curl-header">
+        <span class="token-tip" style="margin: 0">示例命令：</span>
+        <el-radio-group v-model="exampleFormat" size="small">
+          <el-radio-button value="json">JSON</el-radio-button>
+          <el-radio-button value="yaml">YAML</el-radio-button>
+        </el-radio-group>
+        <el-button v-if="importCurlExample" type="primary" size="small" link @click="copyImportCurl">复制命令</el-button>
+      </div>
+      <pre class="token-curl"><code>{{ importCurlExample || '请先选择项目和服务' }}</code></pre>
+    </el-card>
 
     <el-table v-loading="loading" :data="apiKeys" border>
       <el-table-column prop="name" label="备注名" min-width="160" />
@@ -22,7 +61,6 @@
           <el-tag v-for="scope in row.scopes || []" :key="scope" size="small" type="info">{{ scope }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="creatorName" label="创建者" width="120" />
       <el-table-column label="启用" width="80">
         <template #default="{ row }">
           <el-switch
@@ -88,11 +126,11 @@
       </template>
     </el-dialog>
 
-    <!-- 一次性明文 token 展示弹窗（创建与重置共用） -->
+    <!-- 一次性明文 token 展示弹窗（创建与重置）：仅展示令牌，不含调用示例 -->
     <el-dialog
       v-model="tokenDialogVisible"
       :title="tokenDialogTitle"
-      width="540px"
+      width="480px"
       :close-on-click-modal="false"
       :close-on-press-escape="false"
       :show-close="false"
@@ -103,8 +141,7 @@
         <code class="token-plain">{{ createdToken }}</code>
         <el-button type="primary" size="small" @click="copyToken">复制</el-button>
       </div>
-      <p class="token-tip">调用示例：</p>
-      <pre class="token-curl"><code>curl -H "Authorization: Bearer {{ createdToken }}" ...</code></pre>
+      <p class="token-tip muted">导入接口的 curl 示例见页面上方「OpenAPI/Swagger 导入调用示例」。</p>
       <template #footer>
         <el-button type="primary" @click="tokenDialogVisible = false">我已复制保存，关闭</el-button>
       </template>
@@ -115,7 +152,7 @@
 <script>
 import { ElMessage, ElMessageBox } from 'element-plus'
 
-import { createApiKey, deleteApiKey, listApiKeys, rotateApiKey, updateApiKey } from '../../api'
+import { createApiKey, deleteApiKey, listApiKeys, listProjects, listServices, rotateApiKey, updateApiKey } from '../../api'
 import { formatDateTime } from '../../utils/datetime'
 
 export default {
@@ -130,11 +167,32 @@ export default {
       form: this.emptyForm(),
       tokenDialogVisible: false,
       tokenDialogTitle: 'API Key 创建成功',
-      createdToken: ''
+      createdToken: '',
+      exampleProjects: [],
+      exampleServices: [],
+      exampleProjectId: '',
+      exampleServiceId: '',
+      exampleFormat: 'json'
     }
   },
   created() {
     this.load()
+    this.loadExampleProjects()
+  },
+  computed: {
+    importCurlExample() {
+      if (!this.exampleProjectId || !this.exampleServiceId) return ''
+      const origin = window.location.origin
+      const isJson = this.exampleFormat === 'json'
+      const contentType = isJson ? 'application/json' : 'application/yaml'
+      const fileName = isJson ? 'openapi.json' : 'openapi.yaml'
+      return [
+        `curl -X POST "${origin}/api/v1/projects/${this.exampleProjectId}/services/${this.exampleServiceId}/specs/import" \\`,
+        `  -H "Authorization: Bearer YOUR_AT_TOKEN" \\`,
+        `  -H "Content-Type: ${contentType}" \\`,
+        `  -d @${fileName}`
+      ].join('\n')
+    }
   },
   methods: {
     formatDateTime,
@@ -300,6 +358,51 @@ export default {
         return false
       }
     },
+    async loadExampleProjects() {
+      try {
+        this.exampleProjects = await listProjects()
+        if (this.exampleProjects.length > 0) {
+          this.exampleProjectId = this.exampleProjects[0].id
+          await this.loadExampleServices(this.exampleProjectId)
+        }
+      } catch {
+        // 静默失败，不影响主流程
+      }
+    },
+    async loadExampleServices(projectId) {
+      this.exampleServiceId = ''
+      this.exampleServices = []
+      if (!projectId) return
+      try {
+        this.exampleServices = await listServices(projectId)
+        if (this.exampleServices.length > 0) {
+          this.exampleServiceId = this.exampleServices[0].id
+        }
+      } catch {
+        // 静默失败
+      }
+    },
+    async onExampleProjectChange(projectId) {
+      await this.loadExampleServices(projectId)
+    },
+    async copyImportCurl() {
+      const text = this.importCurlExample
+      if (!text) return
+      try {
+        if (navigator.clipboard && window.isSecureContext) {
+          await navigator.clipboard.writeText(text)
+          ElMessage.success('已复制到剪贴板')
+          return
+        }
+      } catch {
+        // 落入兜底
+      }
+      if (this.legacyCopy(text)) {
+        ElMessage.success('已复制到剪贴板')
+      } else {
+        ElMessage.error('复制失败，请手动选中复制')
+      }
+    },
     onTokenDialogClose() {
       this.createdToken = ''
       this.load()
@@ -314,6 +417,34 @@ export default {
   color: var(--app-secondary-text);
   font-size: var(--app-font-size-small);
   line-height: 1.6;
+}
+
+.example-card {
+  margin-bottom: 16px;
+  border: 1px solid var(--app-border-color);
+}
+
+.example-card :deep(.el-card__header) {
+  padding: 10px 16px;
+}
+
+.example-card-title {
+  font-weight: 600;
+  font-size: var(--app-font-size-base);
+}
+
+.example-intro {
+  margin: 0 0 12px;
+  color: var(--app-secondary-text);
+  font-size: var(--app-font-size-small);
+  line-height: 1.6;
+}
+
+.example-intro code {
+  background: var(--el-fill-color-light);
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 12px;
 }
 
 .page-hint code {
@@ -379,5 +510,20 @@ export default {
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-all;
+}
+
+.example-selectors {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.curl-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 </style>

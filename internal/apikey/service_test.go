@@ -80,21 +80,23 @@ func (f *fakeRepo) Get(_ context.Context, id uuid.UUID) (*record, error) {
 	return &out, nil
 }
 
-func (f *fakeRepo) List(_ context.Context) ([]record, error) {
+func (f *fakeRepo) List(_ context.Context, owner uuid.UUID) ([]record, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	out := make([]record, 0, len(f.byID))
+	out := make([]record, 0)
 	for _, rec := range f.byID {
-		out = append(out, *rec)
+		if rec.CreatedBy == owner {
+			out = append(out, *rec)
+		}
 	}
 	return out, nil
 }
 
-func (f *fakeRepo) update(_ context.Context, id uuid.UUID, patch updatePatch) (*record, error) {
+func (f *fakeRepo) update(_ context.Context, id uuid.UUID, owner uuid.UUID, patch updatePatch) (*record, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	rec, ok := f.byID[id]
-	if !ok {
+	if !ok || rec.CreatedBy != owner {
 		return nil, ErrNotFound
 	}
 	if patch.Name != nil {
@@ -115,11 +117,11 @@ func (f *fakeRepo) update(_ context.Context, id uuid.UUID, patch updatePatch) (*
 	return &out, nil
 }
 
-func (f *fakeRepo) Rotate(_ context.Context, id uuid.UUID, hash, prefix, suffix string) (*record, error) {
+func (f *fakeRepo) Rotate(_ context.Context, id uuid.UUID, owner uuid.UUID, hash, prefix, suffix string) (*record, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	rec, ok := f.byID[id]
-	if !ok {
+	if !ok || rec.CreatedBy != owner {
 		return nil, ErrNotFound
 	}
 	delete(f.byHash, rec.TokenHash)
@@ -133,11 +135,11 @@ func (f *fakeRepo) Rotate(_ context.Context, id uuid.UUID, hash, prefix, suffix 
 	return &out, nil
 }
 
-func (f *fakeRepo) SoftDelete(_ context.Context, id uuid.UUID) error {
+func (f *fakeRepo) SoftDelete(_ context.Context, id uuid.UUID, owner uuid.UUID) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	rec, ok := f.byID[id]
-	if !ok {
+	if !ok || rec.CreatedBy != owner {
 		return ErrNotFound
 	}
 	delete(f.byHash, rec.TokenHash)
@@ -388,7 +390,7 @@ func TestServiceAuthenticate(t *testing.T) {
 				tc.mutate(rec)
 			}
 			if tc.name == "soft-deleted returns ErrTokenInvalid" {
-				if err := repo.SoftDelete(context.Background(), created.APIKey.ID); err != nil {
+				if err := repo.SoftDelete(context.Background(), created.APIKey.ID, creator); err != nil {
 					t.Fatalf("seed SoftDelete: %v", err)
 				}
 			}
@@ -449,7 +451,7 @@ func TestServiceUpdateAndDelete(t *testing.T) {
 
 	disabled := false
 	newName := "renamed"
-	updated, err := svc.Update(context.Background(), created.APIKey.ID, UpdateInput{Name: &newName, Enabled: &disabled})
+	updated, err := svc.Update(context.Background(), creator, created.APIKey.ID, UpdateInput{Name: &newName, Enabled: &disabled})
 	if err != nil {
 		t.Fatalf("Update: %v", err)
 	}
@@ -457,7 +459,7 @@ func TestServiceUpdateAndDelete(t *testing.T) {
 		t.Fatalf("更新结果异常: %+v", updated)
 	}
 
-	if err := svc.Delete(context.Background(), created.APIKey.ID); err != nil {
+	if err := svc.Delete(context.Background(), creator, created.APIKey.ID); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 	if _, err := svc.Authenticate(context.Background(), created.Token); !errors.Is(err, ErrTokenInvalid) {
@@ -504,7 +506,7 @@ func TestServiceRotate(t *testing.T) {
 		t.Fatalf("seed: 期望 last_used_at 已被刷新，实际为空")
 	}
 
-	rotated, newToken, err := svc.Rotate(context.Background(), created.APIKey.ID)
+	rotated, newToken, err := svc.Rotate(context.Background(), creator, created.APIKey.ID)
 	if err != nil {
 		t.Fatalf("Rotate: %v", err)
 	}
@@ -549,7 +551,48 @@ func TestServiceRotate(t *testing.T) {
 		t.Fatalf("principal.UserID 异常: got %s want %s", principal.UserID, creator)
 	}
 
-	if _, _, err := svc.Rotate(context.Background(), uuid.New()); !errors.Is(err, ErrNotFound) {
+	if _, _, err := svc.Rotate(context.Background(), creator, uuid.New()); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("rotate 不存在的 id 应返回 ErrNotFound，实际 %v", err)
+	}
+}
+
+func TestServiceListAndMutateScopedToOwner(t *testing.T) {
+	t.Parallel()
+
+	alice := uuid.New()
+	bob := uuid.New()
+	repo := newFakeRepo()
+	users := &fakeUserLoader{users: map[uuid.UUID]*auth.User{
+		alice: {ID: alice, Username: "alice", Active: true},
+		bob:   {ID: bob, Username: "bob", Active: true},
+	}}
+	svc := newServiceForTests(repo, users, time.Now)
+
+	aKey, err := svc.Create(context.Background(), alice, CreateInput{Name: "a-ci"})
+	if err != nil {
+		t.Fatalf("Create alice: %v", err)
+	}
+	_, err = svc.Create(context.Background(), bob, CreateInput{Name: "b-ci"})
+	if err != nil {
+		t.Fatalf("Create bob: %v", err)
+	}
+
+	aliceList, err := svc.List(context.Background(), alice)
+	if err != nil {
+		t.Fatalf("List alice: %v", err)
+	}
+	if len(aliceList) != 1 || aliceList[0].ID != aKey.APIKey.ID {
+		t.Fatalf("alice 应只看到 1 条自己的 Key: %#v", aliceList)
+	}
+
+	wrongName := "hijack"
+	if _, err := svc.Update(context.Background(), bob, aKey.APIKey.ID, UpdateInput{Name: &wrongName}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("bob 更新 alice 的 Key 应 ErrNotFound，实际 %v", err)
+	}
+	if _, _, err := svc.Rotate(context.Background(), bob, aKey.APIKey.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("bob 重置 alice 的 Key 应 ErrNotFound，实际 %v", err)
+	}
+	if err := svc.Delete(context.Background(), bob, aKey.APIKey.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("bob 删除 alice 的 Key 应 ErrNotFound，实际 %v", err)
 	}
 }
