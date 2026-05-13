@@ -31,7 +31,7 @@ type Service struct {
 // mockSetService 是 runner 解析 `{{$mock.set.<key>}}` 所需的 `mockset.Service`
 // 子集；定义在调用方以便测试时注入 fake，且避免 runner 直接依赖 mockset 包。
 type mockSetService interface {
-	Lookup(ctx context.Context, projectID uuid.UUID, key string) (values []string, weights []float64, ok bool)
+	Lookup(ctx context.Context, projectID uuid.UUID, key string) (values []json.RawMessage, weights []float64, ok bool)
 }
 
 type parameterSourceService interface {
@@ -91,7 +91,7 @@ func (s *Service) buildRunMockConfig(projectID uuid.UUID) *templating.MockExpand
 	if s.mockSets == nil {
 		return nil
 	}
-	resolver := templating.MockSetResolverFunc(func(key string) ([]string, []float64, bool) {
+	resolver := templating.MockSetResolverFunc(func(key string) ([]json.RawMessage, []float64, bool) {
 		return s.mockSets.Lookup(context.Background(), projectID, key)
 	})
 	return &templating.MockExpanderConfig{

@@ -1,6 +1,7 @@
 package templating
 
 import (
+	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
@@ -317,6 +318,19 @@ func TestRenderRequestHookResolves(t *testing.T) {
 	}
 }
 
+// mockSetJSONStrings 将若干 Go 字符串值编码为 JSON 数组元素（每项为 JSON 字符串）。
+func mockSetJSONStrings(ss ...string) []json.RawMessage {
+	out := make([]json.RawMessage, 0, len(ss))
+	for _, s := range ss {
+		b, err := json.Marshal(s)
+		if err != nil {
+			panic(err)
+		}
+		out = append(out, b)
+	}
+	return out
+}
+
 func TestTokenizeMockSetSyntax(t *testing.T) {
 	t.Parallel()
 
@@ -359,11 +373,11 @@ func TestTokenizeMockSetSyntax(t *testing.T) {
 func TestRenderMockSetRandom(t *testing.T) {
 	t.Parallel()
 
-	resolver := MockSetResolverFunc(func(key string) ([]string, []float64, bool) {
+	resolver := MockSetResolverFunc(func(key string) ([]json.RawMessage, []float64, bool) {
 		if key != "colors" {
 			return nil, nil, false
 		}
-		return []string{"red", "green", "blue"}, nil, true
+		return mockSetJSONStrings("red", "green", "blue"), nil, true
 	})
 	hook := NewMockExpander(MockExpanderConfig{Sets: resolver})
 	got := Render("color={{$mock.set.colors}}", Resolver{Mock: hook})
@@ -385,8 +399,8 @@ func TestRenderMockSetRandom(t *testing.T) {
 func TestRenderMockSetIndex(t *testing.T) {
 	t.Parallel()
 
-	resolver := MockSetResolverFunc(func(key string) ([]string, []float64, bool) {
-		return []string{"red", "green", "blue"}, nil, true
+	resolver := MockSetResolverFunc(func(key string) ([]json.RawMessage, []float64, bool) {
+		return mockSetJSONStrings("red", "green", "blue"), nil, true
 	})
 	hook := NewMockExpander(MockExpanderConfig{Sets: resolver})
 	if got := Render("{{$mock.set.colors[1]}}", Resolver{Mock: hook}); got != "green" {
@@ -397,8 +411,8 @@ func TestRenderMockSetIndex(t *testing.T) {
 func TestRenderMockSetIndexOutOfRangePreservesToken(t *testing.T) {
 	t.Parallel()
 
-	resolver := MockSetResolverFunc(func(key string) ([]string, []float64, bool) {
-		return []string{"red"}, nil, true
+	resolver := MockSetResolverFunc(func(key string) ([]json.RawMessage, []float64, bool) {
+		return mockSetJSONStrings("red"), nil, true
 	})
 	var captured []string
 	hook := NewMockExpander(MockExpanderConfig{
@@ -435,7 +449,7 @@ func TestRenderMockSetMissingResolverReportsError(t *testing.T) {
 func TestRenderMockSetMissingSet(t *testing.T) {
 	t.Parallel()
 
-	resolver := MockSetResolverFunc(func(key string) ([]string, []float64, bool) {
+	resolver := MockSetResolverFunc(func(key string) ([]json.RawMessage, []float64, bool) {
 		return nil, nil, false
 	})
 	var captured []string
@@ -455,8 +469,8 @@ func TestRenderMockSetMissingSet(t *testing.T) {
 func TestRenderMockSetSequentialAdvancesCursor(t *testing.T) {
 	t.Parallel()
 
-	resolver := MockSetResolverFunc(func(key string) ([]string, []float64, bool) {
-		return []string{"a", "b", "c"}, nil, true
+	resolver := MockSetResolverFunc(func(key string) ([]json.RawMessage, []float64, bool) {
+		return mockSetJSONStrings("a", "b", "c"), nil, true
 	})
 	cursors := map[string]*int{}
 	hook := NewMockExpander(MockExpanderConfig{Sets: resolver, Cursors: cursors})
@@ -475,8 +489,8 @@ func TestRenderMockSetSequentialAdvancesCursor(t *testing.T) {
 func TestRenderMockSetWeightsBiasDistribution(t *testing.T) {
 	t.Parallel()
 
-	resolver := MockSetResolverFunc(func(key string) ([]string, []float64, bool) {
-		return []string{"red", "green", "blue"}, []float64{99, 0, 0}, true
+	resolver := MockSetResolverFunc(func(key string) ([]json.RawMessage, []float64, bool) {
+		return mockSetJSONStrings("red", "green", "blue"), []float64{99, 0, 0}, true
 	})
 	hook := NewMockExpander(MockExpanderConfig{Sets: resolver})
 	for i := 0; i < 30; i++ {
@@ -484,6 +498,29 @@ func TestRenderMockSetWeightsBiasDistribution(t *testing.T) {
 		if got != "red" {
 			t.Fatalf("expected red bias, got %q on iteration %d", got, i)
 		}
+	}
+}
+
+func TestRenderMockSetIndexJSONCompact(t *testing.T) {
+	t.Parallel()
+
+	obj := map[string]any{"a": 1, "b": "x"}
+	rawObj, err := json.Marshal(obj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolver := MockSetResolverFunc(func(key string) ([]json.RawMessage, []float64, bool) {
+		return []json.RawMessage{
+			rawObj,
+			json.RawMessage(`null`),
+		}, nil, true
+	})
+	hook := NewMockExpander(MockExpanderConfig{Sets: resolver})
+	if got := Render("{{$mock.set.t[0]}}", Resolver{Mock: hook}); got != `{"a":1,"b":"x"}` {
+		t.Fatalf("object: got %q", got)
+	}
+	if got := Render("{{$mock.set.t[1]}}", Resolver{Mock: hook}); got != "null" {
+		t.Fatalf("null: got %q", got)
 	}
 }
 

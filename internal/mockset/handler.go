@@ -148,6 +148,10 @@ func writeServiceError(w http.ResponseWriter, err error) {
 		errors.Is(err, ErrInvalidName),
 		errors.Is(err, ErrEmptyValues),
 		errors.Is(err, ErrEmptyValueEntry),
+		errors.Is(err, ErrValueNotValidJSON),
+		errors.Is(err, ErrValueExtraJSON),
+		errors.Is(err, ErrValueDepthExceeded),
+		errors.Is(err, ErrValueTooManyNodes),
 		errors.Is(err, ErrWeightsLengthMismatch),
 		errors.Is(err, ErrNegativeWeight):
 		httpx.Error(w, http.StatusBadRequest, err)

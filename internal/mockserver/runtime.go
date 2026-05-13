@@ -23,7 +23,7 @@ const stopTimeout = 5 * time.Second
 // resolve `{{$mock.set.<key>}}` family tokens inside mock response bodies.
 // Defined locally to avoid an import cycle and to keep the runtime testable.
 type MockSetService interface {
-	Lookup(ctx context.Context, projectID uuid.UUID, key string) (values []string, weights []float64, ok bool)
+	Lookup(ctx context.Context, projectID uuid.UUID, key string) (values []json.RawMessage, weights []float64, ok bool)
 }
 
 // Runtime manages in-process HTTP servers for mock server configurations.
@@ -194,7 +194,7 @@ func (rt *Runtime) buildRequestMockConfig(projectID uuid.UUID) *templating.MockE
 	if rt.mockSets == nil {
 		return nil
 	}
-	resolver := templating.MockSetResolverFunc(func(key string) ([]string, []float64, bool) {
+	resolver := templating.MockSetResolverFunc(func(key string) ([]json.RawMessage, []float64, bool) {
 		return rt.mockSets.Lookup(context.Background(), projectID, key)
 	})
 	return &templating.MockExpanderConfig{

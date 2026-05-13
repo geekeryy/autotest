@@ -1,7 +1,10 @@
 package templating
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"io"
 	"math/rand"
 	"strings"
 
@@ -16,14 +19,14 @@ import (
 // NewMockExpander) so the runner can fail the request rather than silently
 // producing an empty string.
 type MockSetResolver interface {
-	Lookup(key string) (values []string, weights []float64, ok bool)
+	Lookup(key string) (values []json.RawMessage, weights []float64, ok bool)
 }
 
 // MockSetResolverFunc adapts a plain function into a MockSetResolver.
-type MockSetResolverFunc func(key string) (values []string, weights []float64, ok bool)
+type MockSetResolverFunc func(key string) (values []json.RawMessage, weights []float64, ok bool)
 
 // Lookup implements MockSetResolver.
-func (f MockSetResolverFunc) Lookup(key string) ([]string, []float64, bool) {
+func (f MockSetResolverFunc) Lookup(key string) ([]json.RawMessage, []float64, bool) {
 	return f(key)
 }
 
@@ -67,30 +70,37 @@ func NewMockExpander(cfg MockExpanderConfig) func(Token) (string, bool) {
 			cfg.report(fmt.Errorf("运行时 mock 集合 %q 未配置或值为空", set.Key))
 			return "", false
 		}
+		var raw json.RawMessage
 		switch set.Mode {
 		case MockSetModeIndex:
 			if set.Index < 0 || set.Index >= len(values) {
 				cfg.report(fmt.Errorf("运行时 mock 集合 %q 索引 [%d] 越界（共 %d 项）", set.Key, set.Index, len(values)))
 				return "", false
 			}
-			return values[set.Index], true
+			raw = values[set.Index]
 		case MockSetModeSequential:
 			if cfg.Cursors == nil {
 				cfg.report(fmt.Errorf("运行时 mock 集合 %q 顺序模式 [*] 缺少 run 上下文，已退化为随机抽样", set.Key))
-				return pickWeighted(values, weights), true
+				raw = pickWeightedRaw(values, weights)
+			} else {
+				cur, ok := cfg.Cursors[set.Key]
+				if !ok {
+					idx := 0
+					cfg.Cursors[set.Key] = &idx
+					cur = &idx
+				}
+				raw = values[*cur%len(values)]
+				*cur++
 			}
-			cur, ok := cfg.Cursors[set.Key]
-			if !ok {
-				idx := 0
-				cfg.Cursors[set.Key] = &idx
-				cur = &idx
-			}
-			value := values[*cur%len(values)]
-			*cur++
-			return value, true
 		default:
-			return pickWeighted(values, weights), true
+			raw = pickWeightedRaw(values, weights)
 		}
+		out, err := FormatMockSetPlaceholderValue(raw)
+		if err != nil {
+			cfg.report(fmt.Errorf("运行时 mock 集合 %q 取值编码失败: %v", set.Key, err))
+			return "", false
+		}
+		return out, true
 	}
 }
 
@@ -100,16 +110,54 @@ func (cfg MockExpanderConfig) report(err error) {
 	}
 }
 
-// pickWeighted returns one of values according to weights. When weights is
-// empty / all zero / length-mismatched, a uniform random pick is used so the
-// caller can rely on this helper for both `random` and the sequential
-// fallback path.
-func pickWeighted(values []string, weights []float64) string {
-	if len(values) == 0 {
-		return ""
+// FormatMockSetPlaceholderValue 将命名值集合中的一项 JSON 转为模板替换文本：
+// JSON 字符串取内部文本；null/bool/number 为 JSON 字面量；object/array 为紧凑 JSON（无多余空格）。
+func FormatMockSetPlaceholderValue(raw json.RawMessage) (string, error) {
+	b := bytes.TrimSpace(raw)
+	if len(b) == 0 {
+		return "", fmt.Errorf("空值")
 	}
-	if len(weights) != len(values) {
-		return values[rand.Intn(len(values))]
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.UseNumber()
+	var v any
+	if err := dec.Decode(&v); err != nil {
+		return "", err
+	}
+	var extra any
+	if err := dec.Decode(&extra); err != io.EOF {
+		return "", fmt.Errorf("多余 JSON 内容")
+	}
+	return formatDecodedMockSetJSON(v)
+}
+
+func formatDecodedMockSetJSON(v any) (string, error) {
+	switch x := v.(type) {
+	case string:
+		return x, nil
+	case nil:
+		return "null", nil
+	case bool:
+		if x {
+			return "true", nil
+		}
+		return "false", nil
+	case json.Number:
+		return x.String(), nil
+	case float64:
+		b, err := json.Marshal(x)
+		return string(b), err
+	default:
+		b, err := json.Marshal(v)
+		return string(b), err
+	}
+}
+
+func pickWeightedIndex(n int, weights []float64) int {
+	if n <= 0 {
+		return 0
+	}
+	if len(weights) != n {
+		return rand.Intn(n)
 	}
 	total := 0.0
 	for _, w := range weights {
@@ -118,7 +166,7 @@ func pickWeighted(values []string, weights []float64) string {
 		}
 	}
 	if total <= 0 {
-		return values[rand.Intn(len(values))]
+		return rand.Intn(n)
 	}
 	target := rand.Float64() * total
 	acc := 0.0
@@ -128,10 +176,17 @@ func pickWeighted(values []string, weights []float64) string {
 		}
 		acc += w
 		if target < acc {
-			return values[i]
+			return i
 		}
 	}
-	return values[len(values)-1]
+	return n - 1
+}
+
+func pickWeightedRaw(values []json.RawMessage, weights []float64) json.RawMessage {
+	if len(values) == 0 {
+		return nil
+	}
+	return values[pickWeightedIndex(len(values), weights)]
 }
 
 // Resolver carries the per-kind callbacks Render uses to look up a value for

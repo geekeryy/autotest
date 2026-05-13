@@ -2,8 +2,11 @@ package mockset
 
 import (
 	"context"
+	"encoding/json"
 	"regexp"
 	"strings"
+
+	"autotest/internal/templating"
 
 	"github.com/google/uuid"
 )
@@ -100,7 +103,7 @@ func (s *Service) Delete(ctx context.Context, projectID, setID uuid.UUID) error 
 // Lookup is the only entry point templating / runner / mockserver use to
 // resolve set tokens, keeping the dependency direction one-way: the
 // templating package never imports mockset directly.
-func (s *Service) Lookup(ctx context.Context, projectID uuid.UUID, key string) (values []string, weights []float64, ok bool) {
+func (s *Service) Lookup(ctx context.Context, projectID uuid.UUID, key string) (values []json.RawMessage, weights []float64, ok bool) {
 	if projectID == uuid.Nil || strings.TrimSpace(key) == "" {
 		return nil, nil, false
 	}
@@ -111,7 +114,11 @@ func (s *Service) Lookup(ctx context.Context, projectID uuid.UUID, key string) (
 	if len(set.Values) == 0 {
 		return nil, nil, false
 	}
-	return append([]string(nil), set.Values...), append([]float64(nil), set.Weights...), true
+	out := make([]json.RawMessage, len(set.Values))
+	for i, r := range set.Values {
+		out[i] = append(json.RawMessage(nil), r...)
+	}
+	return out, append([]float64(nil), set.Weights...), true
 }
 
 // SummariesForProject 返回当前项目所有命名值集合的精简摘要，供 AI prompt
@@ -131,8 +138,17 @@ func (s *Service) SummariesForProject(ctx context.Context, projectID uuid.UUID) 
 		if len(preview) > 10 {
 			preview = preview[:10]
 		}
-		// 拷贝一份避免调用方修改 repo 返回的切片。
-		previewCopy := append([]string(nil), preview...)
+		previewCopy := make([]string, 0, len(preview))
+		for _, raw := range preview {
+			s, err := templating.FormatMockSetPlaceholderValue(raw)
+			if err != nil {
+				s = string(raw)
+			}
+			if len(s) > 200 {
+				s = s[:200] + "…"
+			}
+			previewCopy = append(previewCopy, s)
+		}
 		out = append(out, SetSummary{
 			Key:            row.Key,
 			Name:           row.Name,
@@ -177,29 +193,6 @@ func validateName(name string) error {
 		return ErrInvalidName
 	}
 	return nil
-}
-
-// normalizeValues trims whitespace per entry. Empty entries are rejected
-// rather than silently dropped so the validation error fires instead of
-// surprising the user with a shorter list.
-func normalizeValues(in []string) ([]string, error) {
-	if len(in) == 0 {
-		return nil, ErrEmptyValues
-	}
-	out := make([]string, 0, len(in))
-	hasContent := false
-	for _, v := range in {
-		trimmed := strings.TrimSpace(v)
-		if trimmed == "" {
-			return nil, ErrEmptyValueEntry
-		}
-		out = append(out, trimmed)
-		hasContent = true
-	}
-	if !hasContent {
-		return nil, ErrEmptyValues
-	}
-	return out, nil
 }
 
 // normalizeWeights enforces the contract: empty == uniform random,

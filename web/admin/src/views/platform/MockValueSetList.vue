@@ -94,10 +94,10 @@
             v-model="form.valuesText"
             type="textarea"
             :autosize="{ minRows: 6, maxRows: 16 }"
-            placeholder="每行一项；失焦时自动 trim 空行并去重"
+            placeholder="每行一项。若整行可被 JSON.parse（如数字、null、true、{…}、[…]、&quot;…&quot;），则按 JSON 存库；否则按纯文本字符串。失焦时去空行并按值去重"
             @blur="normalizeValuesText"
           />
-          <div class="form-hint">当前 {{ valuesCount }} 项；模板里 <code v-pre>{{$mock.set.&lt;key&gt;[N]}}</code> 的 N 取值范围 0 ～ {{ Math.max(0, valuesCount - 1) }}。</div>
+          <div class="form-hint">当前 {{ valuesCount }} 项；模板里 <code v-pre>{{$mock.set.&lt;key&gt;[N]}}</code> 的 N 取值范围 0 ～ {{ Math.max(0, valuesCount - 1) }}。对象/数组在模板中输出为紧凑 JSON 文本。</div>
         </el-form-item>
         <el-form-item label="权重">
           <el-input
@@ -114,8 +114,8 @@
             <el-button size="small" :disabled="!previewReady" @click="runSampleDistribution">本地随机抽样 100 次</el-button>
             <span v-if="distributionRows.length === 0" class="dist-empty">点击按钮即可在不保存的情况下，本地按当前 values + weights 验证分布。</span>
             <ul v-else class="dist-list">
-              <li v-for="row in distributionRows" :key="row.value">
-                <code class="dist-value">{{ row.value }}</code>
+              <li v-for="row in distributionRows" :key="row.label">
+                <code class="dist-value">{{ row.label }}</code>
                 <span class="dist-bar" :style="{ width: row.percent + '%' }"></span>
                 <span class="dist-count">{{ row.count }} ({{ row.percent }}%)</span>
               </li>
@@ -155,17 +155,40 @@ function formatDateTime(value) {
     `${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())}`
 }
 
-function uniqueLines(text) {
+/** 尝试将一行解析为 JSON；失败则视为普通字符串（trim 后）。空行返回 null。 */
+function parseValueLine(rawLine) {
+  const trimmed = String(rawLine || '').trim()
+  if (!trimmed) return null
+  try {
+    return JSON.parse(trimmed)
+  } catch {
+    return trimmed
+  }
+}
+
+function stableValueKey(v) {
+  return JSON.stringify(v)
+}
+
+/** 按行解析候选值，去空行并按 JSON 语义去重，保持首次出现顺序。 */
+function uniqueParsedValueLines(text) {
   const seen = new Set()
   const out = []
   for (const raw of String(text || '').split(/\r?\n/)) {
-    const trimmed = raw.trim()
-    if (!trimmed) continue
-    if (seen.has(trimmed)) continue
-    seen.add(trimmed)
-    out.push(trimmed)
+    const v = parseValueLine(raw)
+    if (v === null && !String(raw || '').trim()) continue
+    const key = stableValueKey(v)
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(v)
   }
   return out
+}
+
+/** 编辑区单行展示：字符串原样输出，其余 JSON.stringify。 */
+function valueToLine(v) {
+  if (typeof v === 'string') return v
+  return JSON.stringify(v)
 }
 
 function parseWeights(text) {
@@ -203,10 +226,10 @@ export default {
       return projectState.currentProjectId || ''
     },
     valuesCount() {
-      return uniqueLines(this.form.valuesText).length
+      return uniqueParsedValueLines(this.form.valuesText).length
     },
     previewReady() {
-      const values = uniqueLines(this.form.valuesText)
+      const values = uniqueParsedValueLines(this.form.valuesText)
       if (values.length === 0) return false
       const weightsRaw = String(this.form.weightsText || '').trim()
       if (!weightsRaw) return true
@@ -232,7 +255,10 @@ export default {
     valuesPreview(row) {
       const values = Array.isArray(row?.values) ? row.values : []
       if (values.length === 0) return ''
-      const head = values.slice(0, 5).join(', ')
+      const head = values
+        .slice(0, 5)
+        .map((v) => (typeof v === 'string' ? v : JSON.stringify(v)))
+        .join(', ')
       return values.length > 5 ? `${head}, …` : head
     },
     hasWeights(row) {
@@ -261,14 +287,15 @@ export default {
         key: row.key || '',
         name: row.name || '',
         description: row.description || '',
-        valuesText: (row.values || []).join('\n'),
+        valuesText: (row.values || []).map(valueToLine).join('\n'),
         weightsText: (row.weights || []).join('\n')
       }
       this.distributionRows = []
       this.dialogVisible = true
     },
     normalizeValuesText() {
-      this.form.valuesText = uniqueLines(this.form.valuesText).join('\n')
+      const items = uniqueParsedValueLines(this.form.valuesText)
+      this.form.valuesText = items.map(valueToLine).join('\n')
     },
     normalizeWeightsText() {
       const cleaned = String(this.form.weightsText || '')
@@ -279,15 +306,16 @@ export default {
       this.form.weightsText = cleaned
     },
     runSampleDistribution() {
-      const values = uniqueLines(this.form.valuesText)
+      const values = uniqueParsedValueLines(this.form.valuesText)
       if (values.length === 0) return
       const weights = parseWeights(this.form.weightsText)
       const useWeights = weights.length === values.length && weights.every((w) => Number.isFinite(w) && w >= 0)
       const totalWeight = useWeights ? weights.reduce((acc, w) => acc + Math.max(0, w), 0) : 0
-      const counts = new Map(values.map((v) => [v, 0]))
+      const keys = values.map(stableValueKey)
+      const counts = new Map(keys.map((k) => [k, 0]))
       const SAMPLES = 100
       for (let i = 0; i < SAMPLES; i++) {
-        let pick = values[0]
+        let idx = 0
         if (useWeights && totalWeight > 0) {
           const target = Math.random() * totalWeight
           let acc = 0
@@ -296,19 +324,21 @@ export default {
             if (w <= 0) continue
             acc += w
             if (target < acc) {
-              pick = values[j]
+              idx = j
               break
             }
           }
         } else {
-          pick = values[Math.floor(Math.random() * values.length)]
+          idx = Math.floor(Math.random() * values.length)
         }
-        counts.set(pick, (counts.get(pick) || 0) + 1)
+        const k = keys[idx]
+        counts.set(k, (counts.get(k) || 0) + 1)
       }
       this.distributionRows = values.map((value) => {
-        const count = counts.get(value) || 0
+        const k = stableValueKey(value)
+        const count = counts.get(k) || 0
         const percent = Math.round((count / SAMPLES) * 100)
-        return { value, count, percent }
+        return { label: valueToLine(value), count, percent }
       })
     },
     async submit() {
@@ -316,7 +346,7 @@ export default {
         this.$message.error('key 必须仅包含字母、数字、下划线或中划线')
         return
       }
-      const values = uniqueLines(this.form.valuesText)
+      const values = uniqueParsedValueLines(this.form.valuesText)
       if (values.length === 0) {
         this.$message.error('请至少填写 1 个候选值')
         return

@@ -33,6 +33,7 @@ export const mockHelperList = [
   { name: 'date', example: '{{$mock.date}}', description: '随机日期 yyyy-MM-dd' },
   { name: 'dateTime', example: '{{$mock.dateTime}}', description: '随机日期时间 RFC3339' },
   { name: 'pick', example: '{{$mock.pick(a,b,c)}}', description: '从参数列表随机挑一个（oneOf/choice 是别名）' },
+  { name: 'set', example: '{{$mock.set.<key>}} / {{$mock.set.<key>[0]}}', description: '项目「命名值集合」；候选值可为 JSON 类型，占位输出紧凑 JSON（纯字符串取原文）' },
   { name: 'idCard', example: '{{$mock.idCard}}', description: '中国二代身份证 18 位（含 GB 11643 校验位，仅供测试用）' },
   { name: 'plateNumber', example: '{{$mock.plateNumber}}', description: '中国车牌号（省份简称 + · + 1 字母 + 5 位字母数字）' },
   { name: 'bankCard', example: '{{$mock.bankCard}} / {{$mock.bankCard(16)}}', description: '16-19 位 Luhn 合法银行卡号，默认 19 位，可指定长度' },
@@ -46,7 +47,7 @@ export const mockSetSyntax = [
   {
     name: '{{$mock.set.<key>}}',
     example: '{{$mock.set.colors}}',
-    description: '按权重随机抽样（无权重时均匀随机），用于业务字段不要编造取值'
+    description: '按权重随机抽样（无权重时均匀随机）；集合项可为 JSON 对象/数组等，渲染为紧凑 JSON 文本'
   },
   {
     name: '{{$mock.set.<key>[N]}}',

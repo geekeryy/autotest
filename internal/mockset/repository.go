@@ -205,7 +205,7 @@ func scanValueSet(row rowScanner) (*ValueSet, error) {
 		}
 	}
 	if set.Values == nil {
-		set.Values = []string{}
+		set.Values = []json.RawMessage{}
 	}
 	if len(weightsRaw) > 0 {
 		if err := json.Unmarshal(weightsRaw, &set.Weights); err != nil {

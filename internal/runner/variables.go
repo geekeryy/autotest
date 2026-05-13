@@ -172,6 +172,26 @@ func renderBareTemplateValue(input string, vars map[string]string, mockCfg *temp
 		if b, err := strconv.ParseBool(rendered); err == nil {
 			return b
 		}
+	case "set":
+		if v, ok := parseBareTemplateScalar(rendered); ok {
+			return v
+		}
+		dec := json.NewDecoder(strings.NewReader(strings.TrimSpace(rendered)))
+		dec.UseNumber()
+		var v any
+		if err := dec.Decode(&v); err != nil {
+			return rendered
+		}
+		var extra any
+		if err := dec.Decode(&extra); err != io.EOF {
+			return rendered
+		}
+		switch v.(type) {
+		case map[string]any, []any:
+			return v
+		default:
+			return rendered
+		}
 	}
 	return rendered
 }

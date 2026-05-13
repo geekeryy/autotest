@@ -664,6 +664,7 @@ func ListHelpers() []HelperInfo {
 		{Name: "date", Example: "{{$mock.date}}", Description: "随机日期 yyyy-MM-dd（可自定义布局）"},
 		{Name: "dateTime", Example: "{{$mock.dateTime}}", Description: "随机日期时间 RFC3339（可自定义布局）"},
 		{Name: "pick", Example: "{{$mock.pick(a,b,c)}}", Description: "从参数列表随机挑一个，oneOf 是别名"},
+		{Name: "set", Example: "{{$mock.set.<key>}} / {{$mock.set.<key>[0]}}", Description: "项目「命名值集合」；候选值可为 JSON 字符串/数字/布尔/null/对象/数组，占位输出紧凑 JSON（纯字符串取原文），详见平台资源命名值集合"},
 		{Name: "idCard", Example: "{{$mock.idCard}}", Description: "中国二代身份证 18 位（含 GB 11643 校验位，仅供测试用）"},
 		{Name: "plateNumber", Example: "{{$mock.plateNumber}}", Description: "中国车牌号（省份简称 + · + 1 字母 + 5 位字母数字）"},
 		{Name: "bankCard", Example: "{{$mock.bankCard}} / {{$mock.bankCard(16)}}", Description: "16-19 位 Luhn 合法银行卡号，默认 19 位"},
