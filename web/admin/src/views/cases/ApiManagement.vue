@@ -77,7 +77,10 @@
         </div>
 
         <el-alert v-if="summary" type="success" show-icon :closable="false" class="summary">
-          <template #title>导入成功：接口定义 {{ (summary.endpoints || []).length }} 个，生成请求模板 {{ summary.generatedCases }} 条</template>
+          <template #title>
+            导入成功：文档中共 {{ summary.apiCount }} 个接口，端点新增 {{ summary.createdEndpoints }}、更新
+            {{ summary.updatedEndpoints }}，写入请求模板 {{ summary.generatedCases }} 条（spec v{{ summary.specVersion }}）
+          </template>
         </el-alert>
 
         <el-table :data="specs" border size="small" empty-text="暂无导入记录">

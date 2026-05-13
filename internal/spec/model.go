@@ -42,8 +42,13 @@ type ImportResult struct {
 	Snapshot  json.RawMessage `json:"snapshot"`
 }
 
+// ImportSummary 为导入接口的 HTTP 响应体：仅含统计与小体量标识，不含端点列表或 snapshot。
 type ImportSummary struct {
-	Spec           *APISpec   `json:"spec"`
-	Endpoints      []Endpoint `json:"endpoints"`
-	GeneratedCases int        `json:"generatedCases"`
+	SpecID           uuid.UUID `json:"specId"`
+	SpecVersion      int       `json:"specVersion"`
+	ContentHash      string    `json:"contentHash"`
+	ApiCount         int       `json:"apiCount"`
+	CreatedEndpoints int       `json:"createdEndpoints"`
+	UpdatedEndpoints int       `json:"updatedEndpoints"`
+	GeneratedCases   int       `json:"generatedCases"`
 }

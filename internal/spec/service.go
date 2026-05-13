@@ -32,7 +32,7 @@ func (s *Service) Import(ctx context.Context, projectID, serviceID uuid.UUID, da
 		return nil, err
 	}
 
-	endpoints, err := s.repo.SyncEndpoints(ctx, projectID, serviceID, apiSpec.ID, result.Endpoints)
+	endpoints, createdEP, updatedEP, err := s.repo.SyncEndpoints(ctx, projectID, serviceID, apiSpec.ID, result.Endpoints)
 	if err != nil {
 		return nil, err
 	}
@@ -62,9 +62,13 @@ func (s *Service) Import(ctx context.Context, projectID, serviceID uuid.UUID, da
 	}
 
 	return &ImportSummary{
-		Spec:           apiSpec,
-		Endpoints:      endpoints,
-		GeneratedCases: generated,
+		SpecID:           apiSpec.ID,
+		SpecVersion:      apiSpec.Version,
+		ContentHash:      apiSpec.ContentHash,
+		ApiCount:         len(result.Endpoints),
+		CreatedEndpoints: createdEP,
+		UpdatedEndpoints: updatedEP,
+		GeneratedCases:   generated,
 	}, nil
 }
 

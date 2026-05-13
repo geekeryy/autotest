@@ -81,12 +81,13 @@ func (r *Repository) ListSpecs(ctx context.Context, projectID, serviceID uuid.UU
 	return specs, rows.Err()
 }
 
-func (r *Repository) SyncEndpoints(ctx context.Context, projectID, serviceID, specID uuid.UUID, endpoints []Endpoint) ([]Endpoint, error) {
+func (r *Repository) SyncEndpoints(ctx context.Context, projectID, serviceID, specID uuid.UUID, endpoints []Endpoint) ([]Endpoint, int, int, error) {
 	if r.DB == nil {
-		return nil, fmt.Errorf("database unavailable")
+		return nil, 0, 0, fmt.Errorf("database unavailable")
 	}
 
 	synced := make([]Endpoint, 0, len(endpoints))
+	var created, updated int
 	for _, endpoint := range endpoints {
 		endpoint.ServiceID = serviceID
 		endpoint.SpecID = specID
@@ -113,10 +114,12 @@ func (r *Repository) SyncEndpoints(ctx context.Context, projectID, serviceID, sp
 				deleted_at = null,
 				updated_at = now()
 			returning id, service_id, spec_id, method, path, operation_id, summary, tags,
-				request_schema, response_schema, fingerprint, created_at, updated_at
+				request_schema, response_schema, fingerprint, created_at, updated_at,
+				(xmax = 0) AS inserted
 		`, projectID, serviceID, specID, endpoint.Method, endpoint.Path, endpoint.OperationID, endpoint.Summary, endpoint.Tags, endpoint.RequestSchema, endpoint.ResponseSchema, endpoint.Fingerprint)
 
 		var saved Endpoint
+		var inserted bool
 		if err := row.Scan(
 			&saved.ID,
 			&saved.ServiceID,
@@ -131,12 +134,18 @@ func (r *Repository) SyncEndpoints(ctx context.Context, projectID, serviceID, sp
 			&saved.Fingerprint,
 			&saved.CreatedAt,
 			&saved.UpdatedAt,
+			&inserted,
 		); err != nil {
-			return nil, fmt.Errorf("sync endpoint %s %s: %w", endpoint.Method, endpoint.Path, err)
+			return nil, 0, 0, fmt.Errorf("sync endpoint %s %s: %w", endpoint.Method, endpoint.Path, err)
+		}
+		if inserted {
+			created++
+		} else {
+			updated++
 		}
 		synced = append(synced, saved)
 	}
-	return synced, nil
+	return synced, created, updated, nil
 }
 
 // GetEndpointRequestSchema returns only the request_schema for the given endpoint.
