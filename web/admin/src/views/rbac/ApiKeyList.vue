@@ -49,6 +49,8 @@
       <pre class="token-curl"><code>{{ importCurlExample || '请先选择项目和服务' }}</code></pre>
     </el-card>
 
+    <ListLoadError v-if="loadError" :message="loadError" @retry="load" />
+
     <el-table v-loading="loading" :data="apiKeys" border>
       <el-table-column prop="name" label="备注名" min-width="160" />
       <el-table-column label="Token" min-width="200">
@@ -93,6 +95,10 @@
         </template>
       </el-table-column>
     </el-table>
+
+    <el-empty v-if="!loading && !loadError && !apiKeys.length" description="暂无 API Key">
+      <el-button type="primary" @click="openCreate">新增 API Key</el-button>
+    </el-empty>
 
     <!-- 新增 / 编辑弹窗 -->
     <el-dialog
@@ -153,13 +159,17 @@
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 import { createApiKey, deleteApiKey, listApiKeys, listProjects, listServices, rotateApiKey, updateApiKey } from '../../api'
+import ListLoadError from '../../components/ListLoadError.vue'
 import { formatDateTime } from '../../utils/datetime'
+import { getListLoadErrorMessage } from '../../utils/listPageLoad'
 
 export default {
   name: 'ApiKeyList',
+  components: { ListLoadError },
   data() {
     return {
       loading: false,
+      loadError: '',
       submitting: false,
       apiKeys: [],
       dialogVisible: false,
@@ -201,8 +211,11 @@ export default {
     },
     async load() {
       this.loading = true
+      this.loadError = ''
       try {
         this.apiKeys = await listApiKeys()
+      } catch (err) {
+        this.loadError = getListLoadErrorMessage(err)
       } finally {
         this.loading = false
       }

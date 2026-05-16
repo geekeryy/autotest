@@ -130,6 +130,10 @@ export const deleteAIProvider = (projectId, providerId) =>
   request.delete(`/projects/${projectId}/ai-providers/${providerId}`)
 export const testAIProvider = (projectId, providerId) =>
   request.post(`/projects/${projectId}/ai-providers/${providerId}/test`, undefined, { timeout: 45000 })
+export const listAIProviderModels = (projectId, providerId) =>
+  request.get(`/projects/${projectId}/ai-providers/${providerId}/models`, { timeout: 30000 })
+export const discoverAIProviderModels = (projectId, data) =>
+  request.post(`/projects/${projectId}/ai-providers/models/discover`, data, { timeout: 30000 })
 export const aiChat = (projectId, data) =>
   request.post(`/projects/${projectId}/ai/chat`, data, { timeout: 120000 })
 
@@ -144,6 +148,19 @@ export const analyzeSpecChanges = (projectId, serviceId, specId) =>
     {},
     { timeout: 120000 }
   )
+
+// AI 助理浮窗：会话与消息持久化按 (project, user) 隔离；
+// 真正的对话流通过 `utils/aiStream.js` 的 fetch + SSE，确认写工具调用同样走 SSE。
+export const listAISessions = (projectId) =>
+  request.get(`/projects/${projectId}/ai/sessions`).then(asList)
+export const createAISession = (projectId, data = {}) =>
+  request.post(`/projects/${projectId}/ai/sessions`, data)
+export const getAISession = (projectId, sessionId) =>
+  request.get(`/projects/${projectId}/ai/sessions/${sessionId}`)
+export const renameAISession = (projectId, sessionId, data) =>
+  request.patch(`/projects/${projectId}/ai/sessions/${sessionId}`, data)
+export const deleteAISession = (projectId, sessionId) =>
+  request.delete(`/projects/${projectId}/ai/sessions/${sessionId}`)
 
 // Project AI Prompts (per-project prompt config)
 export const listProjectAIPrompts = (projectId) =>

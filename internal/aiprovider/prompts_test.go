@@ -206,7 +206,8 @@ func TestAnalyzeFailureSystemContainsCriticalGuards(t *testing.T) {
 		"requestSnapshot",
 		"responseSnapshot",
 		"assertions",
-		"中文 markdown",
+		"中文 Markdown",
+		"工具策略",
 	}
 	for _, fragment := range guards {
 		if !strings.Contains(analyzeFailureSystem, fragment) {
@@ -265,10 +266,54 @@ func TestAnalyzeSpecChangesSystemContainsCriticalGuards(t *testing.T) {
 		"应废弃",
 		"affectedTemplates",
 		"affectedScenarioSteps",
+		"工具策略",
+		"get_endpoint",
 	}
 	for _, fragment := range guards {
 		if !strings.Contains(analyzeSpecChangesSystem, fragment) {
 			t.Errorf("analyzeSpecChangesSystem missing critical guard %q", fragment)
+		}
+	}
+}
+
+// TestAssistantChatSystemContainsScenarioWorkflow locks the high-value
+// guards in the global assistant prompt:
+//   - The two-tier tool policy (read-only vs. mutating-with-confirmation),
+//     including names so future renames break this test loudly.
+//   - The scenario generation workflow (list → create_case → create
+//     scenario) and the "you cannot run the scenario yourself" boundary
+//     that came directly from the user's product requirement.
+//   - The control-flow schema hints (stepOrder references, script.config,
+//     for/condition shapes) so the model keeps emitting configs that
+//     match the runtime parsers.
+func TestAssistantChatSystemContainsScenarioWorkflow(t *testing.T) {
+	t.Parallel()
+
+	guards := []string{
+		"全局 AI 助理",
+		"list_services",
+		"list_endpoints",
+		"list_cases",
+		"create_case_from_endpoint",
+		"create_scenario_with_steps",
+		"add_scenario_step",
+		"update_scenario_step",
+		"delete_scenario_step",
+		"reorder_scenario_steps",
+		"update_case_assertions",
+		"场景生成工作流",
+		"你不能直接运行场景",
+		"点击场景页右上角",
+		"bodyStepOrders",
+		"stepOrders",
+		"goja 沙箱",
+		"页面上下文",
+		"权限与项目隔离",
+		"projectId",
+	}
+	for _, fragment := range guards {
+		if !strings.Contains(assistantChatSystem, fragment) {
+			t.Errorf("assistantChatSystem missing critical guard %q", fragment)
 		}
 	}
 }

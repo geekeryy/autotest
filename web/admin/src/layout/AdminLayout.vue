@@ -1,6 +1,20 @@
 <template>
   <el-container class="admin-layout">
-    <el-aside :width="sidebarWidth" class="sidebar" :class="{ 'sidebar--collapsed': isSidebarCollapsed }">
+    <div
+      v-if="isMobileViewport && mobileNavOpen"
+      class="sidebar-backdrop"
+      aria-hidden="true"
+      @click="mobileNavOpen = false"
+    />
+    <el-aside
+      :width="sidebarWidth"
+      class="sidebar"
+      :class="{
+        'sidebar--collapsed': isSidebarCollapsed && !isMobileViewport,
+        'sidebar--mobile': isMobileViewport,
+        'sidebar--mobile-open': isMobileViewport && mobileNavOpen,
+      }"
+    >
       <div class="brand">
         <div class="brand-identity">
           <BrandLogo class="brand-logo-mark" />
@@ -72,74 +86,102 @@
       </div>
     </el-aside>
 
-    <el-container>
-      <el-header class="topbar">
-        <div class="breadcrumb-box">
-          <el-breadcrumb separator="/">
-            <el-breadcrumb-item>管理后台</el-breadcrumb-item>
-            <el-breadcrumb-item v-for="item in breadcrumbs" :key="item.path">{{ item.meta.title }}</el-breadcrumb-item>
-          </el-breadcrumb>
-        </div>
-        <div class="user-box">
-          <div class="global-project">
-            <span class="global-project-label">项目</span>
-            <el-select
-              v-model="projectId"
-              class="global-project-select"
-              placeholder="请选择项目"
-              no-data-text="暂无项目"
-              filterable
-              :loading="projectState.loading"
-            >
-              <el-option v-for="project in projectState.projects" :key="project.id" :label="project.name" :value="project.id" />
-            </el-select>
+    <div class="main-wrapper">
+      <el-container class="content-container">
+        <el-header class="topbar">
+          <el-button
+            v-if="isMobileViewport"
+            class="mobile-nav-trigger"
+            text
+            circle
+            aria-label="打开导航菜单"
+            @click="mobileNavOpen = true"
+          >
+            <el-icon><Menu /></el-icon>
+          </el-button>
+          <div class="breadcrumb-box">
+            <el-breadcrumb separator="/">
+              <el-breadcrumb-item v-if="!isMobileViewport">管理后台</el-breadcrumb-item>
+              <el-breadcrumb-item v-for="item in breadcrumbs" :key="item.path">{{ item.meta.title }}</el-breadcrumb-item>
+            </el-breadcrumb>
           </div>
-          <el-popover placement="bottom-end" :width="420" trigger="click">
-            <template #reference>
-              <el-button>
-                <el-icon><Brush /></el-icon>
-                <span>外观</span>
-              </el-button>
-            </template>
-            <div class="appearance-panel">
-              <div class="appearance-section">
-                <div class="appearance-label">字体大小</div>
-                <el-radio-group v-model="appearance.fontSize" class="font-size-group" size="small" @change="commitAppearance">
-                  <el-radio-button v-for="item in fontSizeOptions" :key="item.value" :value="item.value">
-                    {{ item.label }}
-                  </el-radio-button>
-                </el-radio-group>
-              </div>
-              <div class="appearance-section">
-                <div class="appearance-label">配色方案</div>
-                <el-radio-group v-model="appearance.palette" class="palette-group" size="small" @change="handlePaletteChange">
-                  <el-radio-button v-for="item in paletteOptions" :key="item.value" :value="item.value">
-                    <span class="palette-option">
-                      <span class="palette-dots">
-                        <span class="palette-dot" :style="{ background: item.primary }"></span>
-                        <span class="palette-dot" :style="{ background: item.secondary }"></span>
-                        <span class="palette-dot" :style="{ background: item.accent }"></span>
-                      </span>
-                      {{ item.label }}
-                    </span>
-                  </el-radio-button>
-                </el-radio-group>
-              </div>
-              <div class="appearance-section custom-color-row">
-                <span class="appearance-label">自定义主色</span>
-                <el-color-picker v-model="appearance.primaryColor" :predefine="predefinedColors" @change="handlePrimaryColorChange" />
-              </div>
-              <div class="appearance-actions">
-                <el-button link type="primary" @click="restoreDefaultAppearance">恢复默认</el-button>
-              </div>
+          <div class="user-box">
+            
+            <div class="global-project">
+              <span class="global-project-label">项目</span>
+              <el-select
+                v-model="projectId"
+                class="global-project-select"
+                placeholder="请选择项目"
+                no-data-text="暂无项目"
+                filterable
+                :loading="projectState.loading"
+              >
+                <el-option v-for="project in projectState.projects" :key="project.id" :label="project.name" :value="project.id" />
+              </el-select>
             </div>
-          </el-popover>
-        </div>
-      </el-header>
-      <el-main>
-        <router-view />
-      </el-main>
-    </el-container>
+            <el-popover placement="bottom-end" :width="420" trigger="click">
+              <template #reference>
+                <el-button>
+                  <el-icon><Brush /></el-icon>
+                  <span>外观</span>
+                </el-button>
+              </template>
+              <div class="appearance-panel">
+                <div class="appearance-section">
+                  <div class="appearance-label">字体大小</div>
+                  <el-radio-group v-model="appearance.fontSize" class="font-size-group" size="small" @change="commitAppearance">
+                    <el-radio-button v-for="item in fontSizeOptions" :key="item.value" :value="item.value">
+                      {{ item.label }}
+                    </el-radio-button>
+                  </el-radio-group>
+                </div>
+                <div class="appearance-section">
+                  <div class="appearance-label">配色方案</div>
+                  <el-radio-group v-model="appearance.palette" class="palette-group" size="small" @change="handlePaletteChange">
+                    <el-radio-button v-for="item in paletteOptions" :key="item.value" :value="item.value">
+                      <span class="palette-option">
+                        <span class="palette-dots">
+                          <span class="palette-dot" :style="{ background: item.primary }"></span>
+                          <span class="palette-dot" :style="{ background: item.secondary }"></span>
+                          <span class="palette-dot" :style="{ background: item.accent }"></span>
+                        </span>
+                        {{ item.label }}
+                      </span>
+                    </el-radio-button>
+                  </el-radio-group>
+                </div>
+                <div class="appearance-section custom-color-row">
+                  <span class="appearance-label">自定义主色</span>
+                  <el-color-picker v-model="appearance.primaryColor" :predefine="predefinedColors" @change="handlePrimaryColorChange" />
+                </div>
+                <div class="appearance-actions">
+                  <el-button link type="primary" @click="restoreDefaultAppearance">恢复默认</el-button>
+                </div>
+              </div>
+            </el-popover>
+            <el-tooltip :content="assistantNavTooltip" placement="bottom">
+              <el-button
+                class="topbar-assistant-btn"
+                :class="{ 'topbar-assistant-btn--active': assistantButtonActive }"
+                :disabled="!assistantAvailable"
+                @click="toggleAssistant"
+              >
+                <span class="topbar-assistant-btn__glow" aria-hidden="true" />
+                <el-icon class="topbar-assistant-btn__icon"><ChatLineRound /></el-icon>
+                <span class="topbar-assistant-btn__label">AI 助理</span>
+              </el-button>
+            </el-tooltip>
+          </div>
+        </el-header>
+        <el-main :class="{ 'el-main--workspace': isWorkspaceRoute }">
+          <router-view />
+        </el-main>
+      </el-container>
+
+      <!-- 全局 AI 助理右侧面板 -->
+      <GlobalAIAssistant v-if="assistantPanelMounted" layout="panel" />
+    </div>
   </el-container>
 </template>
 
@@ -150,6 +192,7 @@ import { clearToken } from '../utils/storage'
 import { menuRoutes } from '../router'
 import { loadGlobalProjects, projectState, setCurrentProjectId } from '../utils/currentProject'
 import BrandLogo from '../components/BrandLogo.vue'
+import GlobalAIAssistant from '../components/GlobalAIAssistant.vue'
 import {
   FONT_SIZE_OPTIONS,
   PALETTE_OPTIONS,
@@ -159,6 +202,9 @@ import {
   resetAppearance,
   saveAppearance
 } from '../utils/appearance'
+import { assistantState, toggleAssistant } from '../stores/aiAssistant'
+import { ChatLineRound, Menu } from '@element-plus/icons-vue'
+import { getAvatarBgStyle, getInitials } from '../utils/useInitialsColor'
 
 const icons = {
   '/dashboard': 'DataAnalysis',
@@ -219,11 +265,16 @@ function findOpenMenus(items, currentPath) {
 export default {
   name: 'AdminLayout',
   components: {
-    BrandLogo
+    BrandLogo,
+    GlobalAIAssistant,
+    ChatLineRound,
+    Menu,
   },
   data() {
     return {
       isSidebarCollapsed: false,
+      mobileNavOpen: false,
+      viewportWidth: typeof window !== 'undefined' ? window.innerWidth : 1200,
       appearance: getStoredAppearance(),
       fontSizeOptions: FONT_SIZE_OPTIONS,
       paletteOptions: PALETTE_OPTIONS,
@@ -233,6 +284,29 @@ export default {
   computed: {
     projectState() {
       return projectState
+    },
+    isMobileViewport() {
+      return this.viewportWidth < 768
+    },
+    isWorkspaceRoute() {
+      const path = this.$route.path
+      return path === '/ai-assistant' || path.startsWith('/run-console') || path.startsWith('/scenarios')
+    },
+    assistantState() {
+      return assistantState
+    },
+    assistantAvailable() {
+      return !!projectState.currentProjectId
+    },
+    assistantButtonActive() {
+      return this.assistantAvailable && assistantState.open
+    },
+    assistantPanelMounted() {
+      return this.assistantButtonActive
+    },
+    assistantNavTooltip() {
+      if (!this.assistantAvailable) return '请选择项目后打开 AI 助理侧栏'
+      return assistantState.open ? '关闭 AI 助理侧栏' : '打开 AI 助理侧栏'
     },
     projectId: {
       get() {
@@ -267,40 +341,40 @@ export default {
       const u = authState.user
       return u?.avatarUrl ? String(u.avatarUrl) : ''
     },
-    avatarHueBackground() {
-      const raw = String(authState.user?.id || authState.user?.username || 'x')
-      let h = 0
-      for (let i = 0; i < raw.length; i++) {
-        h = raw.charCodeAt(i) + ((h << 5) - h)
-      }
-      const hue = Math.abs(h) % 360
-      return `hsl(${hue}, 42%, 44%)`
-    },
     avatarBgStyle() {
-      if (this.avatarSrc) return {}
-      return { backgroundColor: this.avatarHueBackground }
+      const u = authState.user
+      return getAvatarBgStyle(u?.id || u?.username, !!this.avatarSrc)
     },
     userInitials() {
       const u = authState.user
-      const display = (u?.displayName || '').trim()
-      const username = (u?.username || '').trim()
-      const name = display || username || '管'
-      if (/[\u4e00-\u9fff]/.test(name)) {
-        return name.length >= 2 ? name.slice(0, 2) : name.slice(0, 1)
-      }
-      const parts = name.split(/[\s._-]+/).filter(Boolean)
-      if (parts.length >= 2) {
-        return (parts[0][0] + parts[1][0]).toUpperCase()
-      }
-      return name.slice(0, 2).toUpperCase()
+      return getInitials(u?.displayName || u?.username, '管')
     }
+  },
+  watch: {
+    '$route.path'() {
+      this.mobileNavOpen = false
+    },
   },
   created() {
     loadGlobalProjects()
   },
+  mounted() {
+    this.onViewportResize = () => {
+      this.viewportWidth = window.innerWidth
+      if (!this.isMobileViewport) this.mobileNavOpen = false
+    }
+    window.addEventListener('resize', this.onViewportResize)
+    this.onViewportResize()
+  },
+  beforeUnmount() {
+    window.removeEventListener('resize', this.onViewportResize)
+  },
   methods: {
     toggleSidebar() {
       this.isSidebarCollapsed = !this.isSidebarCollapsed
+    },
+    toggleAssistant() {
+      toggleAssistant()
     },
     commitAppearance() {
       this.appearance = saveAppearance(applyAppearance(this.appearance))
@@ -344,8 +418,16 @@ export default {
   overflow: hidden;
 }
 
+.main-wrapper {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+
 /* 右侧栏：顶栏 + 主区纵向排列，主区吸收剩余高度并单独滚动，避免整页增高导致左侧导航被带出视口 */
-.admin-layout > .el-container {
+.content-container {
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
@@ -357,6 +439,40 @@ export default {
   min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
+}
+
+.admin-layout :deep(.el-main--workspace) {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1999;
+  background: rgba(15, 23, 42, 0.45);
+}
+
+.sidebar--mobile {
+  position: fixed;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  z-index: 2000;
+  transform: translateX(-100%);
+  transition: transform 0.2s ease;
+  box-shadow: none;
+}
+
+.sidebar--mobile.sidebar--mobile-open {
+  transform: translateX(0);
+  box-shadow: 4px 0 24px rgba(15, 23, 42, 0.2);
+}
+
+.mobile-nav-trigger {
+  flex-shrink: 0;
+  color: var(--app-text-color);
 }
 
 .sidebar {
@@ -403,13 +519,34 @@ export default {
 
 .collapse-button {
   flex: 0 0 auto;
+  --el-button-hover-bg-color: var(--app-sidebar-menu-hover-bg);
+  --el-button-hover-text-color: color-mix(
+    in srgb,
+    var(--app-sidebar-active) 82%,
+    var(--app-sidebar-text)
+  );
   color: var(--app-sidebar-text);
+  background-color: transparent;
+  transition:
+    color 0.18s ease,
+    background-color 0.18s ease,
+    transform 0.15s ease;
 }
 
 .collapse-button:hover,
-.collapse-button:focus {
+.collapse-button:focus-visible {
+  color: var(--el-button-hover-text-color);
+  background-color: var(--app-sidebar-menu-hover-bg) !important;
+}
+
+.collapse-button:active {
   color: var(--app-sidebar-active);
-  background: rgba(255, 255, 255, 0.08);
+  background-color: color-mix(
+    in srgb,
+    var(--app-sidebar-menu-hover-bg) 65%,
+    var(--app-sidebar-bg)
+  ) !important;
+  transform: scale(0.96);
 }
 
 .sidebar-menu {
@@ -417,6 +554,71 @@ export default {
   flex: 1;
   min-height: 0;
   overflow: hidden;
+}
+
+.sidebar-menu :deep(.el-menu-item),
+.sidebar-menu :deep(.el-sub-menu__title) {
+  margin: 2px 8px;
+  border-radius: 6px;
+  border-left: 3px solid transparent;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.sidebar-menu :deep(.el-menu-item:hover),
+.sidebar-menu :deep(.el-sub-menu__title:hover) {
+  background-color: var(--app-sidebar-menu-hover-bg) !important;
+}
+
+.sidebar-menu :deep(.el-menu-item.is-active) {
+  background-color: var(--app-sidebar-menu-active-bg) !important;
+  border-left-color: var(--app-sidebar-menu-active-accent);
+  color: var(--app-sidebar-active) !important;
+  font-weight: 600;
+}
+
+.sidebar-menu :deep(.el-sub-menu.is-active > .el-sub-menu__title) {
+  color: var(--app-sidebar-active);
+  font-weight: 600;
+}
+
+/* 折叠态：左边框会挤占内容区导致图标视觉偏移，改用绝对定位伪元素绘制高亮条 */
+.sidebar-menu.el-menu--collapse :deep(.el-menu-item),
+.sidebar-menu.el-menu--collapse :deep(.el-sub-menu__title) {
+  position: relative;
+  margin: 2px 6px;
+  border-left: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+}
+
+.sidebar-menu.el-menu--collapse :deep(.el-menu-item .el-icon),
+.sidebar-menu.el-menu--collapse :deep(.el-sub-menu__title .el-icon) {
+  margin: 0;
+}
+
+.sidebar-menu.el-menu--collapse :deep(.el-menu-item.is-active),
+.sidebar-menu.el-menu--collapse :deep(.el-sub-menu.is-active > .el-sub-menu__title) {
+  border-left: none;
+  box-shadow: none;
+}
+
+.sidebar-menu.el-menu--collapse :deep(.el-menu-item.is-active)::before,
+.sidebar-menu.el-menu--collapse :deep(.el-sub-menu.is-active > .el-sub-menu__title)::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 4px;
+  bottom: 4px;
+  width: 3px;
+  border-radius: 0 2px 2px 0;
+  background: var(--app-sidebar-menu-active-accent);
+  pointer-events: none;
 }
 
 .sidebar-footer {
@@ -516,8 +718,86 @@ export default {
 .user-box {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
   flex: 0 0 auto;
+}
+
+.user-box :deep(.topbar-assistant-btn) {
+  position: relative;
+  overflow: hidden;
+  border: none;
+  padding: 0 14px 0 12px;
+  height: 36px;
+  border-radius: 999px;
+  color: #fff;
+  background: linear-gradient(
+    120deg,
+    var(--el-color-primary),
+    color-mix(in srgb, #8b5cf6 55%, var(--el-color-primary))
+  );
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.08),
+    0 6px 16px -4px color-mix(in srgb, var(--el-color-primary) 45%, transparent);
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease,
+    filter 0.15s ease;
+}
+
+.user-box :deep(.topbar-assistant-btn:hover),
+.user-box :deep(.topbar-assistant-btn:focus-visible) {
+  color: #fff;
+  background: linear-gradient(
+    120deg,
+    color-mix(in srgb, var(--el-color-primary) 92%, #fff),
+    color-mix(in srgb, #8b5cf6 50%, var(--el-color-primary))
+  );
+  transform: translateY(-1px);
+  filter: brightness(1.03);
+  box-shadow:
+    0 2px 6px rgba(15, 23, 42, 0.1),
+    0 10px 22px -6px color-mix(in srgb, var(--el-color-primary) 50%, transparent);
+}
+
+.user-box :deep(.topbar-assistant-btn.is-disabled),
+.user-box :deep(.topbar-assistant-btn.is-disabled:hover),
+.user-box :deep(.topbar-assistant-btn.is-disabled:focus-visible) {
+  color: rgba(255, 255, 255, 0.86);
+  background: linear-gradient(120deg, #94a3b8, #a5b4fc);
+  box-shadow: none;
+  cursor: not-allowed;
+  filter: grayscale(0.2);
+  transform: none;
+}
+
+.user-box :deep(.topbar-assistant-btn--active) {
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.35),
+    0 6px 16px -4px color-mix(in srgb, var(--el-color-primary) 45%, transparent);
+}
+
+.topbar-assistant-btn__glow {
+  position: absolute;
+  inset: -40% auto auto -20%;
+  width: 60%;
+  height: 180%;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.35), transparent 70%);
+  pointer-events: none;
+}
+
+.topbar-assistant-btn__icon {
+  position: relative;
+  z-index: 1;
+  font-size: 16px;
+}
+
+.topbar-assistant-btn__label {
+  position: relative;
+  z-index: 1;
+  margin-left: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
 }
 
 .global-project {
@@ -605,6 +885,16 @@ export default {
 .appearance-actions {
   display: flex;
   justify-content: flex-end;
+}
+
+@media (max-width: 768px) {
+  .topbar-assistant-btn__label {
+    display: none;
+  }
+
+  .user-box :deep(.topbar-assistant-btn) {
+    padding: 0 12px;
+  }
 }
 
 @media (max-width: 900px) {

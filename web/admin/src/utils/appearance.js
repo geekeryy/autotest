@@ -26,39 +26,7 @@ export const PALETTE_OPTIONS = [
     border: '#e2e8f0',
     codeBg: '#f1f5f9'
   },
-  {
-    value: 'black-gold',
-    label: '高级黑金',
-    primary: '#d4af37',
-    secondary: '#8b5cf6',
-    accent: '#f59e0b',
-    sidebarBg: '#050816',
-    sidebarText: '#d1d5db',
-    sidebarActive: '#ffffff',
-    pageBg: '#0b0f19',
-    cardBg: '#111827',
-    text: '#f9fafb',
-    muted: '#9ca3af',
-    border: '#374151',
-    codeBg: '#020617',
-    isDark: true
-  },
-  {
-    value: 'green',
-    label: '清新自然绿',
-    primary: '#16a34a',
-    secondary: '#0ea5e9',
-    accent: '#facc15',
-    sidebarBg: '#14532d',
-    sidebarText: '#dcfce7',
-    sidebarActive: '#ffffff',
-    pageBg: '#f7fdf9',
-    cardBg: '#ffffff',
-    text: '#14532d',
-    muted: '#6b7280',
-    border: '#d1fae5',
-    codeBg: '#ecfdf5'
-  },
+
   {
     value: 'purple',
     label: '柔和紫粉',
@@ -74,38 +42,6 @@ export const PALETTE_OPTIONS = [
     muted: '#6b7280',
     border: '#e9d5ff',
     codeBg: '#f5f3ff'
-  },
-  {
-    value: 'neutral',
-    label: '极简中性色',
-    primary: '#111827',
-    secondary: '#4f46e5',
-    accent: '#10b981',
-    sidebarBg: '#111827',
-    sidebarText: '#d1d5db',
-    sidebarActive: '#ffffff',
-    pageBg: '#f9fafb',
-    cardBg: '#ffffff',
-    text: '#111827',
-    muted: '#6b7280',
-    border: '#e5e7eb',
-    codeBg: '#f3f4f6'
-  },
-  {
-    value: 'orange',
-    label: '温暖橙棕',
-    primary: '#ea580c',
-    secondary: '#92400e',
-    accent: '#fbbf24',
-    sidebarBg: '#3a2414',
-    sidebarText: '#fed7aa',
-    sidebarActive: '#ffffff',
-    pageBg: '#fff7ed',
-    cardBg: '#ffffff',
-    text: '#431407',
-    muted: '#78716c',
-    border: '#fed7aa',
-    codeBg: '#ffedd5'
   },
   {
     value: 'apple-blue',
@@ -154,39 +90,6 @@ export const PALETTE_OPTIONS = [
     muted: '#425466',
     border: '#d9e2ec',
     codeBg: '#edf2f7'
-  },
-  {
-    value: 'linear-dark',
-    label: '深色蓝紫',
-    primary: '#5e6ad2',
-    secondary: '#8b5cf6',
-    accent: '#22d3ee',
-    sidebarBg: '#08090a',
-    sidebarText: '#a1a1aa',
-    sidebarActive: '#f4f4f5',
-    pageBg: '#08090a',
-    cardBg: '#111113',
-    text: '#f4f4f5',
-    muted: '#a1a1aa',
-    border: '#27272a',
-    codeBg: '#18181b',
-    isDark: true
-  },
-  {
-    value: 'cream',
-    label: '温和奶油色',
-    primary: '#d97706',
-    secondary: '#65a30d',
-    accent: '#e11d48',
-    sidebarBg: '#422006',
-    sidebarText: '#fde68a',
-    sidebarActive: '#ffffff',
-    pageBg: '#fffbeb',
-    cardBg: '#ffffff',
-    text: '#422006',
-    muted: '#78716c',
-    border: '#fde68a',
-    codeBg: '#fef3c7'
   },
   {
     value: 'finance',
@@ -326,6 +229,9 @@ export function applyAppearance(appearance) {
   setVar('--app-sidebar-bg', palette.sidebarBg)
   setVar('--app-sidebar-text', palette.sidebarText)
   setVar('--app-sidebar-active', palette.sidebarActive)
+  setVar('--app-sidebar-menu-hover-bg', mix(palette.sidebarBg, '#ffffff', 0.1))
+  setVar('--app-sidebar-menu-active-bg', mix(palette.primary, palette.sidebarBg, 0.82))
+  setVar('--app-sidebar-menu-active-accent', palette.primary)
   setVar('--app-page-bg', palette.pageBg)
   setVar('--app-card-bg', palette.cardBg)
   setVar('--app-text-color', palette.text)
@@ -363,7 +269,8 @@ export function applyAppearance(appearance) {
   setVar('--el-fill-color-light', palette.codeBg)
   setVar('--el-fill-color-lighter', palette.codeBg)
   setVar('--el-fill-color-extra-light', palette.pageBg)
-  setVar('--el-menu-hover-bg-color', palette.isDark ? mix(palette.sidebarBg, '#ffffff', 0.08) : mix(palette.sidebarBg, '#ffffff', 0.16))
+  setVar('--el-menu-hover-bg-color', mix(palette.sidebarBg, '#ffffff', 0.1))
+  setVar('--el-menu-active-color', palette.sidebarActive)
 
   return normalized
 }

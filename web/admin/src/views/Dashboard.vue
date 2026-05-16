@@ -10,8 +10,10 @@
 
     <p v-if="!currentProjectId" class="context-hint">在顶部选择项目后，接口、场景与数据源数量将按当前项目统计。</p>
 
+    <ListLoadError v-if="loadError" :message="loadError" @retry="load" />
+
     <el-row :gutter="16" v-loading="loading" class="metric-row">
-      <el-col :span="6" v-for="card in cards" :key="card.title">
+      <el-col :xs="12" :sm="12" :md="6" v-for="card in cards" :key="card.title">
         <el-card class="metric" :style="{ borderTopColor: card.color }">
           <div class="metric-icon" :style="{ color: card.color }">
             <el-icon :size="28"><component :is="card.icon" /></el-icon>
@@ -38,11 +40,40 @@
         </el-col>
       </el-row>
     </div>
+
+    <section class="ai-spotlight" aria-label="AI 助理引导">
+      <div class="ai-spotlight__aurora" aria-hidden="true" />
+      <div class="ai-spotlight__inner">
+        <div class="ai-spotlight__copy">
+          <div class="ai-spotlight__eyebrow">
+            <span class="ai-spotlight__pulse" />
+            <span>全新 · AI 测试助理</span>
+          </div>
+          <h3 class="ai-spotlight__title">用对话完成查询、编排与断言调整</h3>
+          <p class="ai-spotlight__desc">
+            结合当前项目上下文理解你在看的场景与用例；所有写操作会先展示预览并等待你确认，再写入平台。
+          </p>
+          <ul class="ai-spotlight__features">
+            <li v-for="item in aiFeatureHighlights" :key="item">{{ item }}</li>
+          </ul>
+        </div>
+        <div class="ai-spotlight__cta">
+          <router-link to="/ai-assistant" class="ai-spotlight__link">
+            <el-button type="primary" size="large" class="ai-spotlight__btn">
+              <el-icon><ChatLineRound /></el-icon>
+              <span>进入 AI 工作台</span>
+            </el-button>
+          </router-link>
+          <p class="ai-spotlight__cta-hint">顶栏「AI 助理」可随时打开右侧对话侧栏</p>
+        </div>
+      </div>
+    </section>
   </div>
 </template>
 
 <script>
 import {
+  ChatLineRound,
   Connection,
   Document,
   Folder,
@@ -54,7 +85,9 @@ import {
 } from '@element-plus/icons-vue'
 import { listCases, listDataSources, listProjects, listScenarios } from '../api'
 import { hasPermission } from '../auth'
+import ListLoadError from '../components/ListLoadError.vue'
 import { incrementShortcutClick, rankShortcutsByClicks } from '../utils/dashboardShortcutClicks'
+import { getListLoadErrorMessage } from '../utils/listPageLoad'
 import { projectState } from '../utils/currentProject'
 
 const SHORTCUTS = [
@@ -75,18 +108,28 @@ const SHORTCUTS = [
 
 const SHORTCUT_ORDER_KEYS = SHORTCUTS.map((s) => s.key)
 
+const AI_FEATURE_HIGHLIGHTS = [
+  '自然语言查询接口与场景',
+  '一键生成多步骤编排',
+  '写操作人工确认后生效',
+]
+
 export default {
   name: 'Dashboard',
   components: {
+    ListLoadError,
     Refresh,
     Folder,
     Document,
     Connection,
-    Tickets
+    Tickets,
+    ChatLineRound,
   },
   data() {
     return {
+      aiFeatureHighlights: AI_FEATURE_HIGHLIGHTS,
       loading: false,
+      loadError: '',
       counts: {
         projects: 0,
         cases: 0,
@@ -139,6 +182,7 @@ export default {
     },
     async load() {
       this.loading = true
+      this.loadError = ''
       try {
         const projects = await listProjects()
         this.counts.projects = projects.length
@@ -155,8 +199,8 @@ export default {
         this.counts.cases = Array.isArray(cases) ? cases.length : 0
         this.counts.scenarios = Array.isArray(scenarios) ? scenarios.length : 0
         this.counts.dataSources = Array.isArray(dataSources) ? dataSources.length : 0
-      } catch {
-        // 错误已在全局请求拦截器中提示
+      } catch (err) {
+        this.loadError = getListLoadErrorMessage(err)
       } finally {
         this.loading = false
       }
@@ -200,6 +244,171 @@ export default {
   margin-top: 4px;
   font-size: var(--el-font-size-extra-small);
   color: var(--el-text-color-placeholder);
+}
+
+.ai-spotlight {
+  position: relative;
+  overflow: hidden;
+  margin: 20px 0 8px;
+  padding: 22px 24px;
+  border-radius: 16px;
+  border: 1px solid color-mix(in srgb, var(--el-color-primary) 30%, transparent);
+  background:
+    radial-gradient(ellipse 80% 60% at 100% 0%, color-mix(in srgb, #8b5cf6 14%, transparent), transparent),
+    radial-gradient(ellipse 70% 50% at 0% 100%, color-mix(in srgb, var(--el-color-primary) 12%, transparent), transparent),
+    linear-gradient(135deg, var(--app-card-bg, #fff), color-mix(in srgb, var(--el-color-primary-light-9, #ecf5ff) 55%, var(--app-card-bg, #fff)));
+}
+
+.ai-spotlight__aurora {
+  position: absolute;
+  inset: -50% -20%;
+  background: conic-gradient(
+    from 200deg at 50% 50%,
+    transparent,
+    color-mix(in srgb, var(--el-color-primary) 18%, transparent),
+    transparent,
+    color-mix(in srgb, #8b5cf6 14%, transparent),
+    transparent
+  );
+  animation: spotlight-spin 14s linear infinite;
+  opacity: 0.65;
+  pointer-events: none;
+}
+
+.ai-spotlight__inner {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+
+.ai-spotlight__copy {
+  flex: 1 1 320px;
+  min-width: 0;
+}
+
+.ai-spotlight__eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--el-color-primary);
+}
+
+.ai-spotlight__pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--el-color-primary);
+  animation: spotlight-pulse 2s ease-in-out infinite;
+}
+
+.ai-spotlight__title {
+  margin: 0 0 8px;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.3;
+  letter-spacing: -0.02em;
+}
+
+.ai-spotlight__desc {
+  margin: 0 0 12px;
+  max-width: 520px;
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--app-secondary-text);
+}
+
+.ai-spotlight__features {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ai-spotlight__features li {
+  padding: 4px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  background: color-mix(in srgb, var(--app-card-bg, #fff) 70%, var(--el-color-primary-light-9, #ecf5ff));
+  border: 1px solid var(--el-border-color-lighter);
+  color: var(--el-text-color-regular);
+}
+
+.ai-spotlight__cta {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.ai-spotlight__link {
+  text-decoration: none;
+}
+
+.ai-spotlight__btn {
+  border-radius: 12px;
+  padding: 12px 22px;
+  font-weight: 600;
+  box-shadow: 0 8px 24px -8px color-mix(in srgb, var(--el-color-primary) 55%, transparent);
+}
+
+.ai-spotlight__cta-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--el-text-color-placeholder);
+}
+
+@keyframes spotlight-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ai-spotlight__aurora {
+    animation: none;
+    opacity: 0.35;
+  }
+
+  .ai-spotlight__pulse {
+    animation: none;
+  }
+}
+
+@keyframes spotlight-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--el-color-primary) 50%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 6px transparent;
+  }
+}
+
+@media (max-width: 768px) {
+  .ai-spotlight__inner {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .ai-spotlight__cta {
+    align-items: stretch;
+  }
+
+  .ai-spotlight__btn {
+    width: 100%;
+  }
 }
 
 .shortcuts {

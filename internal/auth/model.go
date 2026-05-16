@@ -34,10 +34,13 @@ type User struct {
 	DisplayName  string       `json:"displayName"`
 	Email        string       `json:"email"`
 	Active       bool         `json:"active"`
+	AvatarURL    string       `json:"avatarUrl,omitempty"`
 	Roles        []Role       `json:"roles,omitempty"`
 	Permissions  []Permission `json:"permissions,omitempty"`
 	CreatedAt    time.Time    `json:"createdAt"`
 	UpdatedAt    time.Time    `json:"updatedAt"`
+	// avatarJPEG 仅包内使用，由 repository 扫描并生成 AvatarURL（data URL，便于 Bearer 鉴权下展示）。
+	avatarJPEG []byte `json:"-"`
 }
 
 type Role struct {
@@ -70,20 +73,23 @@ type LoginResponse struct {
 }
 
 type CreateUserInput struct {
-	Username    string      `json:"username"`
-	Password    string      `json:"password"`
-	DisplayName string      `json:"displayName"`
-	Email       string      `json:"email"`
-	Active      *bool       `json:"active"`
-	RoleIDs     []uuid.UUID `json:"roleIds"`
+	Username     string      `json:"username"`
+	Password     string      `json:"password"`
+	DisplayName  string      `json:"displayName"`
+	Email        string      `json:"email"`
+	Active       *bool       `json:"active"`
+	RoleIDs      []uuid.UUID `json:"roleIds"`
+	AvatarBase64 string      `json:"avatarBase64,omitempty"`
 }
 
 type UpdateUserInput struct {
-	Password    string      `json:"password"`
-	DisplayName string      `json:"displayName"`
-	Email       string      `json:"email"`
-	Active      *bool       `json:"active"`
-	RoleIDs     []uuid.UUID `json:"roleIds"`
+	Password     string      `json:"password"`
+	DisplayName  string      `json:"displayName"`
+	Email        string      `json:"email"`
+	Active       *bool       `json:"active"`
+	RoleIDs      []uuid.UUID `json:"roleIds"`
+	AvatarBase64 string      `json:"avatarBase64,omitempty"`
+	ClearAvatar  bool        `json:"clearAvatar,omitempty"`
 }
 
 type CreateRoleInput struct {

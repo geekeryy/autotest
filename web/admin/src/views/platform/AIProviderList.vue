@@ -27,6 +27,8 @@
       title="请先在左侧列表或顶部选择项目后再管理 AI 提供商。"
     />
 
+    <ListLoadError v-if="projectId && loadError" :message="loadError" @retry="loadList" />
+
     <el-table v-if="projectId" :data="providers" border row-key="id" v-loading="loading">
       <el-table-column prop="name" label="名称" min-width="160" />
       <el-table-column label="类型" width="140">
@@ -61,7 +63,10 @@
         </template>
       </el-table-column>
     </el-table>
-    <el-empty v-if="projectId && !loading && !providers.length" description="暂无 AI 提供商，点击右上角「新增提供商」创建" />
+    <el-empty
+      v-if="projectId && !loading && !loadError && !providers.length"
+      description="暂无 AI 提供商，点击右上角「新增提供商」创建"
+    />
 
     <el-dialog
       v-model="dialogVisible"
@@ -93,13 +98,33 @@
           />
         </el-form-item>
         <el-form-item label="默认模型">
-          <el-autocomplete
-            v-model="form.defaultModel"
-            :fetch-suggestions="modelSuggestions"
-            placeholder="如 deepseek-chat、gpt-4o-mini，调用时仍可覆盖"
-            style="width: 100%"
-            clearable
-          />
+          <div class="model-field-row">
+            <el-select
+              v-model="form.defaultModel"
+              class="model-select"
+              placeholder="选择或输入模型 ID"
+              filterable
+              allow-create
+              default-first-option
+              clearable
+              :loading="modelsLoading"
+              :disabled="!canFetchModels && !remoteModels.length"
+              no-data-text="请先填写 Base URL 与 API Key，再点「刷新列表」"
+            >
+              <el-option v-for="m in modelSelectOptions" :key="m" :label="m" :value="m" />
+            </el-select>
+            <el-button
+              type="primary"
+              link
+              :loading="modelsLoading"
+              :disabled="!canFetchModels"
+              @click="refreshModels"
+            >
+              刷新列表
+            </el-button>
+          </div>
+          <div v-if="modelsHint" class="meta-notes">{{ modelsHint }}</div>
+          <div v-if="modelsWarning" class="meta-notes models-warning">{{ modelsWarning }}</div>
         </el-form-item>
         <el-form-item label="高级参数 JSON">
           <el-input
@@ -131,12 +156,16 @@
 import {
   createAIProvider,
   deleteAIProvider,
+  discoverAIProviderModels,
+  listAIProviderModels,
   listAIProviderTypes,
   listAIProviders,
   testAIProvider,
   updateAIProvider
 } from '../../api'
+import ListLoadError from '../../components/ListLoadError.vue'
 import { loadGlobalProjects, projectState } from '../../utils/currentProject'
+import { getListLoadErrorMessage } from '../../utils/listPageLoad'
 
 function pad2(n) {
   return String(n).padStart(2, '0')
@@ -155,6 +184,7 @@ const blankForm = () => ({
 
 export default {
   name: 'AIProviderList',
+  components: { ListLoadError },
   props: {
     embedded: {
       type: Boolean,
@@ -165,6 +195,7 @@ export default {
     return {
       projectState,
       loading: false,
+      loadError: '',
       providers: [],
       providerTypes: [],
       dialogVisible: false,
@@ -172,7 +203,13 @@ export default {
       saving: false,
       testingId: null,
       deletingId: null,
-      form: blankForm()
+      form: blankForm(),
+      remoteModels: [],
+      modelsLoading: false,
+      modelsWarning: '',
+      modelsHint: '',
+      modelsSource: '',
+      modelsFetchTimer: null
     }
   },
   computed: {
@@ -191,6 +228,22 @@ export default {
     },
     apiKeyLabel() {
       return this.apiKeyRequired ? 'API Key' : 'API Key（可选）'
+    },
+    canFetchModels() {
+      if (!this.projectId || !this.form.providerType || !this.form.baseUrl) return false
+      if (this.apiKeyRequired) {
+        if (this.form.apiKey) return true
+        return !!this.editingId
+      }
+      return true
+    },
+    modelSelectOptions() {
+      const values = new Set(this.remoteModels || [])
+      const current = (this.form.defaultModel || '').trim()
+      if (current) values.add(current)
+      const meta = this.currentTypeMeta?.defaultModel
+      if (meta) values.add(meta)
+      return Array.from(values).sort()
     }
   },
   watch: {
@@ -200,6 +253,24 @@ export default {
         if (val) this.loadList()
         else this.providers = []
       }
+    },
+    dialogVisible(val) {
+      if (!val) {
+        this.clearModelsFetchTimer()
+        this.remoteModels = []
+        this.modelsWarning = ''
+        this.modelsHint = ''
+        this.modelsSource = ''
+      }
+    },
+    'form.providerType'() {
+      this.scheduleModelsFetch()
+    },
+    'form.baseUrl'() {
+      this.scheduleModelsFetch()
+    },
+    'form.apiKey'() {
+      this.scheduleModelsFetch()
     }
   },
   async created() {
@@ -221,18 +292,84 @@ export default {
       if (Number.isNaN(d.getTime())) return String(iso)
       return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`
     },
-    modelSuggestions(query, cb) {
-      const meta = this.currentTypeMeta
-      const list = (meta?.models || []).map((m) => ({ value: m }))
-      if (!query) return cb(list)
-      const lower = String(query).toLowerCase()
-      cb(list.filter((item) => item.value.toLowerCase().includes(lower)))
+    clearModelsFetchTimer() {
+      if (this.modelsFetchTimer) {
+        clearTimeout(this.modelsFetchTimer)
+        this.modelsFetchTimer = null
+      }
+    },
+    scheduleModelsFetch() {
+      if (!this.dialogVisible) return
+      this.clearModelsFetchTimer()
+      this.modelsFetchTimer = setTimeout(() => {
+        this.modelsFetchTimer = null
+        void this.refreshModels()
+      }, 500)
+    },
+    async refreshModels() {
+      if (!this.canFetchModels) {
+        this.remoteModels = []
+        return
+      }
+      this.modelsLoading = true
+      try {
+        let extra = null
+        try {
+          extra = this.parseExtra()
+        } catch {
+          extra = null
+        }
+        const payload = {
+          providerType: this.form.providerType,
+          baseUrl: (this.form.baseUrl || '').trim(),
+          apiKey: (this.form.apiKey || '').trim(),
+          extraConfig: extra || {}
+        }
+        if (this.editingId) payload.providerId = this.editingId
+        let res
+        if (this.editingId && !payload.apiKey) {
+          res = await listAIProviderModels(this.projectId, this.editingId)
+        } else {
+          res = await discoverAIProviderModels(this.projectId, payload)
+        }
+        const ids = Array.isArray(res?.models)
+          ? res.models.map((m) => String(m?.id || '').trim()).filter(Boolean)
+          : []
+        this.remoteModels = ids
+        this.modelsSource = res?.source ? String(res.source) : ''
+        this.modelsWarning = res?.warning ? String(res.warning) : ''
+        const srcLabel = this.modelsSource === 'api' ? '上游 API' : '内置建议'
+        if (ids.length) {
+          this.modelsHint = `已加载 ${ids.length} 个模型（${srcLabel}），点击左侧下拉查看`
+          this.$message.success(`已加载 ${ids.length} 个模型`)
+        } else {
+          this.modelsHint = '未获取到模型，请检查 Base URL 与 API Key'
+        }
+        if (!this.form.defaultModel && ids.length) {
+          const meta = this.currentTypeMeta
+          const preferred = meta?.defaultModel
+          if (preferred && ids.includes(preferred)) {
+            this.form.defaultModel = preferred
+          } else if (ids.length === 1) {
+            this.form.defaultModel = ids[0]
+          }
+        }
+      } catch (e) {
+        this.remoteModels = []
+        this.modelsHint = ''
+        this.modelsWarning = e?.message ? String(e.message) : '获取模型列表失败'
+      } finally {
+        this.modelsLoading = false
+      }
     },
     async loadList() {
       if (!this.projectId) return
       this.loading = true
+      this.loadError = ''
       try {
         this.providers = await listAIProviders(this.projectId)
+      } catch (err) {
+        this.loadError = getListLoadErrorMessage(err)
       } finally {
         this.loading = false
       }
@@ -242,6 +379,7 @@ export default {
       if (!meta) return
       if (!this.form.baseUrl && meta.defaultBaseUrl) this.form.baseUrl = meta.defaultBaseUrl
       if (!this.form.defaultModel && meta.defaultModel) this.form.defaultModel = meta.defaultModel
+      this.scheduleModelsFetch()
     },
     formatExtra() {
       const raw = (this.form.extraConfig || '').trim()
@@ -256,6 +394,10 @@ export default {
     openCreate() {
       this.editingId = null
       this.form = blankForm()
+      this.remoteModels = []
+      this.modelsWarning = ''
+      this.modelsHint = ''
+      this.modelsSource = ''
       this.dialogVisible = true
     },
     openEdit(row) {
@@ -272,6 +414,7 @@ export default {
         isDefault: !!row.isDefault
       }
       this.dialogVisible = true
+      this.scheduleModelsFetch()
     },
     parseExtra() {
       const raw = (this.form.extraConfig || '').trim()
@@ -428,5 +571,21 @@ export default {
 .extra-input :deep(textarea) {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
   font-size: var(--app-font-size-small);
+}
+
+.model-field-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.model-field-row .model-select {
+  flex: 1;
+  min-width: 0;
+}
+
+.models-warning {
+  color: var(--el-color-warning);
 }
 </style>

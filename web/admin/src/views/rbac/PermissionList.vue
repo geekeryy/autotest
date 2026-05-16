@@ -5,11 +5,17 @@
       <el-button type="primary" @click="dialogVisible = true">新增权限点</el-button>
     </div>
 
-    <el-table :data="permissions" border>
+    <ListLoadError v-if="loadError" :message="loadError" @retry="load" />
+
+    <el-table v-loading="loading" :data="permissions" border>
       <el-table-column prop="code" label="权限编码" width="220" />
       <el-table-column prop="name" label="名称" width="180" />
       <el-table-column prop="description" label="描述" />
     </el-table>
+
+    <el-empty v-if="!loading && !loadError && !permissions.length" description="暂无权限点">
+      <el-button type="primary" @click="dialogVisible = true">新增权限点</el-button>
+    </el-empty>
 
     <el-dialog v-model="dialogVisible" title="新增权限点" width="460px">
       <el-form :model="form" label-width="90px">
@@ -27,11 +33,16 @@
 
 <script>
 import { createPermission, listPermissions } from '../../api'
+import ListLoadError from '../../components/ListLoadError.vue'
+import { getListLoadErrorMessage } from '../../utils/listPageLoad'
 
 export default {
   name: 'PermissionList',
+  components: { ListLoadError },
   data() {
     return {
+      loading: false,
+      loadError: '',
       permissions: [],
       dialogVisible: false,
       form: { code: '', name: '', description: '' }
@@ -42,7 +53,15 @@ export default {
   },
   methods: {
     async load() {
-      this.permissions = await listPermissions()
+      this.loading = true
+      this.loadError = ''
+      try {
+        this.permissions = await listPermissions()
+      } catch (err) {
+        this.loadError = getListLoadErrorMessage(err)
+      } finally {
+        this.loading = false
+      }
     },
     async submit() {
       await createPermission(this.form)

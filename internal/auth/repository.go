@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 
 	"autotest/internal/store"
@@ -103,7 +104,7 @@ func (r *Repository) EnsureDefaults(ctx context.Context, adminUsername, adminPas
 
 func (r *Repository) GetUserByUsername(ctx context.Context, username string) (*User, error) {
 	row := r.DB.QueryRow(ctx, `
-		select id, username, password_hash, display_name, email, active, created_at, updated_at
+		select id, username, password_hash, display_name, email, active, avatar_jpeg, created_at, updated_at
 		from users
 		where username = $1
 	`, username)
@@ -112,7 +113,7 @@ func (r *Repository) GetUserByUsername(ctx context.Context, username string) (*U
 
 func (r *Repository) GetUser(ctx context.Context, id uuid.UUID) (*User, error) {
 	user, err := scanUser(r.DB.QueryRow(ctx, `
-		select id, username, password_hash, display_name, email, active, created_at, updated_at
+		select id, username, password_hash, display_name, email, active, avatar_jpeg, created_at, updated_at
 		from users
 		where id = $1
 	`, id))
@@ -127,7 +128,7 @@ func (r *Repository) GetUser(ctx context.Context, id uuid.UUID) (*User, error) {
 
 func (r *Repository) ListUsers(ctx context.Context) ([]User, error) {
 	rows, err := r.DB.Query(ctx, `
-		select id, username, password_hash, display_name, email, active, created_at, updated_at
+		select id, username, password_hash, display_name, email, active, avatar_jpeg, created_at, updated_at
 		from users
 		order by created_at desc
 	`)
@@ -150,7 +151,7 @@ func (r *Repository) ListUsers(ctx context.Context) ([]User, error) {
 	return users, rows.Err()
 }
 
-func (r *Repository) CreateUser(ctx context.Context, input CreateUserInput) (*User, error) {
+func (r *Repository) CreateUser(ctx context.Context, input CreateUserInput, avatarJPEG []byte) (*User, error) {
 	active := true
 	if input.Active != nil {
 		active = *input.Active
@@ -166,11 +167,16 @@ func (r *Repository) CreateUser(ctx context.Context, input CreateUserInput) (*Us
 	}
 	defer tx.Rollback(ctx)
 
+	var avatarArg any
+	if len(avatarJPEG) > 0 {
+		avatarArg = avatarJPEG
+	}
+
 	user, err := scanUser(tx.QueryRow(ctx, `
-		insert into users (username, password_hash, display_name, email, active)
-		values ($1, $2, $3, $4, $5)
-		returning id, username, password_hash, display_name, email, active, created_at, updated_at
-	`, input.Username, string(hash), input.DisplayName, input.Email, active))
+		insert into users (username, password_hash, display_name, email, active, avatar_jpeg)
+		values ($1, $2, $3, $4, $5, $6)
+		returning id, username, password_hash, display_name, email, active, avatar_jpeg, created_at, updated_at
+	`, input.Username, string(hash), input.DisplayName, input.Email, active, avatarArg))
 	if err != nil {
 		return nil, fmt.Errorf("create user: %w", err)
 	}
@@ -183,7 +189,7 @@ func (r *Repository) CreateUser(ctx context.Context, input CreateUserInput) (*Us
 	return r.GetUser(ctx, user.ID)
 }
 
-func (r *Repository) UpdateUser(ctx context.Context, id uuid.UUID, input UpdateUserInput) (*User, error) {
+func (r *Repository) UpdateUser(ctx context.Context, id uuid.UUID, input UpdateUserInput, touchAvatar, clearAvatar bool, avatarJPEG []byte) (*User, error) {
 	tx, err := r.DB.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("begin update user: %w", err)
@@ -217,6 +223,18 @@ func (r *Repository) UpdateUser(ctx context.Context, id uuid.UUID, input UpdateU
 		where id = $1
 	`, id, input.DisplayName, input.Email, active); err != nil {
 		return nil, fmt.Errorf("update user: %w", err)
+	}
+
+	if touchAvatar {
+		if clearAvatar {
+			if _, err := tx.Exec(ctx, `update users set avatar_jpeg = null, updated_at = now() where id = $1`, id); err != nil {
+				return nil, fmt.Errorf("清除头像: %w", err)
+			}
+		} else {
+			if _, err := tx.Exec(ctx, `update users set avatar_jpeg = $2, updated_at = now() where id = $1`, id, avatarJPEG); err != nil {
+				return nil, fmt.Errorf("更新头像: %w", err)
+			}
+		}
 	}
 
 	if input.RoleIDs != nil {
@@ -476,10 +494,21 @@ type scanner interface {
 
 func scanUser(row scanner) (*User, error) {
 	var user User
-	if err := row.Scan(&user.ID, &user.Username, &user.PasswordHash, &user.DisplayName, &user.Email, &user.Active, &user.CreatedAt, &user.UpdatedAt); err != nil {
+	var avatar []byte
+	if err := row.Scan(&user.ID, &user.Username, &user.PasswordHash, &user.DisplayName, &user.Email, &user.Active, &avatar, &user.CreatedAt, &user.UpdatedAt); err != nil {
 		return nil, fmt.Errorf("scan user: %w", err)
 	}
+	user.avatarJPEG = avatar
+	applyAvatarURL(&user)
 	return &user, nil
+}
+
+func applyAvatarURL(u *User) {
+	if len(u.avatarJPEG) == 0 {
+		u.AvatarURL = ""
+		return
+	}
+	u.AvatarURL = "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(u.avatarJPEG)
 }
 
 func scanRole(row scanner) (*Role, error) {

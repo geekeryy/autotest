@@ -1,8 +1,10 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
+import { bindPage } from '../stores/aiAssistant'
 import AdminLayout from '../layout/AdminLayout.vue'
 import Login from '../views/Login.vue'
 import Dashboard from '../views/Dashboard.vue'
+import AIAssistantPage from '../views/AIAssistantPage.vue'
 import ProjectManagement from '../views/projects/ProjectManagement.vue'
 import SQLParameterSourceList from '../views/data/SQLParameterSourceList.vue'
 import MockServerList from '../views/data/MockServerList.vue'
@@ -21,6 +23,11 @@ import ApiKeyList from '../views/rbac/ApiKeyList.vue'
 export const menuRoutes = [
   { path: '/', redirect: '/dashboard' },
   { path: '/dashboard', component: Dashboard, meta: { title: '概览' } },
+  {
+    path: '/ai-assistant',
+    component: AIAssistantPage,
+    meta: { title: 'AI 助理', hidden: true }
+  },
   { path: '/projects', component: ProjectManagement, meta: { title: '项目管理', permission: 'projects:read' } },
   {
     path: '/test-data',
@@ -97,6 +104,24 @@ const router = createRouter({
       children: menuRoutes
     }
   ]
+})
+
+// Push a baseline page-context snapshot on every navigation so the AI
+// assistant always knows at least the current route. Individual pages
+// can call `enrichPage` from setup/mount to add resolved fields like
+// scenarioName / caseName once their data has loaded.
+router.afterEach((to) => {
+  if (to.meta?.public) {
+    bindPage(null)
+    return
+  }
+  const ctx = {
+    path: to.path,
+    routeTitle: to.meta?.title || '',
+  }
+  if (to.params?.scenarioID) ctx.scenarioId = String(to.params.scenarioID)
+  if (to.params?.caseID) ctx.caseId = String(to.params.caseID)
+  bindPage(ctx)
 })
 
 export default router

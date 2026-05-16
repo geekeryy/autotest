@@ -46,6 +46,7 @@ func openAICompatibleFromSpec(spec Spec) *OpenAICompatibleClient {
 		BaseURL:      spec.BaseURL,
 		APIKey:       spec.APIKey,
 		DefaultModel: spec.DefaultModel,
+		Thinking:     openAIThinkingFromSpec(spec),
 	}
 	if spec.ExtraConfig == nil {
 		return c
@@ -64,6 +65,75 @@ func openAICompatibleFromSpec(spec Spec) *OpenAICompatibleClient {
 		}
 	}
 	return c
+}
+
+func openAIThinkingFromSpec(spec Spec) *OpenAIThinkingConfig {
+	providerType := strings.ToLower(strings.TrimSpace(spec.Type))
+	cfg := &OpenAIThinkingConfig{
+		Enabled: providerType == "deepseek" || providerType == "xiaomi",
+		Dialect: providerType,
+	}
+	switch providerType {
+	case "deepseek":
+		cfg.Effort = "high"
+	case "xiaomi":
+		cfg.Effort = "high"
+	}
+
+	if spec.ExtraConfig != nil {
+		if v, ok := spec.ExtraConfig["reasoning_effort"].(string); ok && strings.TrimSpace(v) != "" {
+			cfg.Effort = strings.TrimSpace(v)
+		}
+		if v, ok := spec.ExtraConfig["reasoningEffort"].(string); ok && strings.TrimSpace(v) != "" {
+			cfg.Effort = strings.TrimSpace(v)
+		}
+		if v, ok := spec.ExtraConfig["reasoning_summary"].(string); ok && strings.TrimSpace(v) != "" {
+			cfg.Summary = strings.TrimSpace(v)
+		}
+		if v, ok := spec.ExtraConfig["reasoningSummary"].(string); ok && strings.TrimSpace(v) != "" {
+			cfg.Summary = strings.TrimSpace(v)
+		}
+		applyThinkingExtra(cfg, spec.ExtraConfig["thinking"])
+	}
+
+	if !cfg.Enabled || strings.TrimSpace(cfg.Dialect) == "" {
+		return nil
+	}
+	return cfg
+}
+
+func applyThinkingExtra(cfg *OpenAIThinkingConfig, raw any) {
+	if cfg == nil || raw == nil {
+		return
+	}
+	if enabled, ok := raw.(bool); ok {
+		cfg.Enabled = enabled
+		return
+	}
+	obj, ok := raw.(map[string]any)
+	if !ok {
+		return
+	}
+	if enabled, ok := obj["enabled"].(bool); ok {
+		cfg.Enabled = enabled
+	}
+	if typ, ok := obj["type"].(string); ok {
+		switch strings.ToLower(strings.TrimSpace(typ)) {
+		case "enabled":
+			cfg.Enabled = true
+		case "disabled":
+			cfg.Enabled = false
+		}
+	}
+	if dialect, ok := obj["dialect"].(string); ok && strings.TrimSpace(dialect) != "" {
+		cfg.Dialect = strings.ToLower(strings.TrimSpace(dialect))
+	}
+	if effort, ok := obj["effort"].(string); ok && strings.TrimSpace(effort) != "" {
+		cfg.Effort = strings.TrimSpace(effort)
+	}
+	if summary, ok := obj["summary"].(string); ok && strings.TrimSpace(summary) != "" {
+		cfg.Summary = strings.TrimSpace(summary)
+	}
 }
 
 func anthropicFromSpec(spec Spec) *AnthropicClient {

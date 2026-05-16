@@ -2,18 +2,21 @@ package main
 
 import (
 	"context"
-	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"autotest/internal/aianalysis"
 	"autotest/internal/aiprovider"
+	"autotest/internal/aisession"
+	"autotest/internal/aitools/builtin"
 	"autotest/internal/apikey"
 	"autotest/internal/auth"
 	testcase "autotest/internal/case"
 	"autotest/internal/generator"
 	"autotest/internal/httpx"
+	"autotest/internal/logx"
 	"autotest/internal/mockserver"
 	"autotest/internal/mockset"
 	"autotest/internal/paramsource"
@@ -33,10 +36,13 @@ import (
 )
 
 func main() {
+	logx.Init()
+
 	ctx := context.Background()
 	db, err := store.Open(ctx, store.ConfigFromEnv())
 	if err != nil {
-		log.Fatalf("open database: %v", err)
+		logx.Error("open database", "err", err)
+		os.Exit(1)
 	}
 	defer db.Close()
 
@@ -45,7 +51,8 @@ func main() {
 	authRepo := auth.NewRepository(repo)
 	authSvc := auth.NewService(authRepo)
 	if err := authSvc.EnsureDefaultAdmin(ctx); err != nil {
-		log.Fatalf("ensure default admin: %v", err)
+		logx.Error("ensure default admin", "err", err)
+		os.Exit(1)
 	}
 
 	projectRepo := project.NewRepository(repo)
@@ -71,7 +78,7 @@ func main() {
 	mockServerRuntime := mockserver.NewRuntime(mockServerRepo, mockSetSvc)
 	mockServerSvc := mockserver.NewService(mockServerRepo, mockServerRuntime)
 	if err := mockServerSvc.AutoStartAll(ctx); err != nil {
-		log.Printf("auto-start mock servers: %v", err)
+		logx.Warn("auto-start mock servers", "err", err)
 	}
 	aiProviderRepo := aiprovider.NewRepository(repo)
 	aiProviderSvc := aiprovider.NewService(aiProviderRepo).WithMockSets(mockSetSummaryAdapter{svc: mockSetSvc})
@@ -82,15 +89,17 @@ func main() {
 	apiKeyRepo := apikey.NewRepository(repo)
 	apiKeySvc := apikey.NewService(apiKeyRepo, authRepo)
 	authSvc.WithAPIKey(apiKeySvc)
+	aiSessionRepo := aisession.NewRepository(repo)
+	aiSessionSvc := aisession.NewService(aiSessionRepo)
 	caseRunner := runner.New(nil, nil, reportRepo)
 	runSvc := runner.NewService(caseSvc, projectSvc, reportRepo, caseRunner, paramSourceSvc, testDataSvc, mockSetSvc)
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
-	r.Use(middleware.Logger)
+	r.Use(logx.RequestLogger)
 	r.Use(middleware.Recoverer)
-	r.Use(middleware.Timeout(60 * time.Second))
+	r.Use(timeoutExceptStream(60 * time.Second))
 	r.Use(devCORS)
 
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -118,11 +127,31 @@ func main() {
 		mockserver.NewHandler(mockServerSvc, projectHandler).Register(r)
 		mockset.NewHandler(mockSetSvc, projectHandler).Register(r)
 		projectprompt.NewHandler(projectPromptSvc, projectHandler).Register(r)
-		aiprovider.NewHandler(aiProviderSvc, projectHandler, projectPromptSvc).Register(r)
+
+		// 全局 AI 助理与智能分析共用一份内置工具配置：智能分析仅注入只读
+		// 工具，浮窗会话再额外挂载受控写工具。任何写工具调用都会被 SSE 流
+		// 程挂起，等待用户在前端确认后才真正执行。
+		toolDeps := builtin.Deps{
+			Cases:     caseSvc,
+			Scenarios: scenarioSvc,
+			Specs:     specRepo,
+			Projects:  projectSvc,
+		}
+		aiReadOnly := builtin.ReadOnly(toolDeps)
+		aiAllTools := builtin.All(toolDeps)
+
+		aiprovider.NewHandler(aiProviderSvc, projectHandler, projectPromptSvc).
+			WithAssistant(aisession.NewStoreAdapter(aiSessionSvc), aiAllTools).
+			Register(r)
+		aisession.NewHandler(aiSessionSvc, projectHandler).Register(r)
+
 		testdata.NewHandler(testDataSvc, projectHandler).Register(r)
 		runner.NewHandler(runSvc, scenarioRepo).Register(r)
 		apikey.NewHandler(apiKeySvc, authSvc.RequirePermission).Register(r)
-		aianalysis.NewHandler(repo, aiProviderSvc, projectPromptSvc, reportRepo, projectHandler).Register(r)
+
+		aianalysis.NewHandler(repo, aiProviderSvc, projectPromptSvc, reportRepo, projectHandler).
+			WithTools(aiReadOnly).
+			Register(r)
 	})
 
 	// API Key 白名单组：当前仅 OpenAPI/Swagger 导入接口允许 API Key 调用，
@@ -139,9 +168,10 @@ func main() {
 	if addr == "" {
 		addr = ":8080"
 	}
-	log.Printf("api listening on %s", addr)
+	logx.Info("api listening", "addr", addr)
 	if err := http.ListenAndServe(addr, r); err != nil {
-		log.Fatalf("listen: %v", err)
+		logx.Error("listen", "err", err)
+		os.Exit(1)
 	}
 }
 
@@ -169,6 +199,36 @@ func (a mockSetSummaryAdapter) SummariesForProject(ctx context.Context, projectI
 		})
 	}
 	return out
+}
+
+// timeoutExceptStream wraps the standard chi Timeout middleware but lets
+// long-lived SSE endpoints through untouched. Without this bypass the
+// global 60s timeout would cut every AI assistant stream short, since
+// http.TimeoutHandler buffers the response writer (defeating the
+// purpose of streaming) and force-closes the connection on deadline.
+func timeoutExceptStream(d time.Duration) func(http.Handler) http.Handler {
+	timeout := middleware.Timeout(d)
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if isStreamPath(r.URL.Path) {
+				next.ServeHTTP(w, r)
+				return
+			}
+			timeout(next).ServeHTTP(w, r)
+		})
+	}
+}
+
+// isStreamPath identifies SSE endpoints. Keep this list narrow: the
+// timeout middleware is a real safety net for the rest of the API.
+func isStreamPath(path string) bool {
+	if strings.HasSuffix(path, "/chat/stream") {
+		return true
+	}
+	if strings.Contains(path, "/tool-calls/") && strings.HasSuffix(path, "/confirm") {
+		return true
+	}
+	return false
 }
 
 func devCORS(next http.Handler) http.Handler {

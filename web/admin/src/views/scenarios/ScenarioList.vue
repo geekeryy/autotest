@@ -1,6 +1,6 @@
 <template>
-  <div class="scenario-workspace">
-    <!-- 左侧：场景列表 -->
+  <WorkspaceLayout class="scenario-workspace" sidebar-width="260px" :breakpoint="1100" narrow-mode="stack">
+    <template #sidebar>
     <div class="scenario-sidebar">
       <div class="sidebar-header">
         <el-select
@@ -44,8 +44,8 @@
         <div v-if="!serviceId" class="empty-tip">请先选择服务</div>
       </div>
     </div>
+    </template>
 
-    <!-- 右侧：多 Tab 编辑区 -->
     <div class="scenario-main">
       <template v-if="tabs.length">
         <el-tabs
@@ -98,7 +98,7 @@
         <el-button type="primary" @click="submitScenario">保存</el-button>
       </template>
     </el-dialog>
-  </div>
+  </WorkspaceLayout>
 </template>
 
 <script>
@@ -115,6 +115,7 @@ import {
   updateScenario
 } from '../../api'
 import { loadGlobalProjects, projectState } from '../../utils/currentProject'
+import { enrichPage } from '../../stores/aiAssistant'
 import {
   SCENARIO_STEP_WORKSPACE_KEY,
   SCENARIO_WORKSPACE_KEY,
@@ -123,13 +124,15 @@ import {
   readTabState,
   writeTabState
 } from '../../utils/workspaceTabs'
+import WorkspaceLayout from '../../components/WorkspaceLayout.vue'
 import ScenarioEditor from './ScenarioEditor.vue'
 
 export default {
   name: 'ScenarioList',
   components: {
     MoreFilled,
-    ScenarioEditor
+    ScenarioEditor,
+    WorkspaceLayout,
   },
 
   data() {
@@ -187,7 +190,13 @@ export default {
       if (this._initializing) return
       if (!id) return
       const sc = this.scenarios.find((s) => s.id === id)
-      if (sc) this.openScenario(sc, { sync: false })
+      if (sc) {
+        this.openScenario(sc, { sync: false })
+        enrichPage({ scenarioName: sc.name, serviceId: this.serviceId })
+      }
+    },
+    serviceId(id) {
+      enrichPage({ serviceId: id || undefined })
     }
   },
 
@@ -264,7 +273,10 @@ export default {
       const urlId = this.$route.params.scenarioID
       if (urlId) {
         const sc = this.scenarios.find((s) => s.id === urlId)
-        if (sc) this.openScenario(sc, { sync: false })
+        if (sc) {
+          this.openScenario(sc, { sync: false })
+          enrichPage({ scenarioName: sc.name, serviceId: this.serviceId })
+        }
       }
     },
 
@@ -427,18 +439,14 @@ export default {
 
 <style scoped>
 .scenario-workspace {
-  display: flex;
   height: 100%;
-  gap: 0;
   overflow: hidden;
 }
 
 /* Left sidebar */
 .scenario-sidebar {
-  width: 260px;
-  min-width: 180px;
-  max-width: 320px;
-  border-right: 1px solid var(--el-border-color);
+  width: 100%;
+  height: 100%;
   display: flex;
   flex-direction: column;
   background: var(--el-bg-color);
@@ -496,13 +504,13 @@ export default {
 }
 
 .scenario-action {
-  visibility: hidden;
+  opacity: 0.45;
   cursor: pointer;
   color: var(--el-text-color-secondary);
 }
 
 .scenario-item:hover .scenario-action {
-  visibility: visible;
+  opacity: 1;
 }
 
 /* Main area */

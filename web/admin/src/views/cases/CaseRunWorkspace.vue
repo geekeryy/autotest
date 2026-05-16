@@ -112,6 +112,7 @@
 <script>
 import { getCase, listCases, listEndpoints, listServices } from '../../api'
 import { loadGlobalProjects, projectState, setCurrentProjectId } from '../../utils/currentProject'
+import { enrichPage } from '../../stores/aiAssistant'
 import { persistServiceId, readStoredServiceId } from '../../utils/serviceSelection'
 import CaseRun from './CaseRun.vue'
 
@@ -202,10 +203,16 @@ export default {
     }
   },
   watch: {
-    activeCaseId() {
+    activeCaseId(id) {
       this.$nextTick(() => {
         const panels = this.$el?.querySelector('.console-panels')
         if (panels) panels.scrollTop = 0
+      })
+      const tab = id ? this.tabs.find((t) => t.id === id) : null
+      enrichPage({
+        caseId: id || undefined,
+        caseName: tab?.name || undefined,
+        serviceId: this.selectedServiceId || undefined,
       })
     },
     async projectId(newValue, oldValue) {

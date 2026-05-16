@@ -188,6 +188,7 @@ import { hasPermission } from '../../auth'
 import { loadGlobalProjects, projectState } from '../../utils/currentProject'
 import { formatDateTime } from '../../utils/datetime'
 import { persistServiceId, readStoredServiceId } from '../../utils/serviceSelection'
+import { enrichPage } from '../../stores/aiAssistant'
 import AIAnalysisDialog from '../../components/AIAnalysisDialog.vue'
 import AiSparkleIcon from '../../components/icons/AiSparkleIcon.vue'
 
@@ -244,6 +245,9 @@ export default {
   watch: {
     projectId() {
       this.loadServices()
+    },
+    serviceId(id) {
+      enrichPage({ serviceId: id || undefined })
     }
   },
   methods: {

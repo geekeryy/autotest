@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"autotest/internal/aiprovider/client"
+	"autotest/internal/aitools"
 	"autotest/internal/httpx"
 	"autotest/internal/project"
 	"autotest/internal/projectprompt"
@@ -25,6 +26,10 @@ type Handler struct {
 	service        *Service
 	projectHandler *project.Handler
 	promptSvc      promptService
+	// Conversational assistant plumbing. Both fields are optional — when
+	// nil the streaming routes refuse with 503.
+	sessionStore   SessionStore
+	assistantTools []aitools.Tool
 }
 
 // NewHandler constructs a Handler.
@@ -40,6 +45,8 @@ func (h *Handler) Register(r chi.Router) {
 		r.Use(h.projectHandler.RequireProjectRole(project.ProjectRoleViewer))
 
 		r.Get("/", h.list)
+		r.Get("/{providerID}/models", h.listModels)
+		r.Post("/models/discover", h.discoverModels)
 
 		r.Group(func(r chi.Router) {
 			r.Use(requireProjectRole(project.ProjectRoleDeveloper))
@@ -53,6 +60,8 @@ func (h *Handler) Register(r chi.Router) {
 	r.Route("/projects/{projectID}/ai", func(r chi.Router) {
 		r.Use(h.projectHandler.RequireProjectRole(project.ProjectRoleViewer))
 		r.Post("/chat", h.chat)
+		r.Post("/chat/stream", h.chatStream)
+		r.Post("/tool-calls/{callID}/confirm", h.confirmToolCall)
 	})
 }
 
@@ -119,6 +128,37 @@ func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) listModels(w http.ResponseWriter, r *http.Request) {
+	projectID, providerID, ok := parseProviderIDs(w, r)
+	if !ok {
+		return
+	}
+	result, err := h.service.ListModels(r.Context(), projectID, providerID)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, result)
+}
+
+func (h *Handler) discoverModels(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := parseProjectID(w, r)
+	if !ok {
+		return
+	}
+	var input DiscoverModelsInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		httpx.Error(w, http.StatusBadRequest, err)
+		return
+	}
+	result, err := h.service.DiscoverModels(r.Context(), projectID, input)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, result)
 }
 
 func (h *Handler) test(w http.ResponseWriter, r *http.Request) {

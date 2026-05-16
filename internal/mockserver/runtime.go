@@ -6,12 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"sync"
 	"time"
 
+	"autotest/internal/logx"
 	"autotest/internal/templating"
 
 	"github.com/google/uuid"
@@ -87,7 +87,7 @@ func (rt *Runtime) Start(server MockServer) error {
 
 	go func() {
 		if err := httpServer.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Printf("mock server %s stopped unexpectedly: %v", server.ID, err)
+			logx.Error("mock server stopped unexpectedly", "id", server.ID, "err", err)
 		}
 		rt.mu.Lock()
 		if rt.running[server.ID] == state {

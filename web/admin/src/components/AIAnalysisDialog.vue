@@ -50,7 +50,9 @@
         <span class="ai-analysis-meta-sep">·</span>
         <span>耗时：<strong>{{ elapsedMillis || 0 }} ms</strong></span>
       </div>
-      <pre class="ai-analysis-text">{{ text }}</pre>
+      <div class="ai-analysis-body">
+        <MarkdownView :source="text" />
+      </div>
     </div>
 
     <el-empty v-else description="暂无分析结果" :image-size="48" />
@@ -65,10 +67,11 @@
 
 <script>
 import { Loading } from '@element-plus/icons-vue'
+import MarkdownView from './MarkdownView.vue'
 
 export default {
   name: 'AIAnalysisDialog',
-  components: { Loading },
+  components: { Loading, MarkdownView },
   props: {
     modelValue: { type: Boolean, default: false },
     title: { type: String, default: '' },
@@ -149,18 +152,11 @@ export default {
   font-weight: 500;
 }
 
-.ai-analysis-text {
-  margin: 0;
+.ai-analysis-body {
   padding: 14px 16px;
   background: var(--el-fill-color-lighter, #fafafa);
   border: 1px solid var(--el-border-color-lighter, #ebeef5);
   border-radius: 6px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
-  font-size: var(--app-font-size-small);
-  line-height: 1.6;
-  color: var(--el-text-color-primary, #303133);
-  white-space: pre-wrap;
-  word-break: break-word;
   max-height: 60vh;
   overflow: auto;
 }

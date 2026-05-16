@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -122,11 +123,29 @@ func (s *Service) CreateUser(ctx context.Context, input CreateUserInput) (*User,
 	if input.Password == "" {
 		return nil, errors.New("password is required")
 	}
-	return s.repo.CreateUser(ctx, input)
+	var avatar []byte
+	if strings.TrimSpace(input.AvatarBase64) != "" {
+		var err error
+		avatar, err = ProcessAvatarBase64(input.AvatarBase64)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return s.repo.CreateUser(ctx, input, avatar)
 }
 
 func (s *Service) UpdateUser(ctx context.Context, id uuid.UUID, input UpdateUserInput) (*User, error) {
-	return s.repo.UpdateUser(ctx, id, input)
+	touchAvatar := input.ClearAvatar || strings.TrimSpace(input.AvatarBase64) != ""
+	clearAvatar := input.ClearAvatar
+	var jpeg []byte
+	if touchAvatar && !clearAvatar {
+		var err error
+		jpeg, err = ProcessAvatarBase64(input.AvatarBase64)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return s.repo.UpdateUser(ctx, id, input, touchAvatar, clearAvatar, jpeg)
 }
 
 func (s *Service) DeleteUser(ctx context.Context, id uuid.UUID) error {

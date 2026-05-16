@@ -18,6 +18,9 @@
   --app-sidebar-bg: #0f172a;
   --app-sidebar-text: #cbd5e1;
   --app-sidebar-active: #ffffff;
+  --app-sidebar-menu-hover-bg: rgba(255, 255, 255, 0.1);
+  --app-sidebar-menu-active-bg: color-mix(in srgb, var(--app-primary-color) 18%, var(--app-sidebar-bg));
+  --app-sidebar-menu-active-accent: var(--app-primary-color);
   --app-page-bg: #f8fafc;
   --app-card-bg: #ffffff;
   --app-text-color: #0f172a;
@@ -26,6 +29,9 @@
   --app-code-bg: #f1f5f9;
   --app-workspace-bg: #f3f6fb;
   --app-border-radius: 8px;
+  --app-text-muted: var(--app-secondary-text);
+  --app-surface-subtle: #f2f3f5;
+  --app-focus-ring: color-mix(in srgb, var(--app-primary-color) 10%, var(--app-card-bg));
 }
 
 html,
@@ -314,16 +320,13 @@ select {
   cursor: not-allowed;
 }
 
-/* 暗色主题：背景略淡，hover 仍可读 */
-:root[data-theme='dark'] .ai-sparkle-btn,
-:root[data-theme='dark'] .el-button.ai-sparkle-btn {
-  --ai-grad-start: rgba(167, 139, 250, 0.1);
-  --ai-grad-end: rgba(96, 165, 250, 0.1);
-  --ai-grad-start-hover: rgba(167, 139, 250, 0.2);
-  --ai-grad-end-hover: rgba(96, 165, 250, 0.2);
-  color: #c4b5fd !important;
+.list-load-error {
+  margin-bottom: 12px;
 }
-:root[data-theme='dark'] .ai-sparkle-btn:hover,
-:root[data-theme='dark'] .el-button.ai-sparkle-btn:hover {
-  color: #ddd6fe !important;
+
+.list-load-error :deep(.el-alert__title) {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }

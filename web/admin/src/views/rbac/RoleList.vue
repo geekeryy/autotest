@@ -5,7 +5,9 @@
       <el-button type="primary" @click="openCreate">新增角色</el-button>
     </div>
 
-    <el-table :data="roles" border>
+    <ListLoadError v-if="loadError" :message="loadError" @retry="load" />
+
+    <el-table v-loading="loading" :data="roles" border>
       <el-table-column prop="code" label="编码" width="160" />
       <el-table-column prop="name" label="名称" width="160" />
       <el-table-column prop="description" label="描述" />
@@ -21,6 +23,10 @@
         </template>
       </el-table-column>
     </el-table>
+
+    <el-empty v-if="!loading && !loadError && !roles.length" description="暂无角色">
+      <el-button type="primary" @click="openCreate">新增角色</el-button>
+    </el-empty>
 
     <el-dialog v-model="dialogVisible" :title="editing ? '编辑角色' : '新增角色'" width="620px">
       <el-form :model="form" label-width="90px">
@@ -43,11 +49,16 @@
 
 <script>
 import { createRole, deleteRole, listPermissions, listRoles, updateRole } from '../../api'
+import ListLoadError from '../../components/ListLoadError.vue'
+import { getListLoadErrorMessage } from '../../utils/listPageLoad'
 
 export default {
   name: 'RoleList',
+  components: { ListLoadError },
   data() {
     return {
+      loading: false,
+      loadError: '',
       roles: [],
       permissions: [],
       dialogVisible: false,
@@ -63,9 +74,17 @@ export default {
       return { code: '', name: '', description: '', permissionIds: [] }
     },
     async load() {
-      const [roles, permissions] = await Promise.all([listRoles(), listPermissions()])
-      this.roles = roles
-      this.permissions = permissions
+      this.loading = true
+      this.loadError = ''
+      try {
+        const [roles, permissions] = await Promise.all([listRoles(), listPermissions()])
+        this.roles = roles
+        this.permissions = permissions
+      } catch (err) {
+        this.loadError = getListLoadErrorMessage(err)
+      } finally {
+        this.loading = false
+      }
     },
     openCreate() {
       this.editing = null

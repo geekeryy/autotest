@@ -9,9 +9,16 @@ import (
 	"time"
 
 	"autotest/internal/aiprovider/client"
+	"autotest/internal/aitools"
 
 	"github.com/google/uuid"
 )
+
+// MaxToolHops caps how many round-trips the tool-calling loop will perform
+// for a single AI call. Each hop is one LLM round-trip; after the cap the
+// loop returns whatever text the model produced last (or a clear warning if
+// the model still wanted to call tools).
+const MaxToolHops = 6
 
 // MockSetSummaryProvider 是 aiprovider 用来为 `generate_params` 注入项目级
 // 命名值集合摘要的可选依赖。返回的 summary 仅供模型参考；任何错误都被静默
@@ -50,60 +57,14 @@ func (s *Service) WithMockSets(provider MockSetSummaryProvider) *Service {
 
 // SupportedTypes returns metadata about each provider type for the frontend create form.
 func (s *Service) SupportedTypes() []ProviderTypeMeta {
-	return []ProviderTypeMeta{
-		{
-			Type:           ProviderTypeDeepSeek,
-			Label:          "DeepSeek",
-			DefaultBaseURL: "https://api.deepseek.com/v1",
-			DefaultModel:   "deepseek-chat",
-			Models:         []string{"deepseek-chat", "deepseek-reasoner"},
-			APIKeyRequired: true,
-			Notes:          "OpenAI 兼容协议，使用官方 https://api.deepseek.com/v1。",
-		},
-		{
-			Type:           ProviderTypeXiaomi,
-			Label:          "Xiaomi（小米大模型）",
-			DefaultBaseURL: "",
-			DefaultModel:   "",
-			APIKeyRequired: true,
-			Notes:          "小米大模型网关，需要在企业内部确认 base URL（OpenAI 兼容）。",
-		},
-		{
-			Type:           ProviderTypeOpenAI,
-			Label:          "OpenAI",
-			DefaultBaseURL: "https://api.openai.com/v1",
-			DefaultModel:   "gpt-4o-mini",
-			Models:         []string{"gpt-4o-mini", "gpt-4o", "gpt-4.1-mini"},
-			APIKeyRequired: true,
-			Notes:          "可在 extraConfig 中通过 organization 或 headers 字段附加自定义请求头。",
-		},
-		{
-			Type:           ProviderTypeAnthropic,
-			Label:          "Anthropic",
-			DefaultBaseURL: "https://api.anthropic.com/v1",
-			DefaultModel:   "claude-3-5-sonnet-latest",
-			Models:         []string{"claude-3-5-sonnet-latest", "claude-3-5-haiku-latest", "claude-3-opus-latest"},
-			APIKeyRequired: true,
-			Notes:          "默认使用 anthropic-version: 2023-06-01，可在 extraConfig.anthropicVersion 覆盖。",
-		},
-		{
-			Type:           ProviderTypeKimi,
-			Label:          "Kimi（月之暗面）",
-			DefaultBaseURL: "https://api.moonshot.cn/v1",
-			DefaultModel:   "moonshot-v1-8k",
-			Models:         []string{"moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k"},
-			APIKeyRequired: true,
-			Notes:          "OpenAI 兼容协议，访问 Moonshot AI。",
-		},
-		{
-			Type:           ProviderTypeOllama,
-			Label:          "Ollama（本地）",
-			DefaultBaseURL: "http://localhost:11434/v1",
-			DefaultModel:   "llama3.1:8b",
-			APIKeyRequired: false,
-			Notes:          "本地部署的 Ollama，需以 OpenAI 兼容端点访问（路径 /v1/chat/completions）。",
-		},
+	meta := supportedTypesMeta()
+	out := make([]ProviderTypeMeta, len(meta))
+	for i, m := range meta {
+		// Models are offline fallbacks; live lists come from ListModels/DiscoverModels.
+		m.Models = nil
+		out[i] = m
 	}
+	return out
 }
 
 // List returns all providers visible to the project (with masked API keys).
@@ -275,6 +236,157 @@ func (s *Service) Chat(ctx context.Context, projectID uuid.UUID, req ChatRequest
 		resp.ParseWarnings = warning
 	}
 	return resp, nil
+}
+
+// ChatWithTools is the multi-hop version of Chat. When the configured model
+// returns tool_calls, each non-mutating tool is executed locally and the
+// result is fed back to the model; the loop continues until the model
+// produces a final text answer (or until MaxToolHops is reached).
+//
+// PR-1 contract: mutating tools are filtered out before being shown to the
+// model. Human-in-the-loop confirmation for mutating tools lands together
+// with the global assistant in a later PR.
+//
+// Errors from individual tool runs are not fatal — the error message is
+// embedded into the tool result fed back to the model, which can then
+// recover (e.g. try a different tool or stop calling).
+func (s *Service) ChatWithTools(ctx context.Context, projectID uuid.UUID, req ChatRequest, tools []aitools.Tool) (*ChatResponse, error) {
+	if projectID == uuid.Nil {
+		return nil, errors.New("projectId is required")
+	}
+	if req.ProviderID == uuid.Nil {
+		return nil, errors.New("providerId is required")
+	}
+	action := strings.TrimSpace(req.Action)
+	if action == "" {
+		action = ActionRaw
+	}
+	if !validAction(action) {
+		return nil, ErrProviderActionInvalid
+	}
+
+	row, err := s.repo.Get(ctx, projectID, req.ProviderID)
+	if err != nil {
+		return nil, err
+	}
+	if !row.Enabled {
+		return nil, ErrProviderDisabled
+	}
+
+	cli, err := s.buildClient(row)
+	if err != nil {
+		return nil, err
+	}
+
+	readOnly := make([]aitools.Tool, 0, len(tools))
+	toolByName := make(map[string]aitools.Tool, len(tools))
+	for _, t := range tools {
+		if t.Mutating {
+			continue
+		}
+		readOnly = append(readOnly, t)
+		toolByName[t.Name] = t
+	}
+
+	messages, _ := buildMessages(action, req.Prompt, req.Context, req.SystemPromptOverride)
+	baseOpts := client.Options{
+		Model:       req.Model,
+		Temperature: req.Temperature,
+		MaxTokens:   req.MaxTokens,
+		Tools:       aitools.Describe(readOnly),
+	}
+
+	timeoutCtx, cancel := context.WithTimeout(ctx, 180*time.Second)
+	defer cancel()
+
+	var (
+		finalText  string
+		finalModel string
+		totalMs    int64
+		lastResult *client.Result
+	)
+
+	for hop := 0; hop < MaxToolHops; hop++ {
+		start := time.Now()
+		result, err := cli.Chat(timeoutCtx, messages, baseOpts)
+		totalMs += time.Since(start).Milliseconds()
+		if err != nil {
+			return nil, err
+		}
+		lastResult = result
+		finalModel = result.Model
+
+		if len(result.ToolCalls) == 0 {
+			finalText = result.Text
+			break
+		}
+
+		// Append the assistant turn that requested the tool calls.
+		messages = append(messages, client.Message{
+			Role:             "assistant",
+			Content:          result.Text,
+			ReasoningContent: result.ReasoningContent,
+			ToolCalls:        result.ToolCalls,
+		})
+
+		// Execute each tool call and append a corresponding tool result.
+		for _, call := range result.ToolCalls {
+			content := executeToolCall(ctx, toolByName, call)
+			messages = append(messages, client.Message{
+				Role:       "tool",
+				ToolCallID: call.ID,
+				Content:    content,
+			})
+		}
+	}
+
+	if finalText == "" {
+		if lastResult != nil && len(lastResult.ToolCalls) > 0 {
+			finalText = fmt.Sprintf("AI 在 %d 轮工具调用后仍未给出结论，已停止。请缩小问题范围或在 Prompt 中给出更明确的指令。", MaxToolHops)
+		} else {
+			finalText = ""
+		}
+	}
+
+	return &ChatResponse{
+		ProviderID:    row.ID,
+		Action:        action,
+		Model:         finalModel,
+		Text:          finalText,
+		ElapsedMillis: totalMs,
+	}, nil
+}
+
+// executeToolCall runs a single tool and serialises the result for the
+// model. Both success and failure paths return a JSON string so the model
+// always sees structured content under the "tool" role; this matches what
+// OpenAI and Anthropic expect.
+func executeToolCall(ctx context.Context, tools map[string]aitools.Tool, call client.ToolCall) string {
+	tool, ok := tools[call.Name]
+	if !ok {
+		return encodeToolError(fmt.Sprintf("未知工具: %s", call.Name))
+	}
+	args := call.Arguments
+	if len(strings.TrimSpace(string(args))) == 0 {
+		args = json.RawMessage("{}")
+	}
+	value, err := tool.Run(ctx, args)
+	if err != nil {
+		return encodeToolError(err.Error())
+	}
+	body, err := json.Marshal(value)
+	if err != nil {
+		return encodeToolError(fmt.Sprintf("序列化工具结果失败: %s", err))
+	}
+	return string(body)
+}
+
+func encodeToolError(message string) string {
+	b, err := json.Marshal(map[string]string{"error": message})
+	if err != nil {
+		return fmt.Sprintf(`{"error":%q}`, message)
+	}
+	return string(b)
 }
 
 func (s *Service) buildClient(row *providerRow) (client.Client, error) {

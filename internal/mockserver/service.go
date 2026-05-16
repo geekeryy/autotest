@@ -5,8 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"strings"
+
+	"autotest/internal/logx"
 
 	"github.com/google/uuid"
 )
@@ -97,12 +98,12 @@ func (s *Service) AutoStartAll(ctx context.Context) error {
 			if errors.Is(err, ErrMockServerRunning) {
 				continue
 			}
-			log.Printf("默认启动 Mock Server 失败 id=%s name=%s port=%d: %v",
-				server.ID, server.Name, server.Port, err)
+			logx.Warn("默认启动 Mock Server 失败",
+				"id", server.ID, "name", server.Name, "port", server.Port, "err", err)
 			continue
 		}
-		log.Printf("默认启动 Mock Server 成功 id=%s name=%s port=%d",
-			server.ID, server.Name, server.Port)
+		logx.Info("默认启动 Mock Server 成功",
+			"id", server.ID, "name", server.Name, "port", server.Port)
 	}
 	return nil
 }

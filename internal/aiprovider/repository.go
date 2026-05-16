@@ -191,6 +191,33 @@ func (r *Repository) Get(ctx context.Context, projectID, providerID uuid.UUID) (
 	return out, nil
 }
 
+// GetDefaultProvider returns the provider flagged as is_default for the
+// project. When no provider is explicitly defaulted we fall back to the
+// oldest enabled provider so single-provider installs work out of the box.
+func (r *Repository) GetDefaultProvider(ctx context.Context, projectID uuid.UUID) (*providerRow, error) {
+	if r.DB == nil {
+		return nil, fmt.Errorf("database unavailable")
+	}
+	row := r.DB.QueryRow(ctx, `
+		select ap.id, ap.project_id, ap.name, ap.provider_type, ap.base_url, ap.api_key,
+		       ap.default_model, ap.extra_config, ap.enabled, ap.is_default,
+		       ap.created_at, ap.updated_at
+		from ai_providers ap
+		join projects p on p.id = ap.project_id and p.deleted_at is null
+		where ap.project_id = $1 and ap.deleted_at is null and ap.enabled = true
+		order by ap.is_default desc, ap.created_at asc
+		limit 1
+	`, projectID)
+	out, err := scanProvider(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrProviderNotFound
+		}
+		return nil, err
+	}
+	return out, nil
+}
+
 // ListByProject returns all active providers for a project.
 func (r *Repository) ListByProject(ctx context.Context, projectID uuid.UUID) ([]providerRow, error) {
 	if r.DB == nil {

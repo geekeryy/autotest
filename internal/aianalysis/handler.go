@@ -27,6 +27,8 @@ import (
 	"time"
 
 	"autotest/internal/aiprovider"
+	"autotest/internal/aitools"
+	"autotest/internal/auth"
 	"autotest/internal/httpx"
 	"autotest/internal/project"
 	"autotest/internal/projectprompt"
@@ -42,8 +44,13 @@ import (
 // AIChatService is the slice of `aiprovider.Service` we depend on. Defined as
 // an interface so handler tests can inject a fake without spinning up a real
 // model client.
+//
+// Both Chat and ChatWithTools are required: ChatWithTools is invoked when
+// the handler has a non-empty tool registry attached, otherwise we fall back
+// to the legacy single-shot Chat for parity with earlier behaviour.
 type AIChatService interface {
 	Chat(ctx context.Context, projectID uuid.UUID, req aiprovider.ChatRequest) (*aiprovider.ChatResponse, error)
+	ChatWithTools(ctx context.Context, projectID uuid.UUID, req aiprovider.ChatRequest, tools []aitools.Tool) (*aiprovider.ChatResponse, error)
 	List(ctx context.Context, projectID uuid.UUID) ([]aiprovider.Provider, error)
 }
 
@@ -67,9 +74,15 @@ type Handler struct {
 	prompts        PromptService
 	reports        ReportService
 	projectHandler *project.Handler
+
+	// tools is the read-only tool set surfaced to the model on every
+	// analyze call. Mutating tools are filtered out by aiprovider.Service
+	// for safety, but we keep this slice read-only by convention.
+	tools []aitools.Tool
 }
 
-// NewHandler constructs the Handler. All collaborators are required.
+// NewHandler constructs the Handler. All collaborators are required; tools
+// are optional and may be attached via WithTools.
 func NewHandler(repo store.Repository, ai AIChatService, prompts PromptService, reports ReportService, projectHandler *project.Handler) *Handler {
 	return &Handler{
 		repo:           repo,
@@ -78,6 +91,37 @@ func NewHandler(repo store.Repository, ai AIChatService, prompts PromptService, 
 		reports:        reports,
 		projectHandler: projectHandler,
 	}
+}
+
+// WithTools attaches the read-only AI tool set that smart-analysis actions
+// expose to the model. Callers should pass the platform's built-in read-only
+// tools; the handler relies on aiprovider.Service to filter out any
+// accidentally-included mutating tool.
+func (h *Handler) WithTools(tools []aitools.Tool) *Handler {
+	h.tools = tools
+	return h
+}
+
+// dispatch sends the request through ChatWithTools when tools are attached,
+// falling back to the single-shot Chat path otherwise. Keeps the two
+// analyze handlers identical regardless of whether tool calling is enabled.
+//
+// Before the tool-enabled path we stamp a CallerContext onto ctx so that
+// builtin tools enforcing project isolation (`aitools.ResolveProjectID`)
+// know which project this analysis belongs to and reject any cross-
+// project tool argument from the model.
+func (h *Handler) dispatch(ctx context.Context, projectID uuid.UUID, req aiprovider.ChatRequest) (*aiprovider.ChatResponse, error) {
+	if len(h.tools) > 0 {
+		principal := auth.PrincipalFromContext(ctx)
+		cc := aitools.CallerContext{ProjectID: projectID}
+		if principal != nil {
+			cc.UserID = principal.UserID
+			cc.Username = principal.Username
+		}
+		ctx = aitools.WithCaller(ctx, cc)
+		return h.ai.ChatWithTools(ctx, projectID, req, h.tools)
+	}
+	return h.ai.Chat(ctx, projectID, req)
 }
 
 // Register mounts the two endpoints. The run-failure endpoint sits in the
@@ -141,7 +185,7 @@ func (h *Handler) analyzeFailure(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp, err := h.ai.Chat(r.Context(), run.ProjectID, aiprovider.ChatRequest{
+	resp, err := h.dispatch(r.Context(), run.ProjectID, aiprovider.ChatRequest{
 		ProviderID:           providerID,
 		Action:               aiprovider.ActionAnalyzeFailure,
 		Context:              rawCtx,
@@ -402,7 +446,10 @@ func (h *Handler) analyzeSpecChanges(w http.ResponseWriter, r *http.Request) {
 	affectedSteps := filterAffectedScenarioSteps(diff, steps)
 
 	ctx := map[string]any{
-		"service": map[string]any{"id": serviceID},
+		// projectId / serviceId 顶层暴露便于 AI 在 tool 调用时无需从嵌套结构里推断。
+		"projectId": projectID,
+		"serviceId": serviceID,
+		"service":   map[string]any{"id": serviceID},
 		"prevSpec": map[string]any{
 			"id":          prevSpec.ID,
 			"version":     prevSpec.Version,
@@ -431,7 +478,7 @@ func (h *Handler) analyzeSpecChanges(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp, err := h.ai.Chat(r.Context(), projectID, aiprovider.ChatRequest{
+	resp, err := h.dispatch(r.Context(), projectID, aiprovider.ChatRequest{
 		ProviderID:           providerID,
 		Action:               aiprovider.ActionAnalyzeSpecChanges,
 		Context:              rawCtx,

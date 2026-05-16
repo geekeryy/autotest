@@ -8,8 +8,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"log"
 	"strings"
+
+	"autotest/internal/logx"
 	"time"
 
 	"autotest/internal/auth"
@@ -56,7 +57,7 @@ func NewService(repo *Repository, users *auth.Repository) *Service {
 func (s *Service) defaultTouch(id uuid.UUID, at time.Time) {
 	go func() {
 		if err := s.repo.TouchLastUsed(context.Background(), id, at); err != nil {
-			log.Printf("apikey: 刷新最近使用时间失败: %v", err)
+			logx.Warn("apikey: 刷新最近使用时间失败", "err", err)
 		}
 	}()
 }

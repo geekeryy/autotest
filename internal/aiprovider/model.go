@@ -5,6 +5,8 @@ import (
 	"errors"
 	"time"
 
+	"autotest/internal/aiprovider/client"
+
 	"github.com/google/uuid"
 )
 
@@ -36,6 +38,7 @@ const (
 	ActionGenerateCaseData   = "generate_case_data"
 	ActionAnalyzeFailure     = "analyze_failure"
 	ActionAnalyzeSpecChanges = "analyze_spec_changes"
+	ActionAssistantChat      = "assistant_chat"
 	ActionRaw                = "raw"
 )
 
@@ -112,9 +115,25 @@ type ProviderTypeMeta struct {
 	Label          string   `json:"label"`
 	DefaultBaseURL string   `json:"defaultBaseUrl"`
 	DefaultModel   string   `json:"defaultModel"`
-	Models         []string `json:"models,omitempty"`
+	Models         []string `json:"models,omitempty"` // offline fallback when upstream list fails
 	APIKeyRequired bool     `json:"apiKeyRequired"`
 	Notes          string   `json:"notes,omitempty"`
+}
+
+// ListModelsResult is returned when querying models from the upstream provider.
+type ListModelsResult struct {
+	Models  []client.ModelInfo `json:"models"`
+	Source  string             `json:"source"` // "api" or "fallback"
+	Warning string             `json:"warning,omitempty"`
+}
+
+// DiscoverModelsInput probes an upstream provider before a record is saved.
+type DiscoverModelsInput struct {
+	ProviderType string          `json:"providerType"`
+	BaseURL      string          `json:"baseUrl"`
+	APIKey       string          `json:"apiKey"`
+	ProviderID   *uuid.UUID      `json:"providerId,omitempty"`
+	ExtraConfig  json.RawMessage `json:"extraConfig,omitempty"`
 }
 
 // providerRow is the internal struct used while scanning rows; it carries the plaintext key.
