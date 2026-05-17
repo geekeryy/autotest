@@ -922,6 +922,15 @@
               <el-tag :type="lastRunOutput.run.status === 'passed' ? 'success' : 'danger'" size="small">
                 {{ lastRunOutput.run.status === 'passed' ? '通过' : '失败' }}
               </el-tag>
+              <el-button
+                v-if="lastRunOutput.run?.id"
+                size="small"
+                link
+                type="primary"
+                @click.stop="openFullRunReport"
+              >
+                查看完整报告
+              </el-button>
               <el-tooltip
                 v-if="canAnalyzeScenarioFailure"
                 content="基于本次场景运行的失败步骤、请求/响应快照与断言失败结果调用 AI 分析失败原因"
@@ -942,253 +951,27 @@
             </div>
           </template>
           <div class="run-result-collapse-body" :style="runResultPanelBodyStyle">
-            <el-collapse>
-              <el-collapse-item v-for="(sr, si) in lastRunOutput.stepResults" :key="si" :name="si">
-                <template #title>
-                  <template v-for="m in [stepRunOutcomeMeta(sr)]" :key="m.key">
-                    <div class="step-run-result-title">
-                      <el-icon class="step-run-icon" :class="'step-run-icon--' + m.key">
-                        <component :is="m.Icon" />
-                      </el-icon>
-                      <span class="step-run-result-title__seq"
-                        >#{{ sr.step.stepSeq != null && sr.step.stepSeq !== '' ? sr.step.stepSeq : '?' }}</span
-                      >
-                      <span class="step-run-result-title__name">{{ stepDisplayName(sr.step) }}</span>
-                      <span v-if="sr.result?.durationMillis != null" class="step-run-result-title__duration">
-                        {{ formatDuration(sr.result.durationMillis) }}
-                      </span>
-                    </div>
-                  </template>
-                </template>
-                <div class="step-result-detail">
-                  <el-tabs
-                    :model-value="runResultDetailTabByStep[si] ?? 'detail'"
-                    class="step-result-info-tabs"
-                    type="border-card"
-                    @update:model-value="(v) => setRunResultDetailTab(si, v)"
-                  >
-                    <el-tab-pane label="详情" name="detail">
-                      <div v-if="sr.result?.error || sr.stepErrors?.length" class="step-result-error-strip">
-                        <div v-if="sr.result?.error" class="error-text">{{ sr.result.error }}</div>
-                        <div v-if="sr.stepErrors?.length" class="error-text">
-                          步骤错误：{{ sr.stepErrors.join('; ') }}
-                        </div>
-                      </div>
-                      <div class="step-result-detail-grid">
-                        <section class="step-result-snapshot-panel">
-                          <div class="step-result-panel-head">
-                            <span>响应</span>
-                            <el-tag
-                              v-if="getStepHttpResponse(sr)"
-                              :type="responseSnapshotStatusType(sr.result?.responseSnapshot)"
-                              size="small"
-                              effect="plain"
-                            >
-                              {{ getStepHttpResponse(sr).statusCode }}
-                            </el-tag>
-                          </div>
-                          <div
-                            v-if="runResultJsonLines(si, 'response', sr.result?.responseSnapshot).length"
-                            class="json-viewer snapshot-pre run-result-json-viewer"
-                          >
-                            <div
-                              v-for="line in runResultJsonLines(si, 'response', sr.result?.responseSnapshot)"
-                              :key="'res-' + si + '-' + line.id"
-                              class="json-line"
-                              :style="{ paddingLeft: `${line.depth * 16}px` }"
-                            >
-                              <span
-                                v-if="line.type === 'open'"
-                                class="json-toggle"
-                                @click="toggleRunResultJsonCollapse(si, 'response', line.path)"
-                              />
-                              <span
-                                v-else-if="line.type === 'collapsed'"
-                                class="json-toggle is-collapsed"
-                                @click="toggleRunResultJsonCollapse(si, 'response', line.path)"
-                              />
-                              <span v-else class="json-toggle-ph" />
-                              <span
-                                v-if="line.key !== null && line.key !== undefined"
-                                class="json-key"
-                              >"{{ line.key }}"<span class="json-colon">: </span></span>
-                              <template v-if="line.type === 'primitive'">
-                                <span class="json-value" :class="`json-${line.valueType}`">{{ line.displayValue }}</span>
-                              </template>
-                              <template v-else-if="line.type === 'open'">
-                                <span class="json-bracket">{{ line.bracket }}</span>
-                              </template>
-                              <template v-else-if="line.type === 'close'">
-                                <span class="json-bracket">{{ line.bracket }}</span>
-                              </template>
-                              <template v-else-if="line.type === 'collapsed'">
-                                <span class="json-bracket">{{ line.open }}</span><span class="json-collapsed-preview"> {{ line.count }} {{ line.open === '[' ? 'items' : 'keys' }} </span><span class="json-bracket">{{ line.close }}</span>
-                              </template>
-                              <template v-else-if="line.type === 'empty-object'">
-                                <span class="json-bracket">{}</span>
-                              </template>
-                              <template v-else-if="line.type === 'empty-array'">
-                                <span class="json-bracket">[]</span>
-                              </template>
-                              <span v-if="line.hasComma" class="json-comma">,</span>
-                            </div>
-                          </div>
-                          <el-empty v-else description="暂无响应信息" :image-size="42" />
-                        </section>
-                        <section class="step-result-snapshot-panel">
-                          <div class="step-result-panel-head">
-                            <span>请求</span>
-                            <el-tag v-if="runResultRequestMethod(sr)" size="small" effect="plain">
-                              {{ runResultRequestMethod(sr) }}
-                            </el-tag>
-                          </div>
-                          <div
-                            v-if="runResultJsonLines(si, 'request', sr.result?.requestSnapshot).length"
-                            class="json-viewer snapshot-pre run-result-json-viewer"
-                          >
-                            <div
-                              v-for="line in runResultJsonLines(si, 'request', sr.result?.requestSnapshot)"
-                              :key="'req-' + si + '-' + line.id"
-                              class="json-line"
-                              :style="{ paddingLeft: `${line.depth * 16}px` }"
-                            >
-                              <span
-                                v-if="line.type === 'open'"
-                                class="json-toggle"
-                                @click="toggleRunResultJsonCollapse(si, 'request', line.path)"
-                              />
-                              <span
-                                v-else-if="line.type === 'collapsed'"
-                                class="json-toggle is-collapsed"
-                                @click="toggleRunResultJsonCollapse(si, 'request', line.path)"
-                              />
-                              <span v-else class="json-toggle-ph" />
-                              <span
-                                v-if="line.key !== null && line.key !== undefined"
-                                class="json-key"
-                              >"{{ line.key }}"<span class="json-colon">: </span></span>
-                              <template v-if="line.type === 'primitive'">
-                                <span class="json-value" :class="`json-${line.valueType}`">{{ line.displayValue }}</span>
-                              </template>
-                              <template v-else-if="line.type === 'open'">
-                                <span class="json-bracket">{{ line.bracket }}</span>
-                              </template>
-                              <template v-else-if="line.type === 'close'">
-                                <span class="json-bracket">{{ line.bracket }}</span>
-                              </template>
-                              <template v-else-if="line.type === 'collapsed'">
-                                <span class="json-bracket">{{ line.open }}</span><span class="json-collapsed-preview"> {{ line.count }} {{ line.open === '[' ? 'items' : 'keys' }} </span><span class="json-bracket">{{ line.close }}</span>
-                              </template>
-                              <template v-else-if="line.type === 'empty-object'">
-                                <span class="json-bracket">{}</span>
-                              </template>
-                              <template v-else-if="line.type === 'empty-array'">
-                                <span class="json-bracket">[]</span>
-                              </template>
-                              <span v-if="line.hasComma" class="json-comma">,</span>
-                            </div>
-                          </div>
-                          <el-empty v-else description="暂无请求信息" :image-size="42" />
-                        </section>
-
-                      </div>
-                    </el-tab-pane>
-
-                    <el-tab-pane label="断言" name="assertions">
-                      <el-table
-                        v-if="sr.result?.assertions?.length"
-                        :data="sr.result.assertions"
-                        border
-                        size="small"
-                        class="assertion-result-table"
-                      >
-                        <el-table-column label="类型" width="100">
-                          <template #default="{ row }">
-                            <el-tag size="small" effect="plain">{{ assertionTypeLabel(row.type) }}</el-tag>
-                          </template>
-                        </el-table-column>
-                        <el-table-column label="名称 / 路径" min-width="140">
-                          <template #default="{ row }">
-                            <span v-if="row.name">{{ row.name }}</span>
-                            <code v-else class="assertion-path">{{ row.path || row.headerName || '' }}</code>
-                          </template>
-                        </el-table-column>
-                        <el-table-column label="状态" width="80">
-                          <template #default="{ row }">
-                            <el-tag :type="row.passed ? 'success' : 'danger'" size="small">
-                              {{ row.passed ? '通过' : '失败' }}
-                            </el-tag>
-                          </template>
-                        </el-table-column>
-                        <el-table-column prop="message" label="详情" min-width="180" />
-                      </el-table>
-                      <el-empty v-else description="暂无断言结果" :image-size="42" />
-                    </el-tab-pane>
-
-                    <el-tab-pane
-                      v-if="sr.output && Object.keys(sr.output).length"
-                      label="步骤输出"
-                      name="output"
-                    >
-                      <section class="step-result-snapshot-panel step-result-snapshot-panel--full">
-                        <div class="step-result-panel-head">
-                          <span>步骤输出</span>
-                          <span class="step-result-panel-hint">
-                            可通过 <code>{{ stepsRefSnippet(sr.step.stepSeq, '.xxx') }}</code> 在后续步骤中引用
-                          </span>
-                        </div>
-                        <div
-                          v-if="runResultJsonLines(si, 'output', sr.output).length"
-                          class="json-viewer snapshot-pre run-result-json-viewer"
-                        >
-                          <div
-                            v-for="line in runResultJsonLines(si, 'output', sr.output)"
-                            :key="'out-' + si + '-' + line.id"
-                            class="json-line"
-                            :style="{ paddingLeft: `${line.depth * 16}px` }"
-                          >
-                            <span
-                              v-if="line.type === 'open'"
-                              class="json-toggle"
-                              @click="toggleRunResultJsonCollapse(si, 'output', line.path)"
-                            />
-                            <span
-                              v-else-if="line.type === 'collapsed'"
-                              class="json-toggle is-collapsed"
-                              @click="toggleRunResultJsonCollapse(si, 'output', line.path)"
-                            />
-                            <span v-else class="json-toggle-ph" />
-                            <span
-                              v-if="line.key !== null && line.key !== undefined"
-                              class="json-key"
-                            >"{{ line.key }}"<span class="json-colon">: </span></span>
-                            <template v-if="line.type === 'primitive'">
-                              <span class="json-value" :class="`json-${line.valueType}`">{{ line.displayValue }}</span>
-                            </template>
-                            <template v-else-if="line.type === 'open'">
-                              <span class="json-bracket">{{ line.bracket }}</span>
-                            </template>
-                            <template v-else-if="line.type === 'close'">
-                              <span class="json-bracket">{{ line.bracket }}</span>
-                            </template>
-                            <template v-else-if="line.type === 'collapsed'">
-                              <span class="json-bracket">{{ line.open }}</span><span class="json-collapsed-preview"> {{ line.count }} {{ line.open === '[' ? 'items' : 'keys' }} </span><span class="json-bracket">{{ line.close }}</span>
-                            </template>
-                            <template v-else-if="line.type === 'empty-object'">
-                              <span class="json-bracket">{}</span>
-                            </template>
-                            <template v-else-if="line.type === 'empty-array'">
-                              <span class="json-bracket">[]</span>
-                            </template>
-                            <span v-if="line.hasComma" class="json-comma">,</span>
-                          </div>
-                        </div>
-                      </section>
-                    </el-tab-pane>
-                  </el-tabs>
-                </div>
-              </el-collapse-item>
-            </el-collapse>
+            <div class="run-result-steps-header">
+              <span>步骤结果</span>
+              <el-tooltip
+                v-if="lastRunOutput.stepResults?.length"
+                :content="stepExpandToggleLabel"
+                placement="top"
+              >
+                <el-button
+                  size="small"
+                  :icon="stepExpandToggleIcon"
+                  :aria-label="stepExpandToggleLabel"
+                  @click="toggleStepResultsExpand"
+                />
+              </el-tooltip>
+            </div>
+            <ScenarioRunResultViewer
+              ref="stepResultsViewer"
+              :step-results="lastRunOutput.stepResults"
+              :case-name-resolver="findCaseName"
+              @expand-state="onStepExpandState"
+            />
           </div>
         </el-collapse-item>
       </el-collapse>
@@ -1240,6 +1023,8 @@ import {
   CircleCheck,
   CircleClose,
   CopyDocument,
+  Expand,
+  Fold,
   Plus,
   QuestionFilled,
   Remove,
@@ -1266,6 +1051,7 @@ import AiSparkleIcon from '../../components/icons/AiSparkleIcon.vue'
 import JsonBodyEditor from '../../components/JsonBodyEditor.vue'
 import ScenarioStepTreeNode from './ScenarioStepTreeNode.vue'
 import ScenarioStepClonePicker from './ScenarioStepClonePicker.vue'
+import ScenarioRunResultViewer from '../../components/scenario/ScenarioRunResultViewer.vue'
 import {
   SCENARIO_STEP_WORKSPACE_KEY,
   buildScopeKey,
@@ -1374,6 +1160,7 @@ export default {
     WarningFilled,
     ScenarioStepTreeNode,
     ScenarioStepClonePicker,
+    ScenarioRunResultViewer,
     SqlEditor,
     AssertionEditor,
     ScriptLibraryPicker,
@@ -1410,7 +1197,10 @@ export default {
       stepRunResultTab: 'response',
       stepRunResponseDetailTab: 'body',
       runResultDetailTabByStep: {},
-      scenarioRunResultActiveNames: ['panel'],
+      scenarioRunResultActiveNames: [],
+      stepResultsAllExpanded: false,
+      Expand,
+      Fold,
       runResultPanelHeightPx: RUN_RESULT_PANEL_DEFAULT_HEIGHT,
       runResultJsonCollapsed: {},
       _runResultPanelResize: null,
@@ -1517,6 +1307,12 @@ export default {
         if (Array.isArray(sr.stepErrors) && sr.stepErrors.length) return true
         return false
       })
+    },
+    stepExpandToggleLabel() {
+      return this.stepResultsAllExpanded ? '全部折叠' : '全部展开'
+    },
+    stepExpandToggleIcon() {
+      return this.stepResultsAllExpanded ? Fold : Expand
     },
     isStepFormActive() {
       if (!this.activeStepTabId) return false
@@ -1757,9 +1553,6 @@ export default {
         this.$nextTick(() => this.initStepSortable())
       },
       deep: true
-    },
-    lastRunOutput(val) {
-      if (val) this.scenarioRunResultActiveNames = ['panel']
     },
     aiScenarioScriptDialogVisible(val) {
       if (!val) this.aiScenarioScriptLoading = false
@@ -3774,6 +3567,18 @@ export default {
      * 打开场景运行失败的 AI 分析弹窗。先打开弹窗以保证用户立即看到 loading
      * 反馈，再异步调用 analyzeRunFailure。失败时保留弹窗以便用户重试或复制错误。
      */
+    openFullRunReport() {
+      const runId = this.lastRunOutput?.run?.id
+      if (!runId) return
+      const route = this.$router.resolve(`/runs/${runId}`)
+      window.open(route.href, '_blank')
+    },
+    onStepExpandState({ allExpanded }) {
+      this.stepResultsAllExpanded = !!allExpanded
+    },
+    toggleStepResultsExpand() {
+      this.$refs.stepResultsViewer?.toggleExpandAll()
+    },
     async openAIScenarioFailureAnalysis() {
       if (!this.lastRunOutput?.run?.id) {
         this.$message.warning('暂无可分析的场景运行记录')
@@ -4803,6 +4608,17 @@ export default {
   overflow-y: auto;
 }
 
+.run-result-steps-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.run-result-steps-header > span {
+  font-weight: 600;
+}
+
 .step-run-result-title {
   display: flex;
   align-items: center;
@@ -4903,10 +4719,6 @@ export default {
 
 .step-result-info-tabs :deep(.el-tabs__content) {
   padding: 12px;
-}
-
-.step-result-error-strip {
-  margin-bottom: 10px;
 }
 
 .step-result-detail-grid {

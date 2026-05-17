@@ -146,7 +146,7 @@ func main() {
 		aisession.NewHandler(aiSessionSvc, projectHandler).Register(r)
 
 		testdata.NewHandler(testDataSvc, projectHandler).Register(r)
-		runner.NewHandler(runSvc, scenarioRepo).Register(r)
+		runner.NewHandler(runSvc, scenarioRepo, projectSvc).Register(r)
 		apikey.NewHandler(apiKeySvc, authSvc.RequirePermission).Register(r)
 
 		aianalysis.NewHandler(repo, aiProviderSvc, projectPromptSvc, reportRepo, projectHandler).

@@ -138,7 +138,7 @@ curl -X POST "http://localhost:8080/api/v1/projects/$PROJ/services/$SVC/specs/im
 - 审计日志
 - API 文档页面
 - CI/CD 集成与自动化触发
-- 测试报告与统计分析
+- 项目级测试大盘与 CI 触发（场景报告与运行历史已支持，见场景编排）
 - 断言能力增强
 - gRPC / WebSocket / TCP 协议支持
 - 性能测试能力

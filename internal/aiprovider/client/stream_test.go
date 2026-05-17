@@ -250,6 +250,26 @@ func TestParseAnthropicStream_TextAndTool(t *testing.T) {
 	}
 }
 
+func TestParseOpenAIStream_UsageOnDone(t *testing.T) {
+	stream := strings.Join([]string{
+		`data: {"choices":[{"index":0,"delta":{"content":"hi"}}]}`,
+		`data: {"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15,"prompt_tokens_details":{"cached_tokens":3}}}`,
+		`data: [DONE]`,
+		"",
+	}, "\n\n")
+	var doneUsage *TokenUsage
+	_ = parseOpenAIStream(strings.NewReader(stream), "m", func(ev StreamEvent) error {
+		if ev.Kind == StreamEventDone && ev.Usage != nil {
+			u := *ev.Usage
+			doneUsage = &u
+		}
+		return nil
+	})
+	if doneUsage == nil || doneUsage.PromptTokens != 10 || doneUsage.CachedPromptTokens != 3 {
+		t.Fatalf("usage: %+v", doneUsage)
+	}
+}
+
 // TestParseOpenAIStream_CallbackAbort ensures a callback returning an
 // error stops the stream and the resulting error is surfaced from
 // parseOpenAIStream. A final done event is still emitted so the SSE

@@ -36,7 +36,10 @@
           <el-tag size="small">{{ typeLabel(row.providerType) }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="defaultModel" label="默认模型" min-width="160" show-overflow-tooltip />
+      <el-table-column prop="defaultModel" label="文本模型" min-width="140" show-overflow-tooltip />
+      <el-table-column label="图片模型" min-width="140" show-overflow-tooltip>
+        <template #default="{ row }">{{ row.modalityModels?.image || '—' }}</template>
+      </el-table-column>
       <el-table-column prop="baseUrl" label="Base URL" min-width="220" show-overflow-tooltip />
       <el-table-column label="API Key" width="180">
         <template #default="{ row }">
@@ -97,21 +100,26 @@
             autocomplete="new-password"
           />
         </el-form-item>
-        <el-form-item label="默认模型">
+        <el-form-item label="文本模型">
           <div class="model-field-row">
             <el-select
               v-model="form.defaultModel"
               class="model-select"
-              placeholder="选择或输入模型 ID"
+              placeholder="纯文本对话默认模型"
               filterable
               allow-create
               default-first-option
               clearable
               :loading="modelsLoading"
-              :disabled="!canFetchModels && !remoteModels.length"
+              :disabled="!canFetchModels && !remoteModelEntries.length"
               no-data-text="请先填写 Base URL 与 API Key，再点「刷新列表」"
             >
-              <el-option v-for="m in modelSelectOptions" :key="m" :label="m" :value="m" />
+              <el-option
+                v-for="m in modelSelectOptions"
+                :key="m.id"
+                :label="modelOptionLabel(m)"
+                :value="m.id"
+              />
             </el-select>
             <el-button
               type="primary"
@@ -125,6 +133,64 @@
           </div>
           <div v-if="modelsHint" class="meta-notes">{{ modelsHint }}</div>
           <div v-if="modelsWarning" class="meta-notes models-warning">{{ modelsWarning }}</div>
+        </el-form-item>
+        <el-form-item label="图片模型">
+          <el-select
+            v-model="form.modalityModels.image"
+            class="model-select"
+            placeholder="含图消息时自动切换"
+            filterable
+            allow-create
+            default-first-option
+            clearable
+            :loading="modelsLoading"
+          >
+            <el-option
+              v-for="m in imageModelOptions"
+              :key="'img-' + m.id"
+              :label="modelOptionLabel(m)"
+              :value="m.id"
+            />
+          </el-select>
+          <p class="meta-notes">从上游列表选择带「图片」能力标签的模型；AI 助理上传图片前须配置此项。</p>
+        </el-form-item>
+        <el-form-item label="音频模型">
+          <el-select
+            v-model="form.modalityModels.audio"
+            class="model-select"
+            placeholder="预留：音频输入时切换"
+            filterable
+            allow-create
+            default-first-option
+            clearable
+            :loading="modelsLoading"
+          >
+            <el-option
+              v-for="m in audioModelOptions"
+              :key="'aud-' + m.id"
+              :label="modelOptionLabel(m)"
+              :value="m.id"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="视频模型">
+          <el-select
+            v-model="form.modalityModels.video"
+            class="model-select"
+            placeholder="预留：视频输入时切换"
+            filterable
+            allow-create
+            default-first-option
+            clearable
+            :loading="modelsLoading"
+          >
+            <el-option
+              v-for="m in videoModelOptions"
+              :key="'vid-' + m.id"
+              :label="modelOptionLabel(m)"
+              :value="m.id"
+            />
+          </el-select>
         </el-form-item>
         <el-form-item label="高级参数 JSON">
           <el-input
@@ -166,10 +232,19 @@ import {
 import ListLoadError from '../../components/ListLoadError.vue'
 import { loadGlobalProjects, projectState } from '../../utils/currentProject'
 import { getListLoadErrorMessage } from '../../utils/listPageLoad'
+import {
+  MODALITY_AUDIO,
+  MODALITY_IMAGE,
+  MODALITY_VIDEO,
+  filterModelsByCapability,
+  formatModelCapabilities,
+} from '../../utils/modelCapabilities'
 
 function pad2(n) {
   return String(n).padStart(2, '0')
 }
+
+const blankModalityModels = () => ({ image: '', audio: '', video: '' })
 
 const blankForm = () => ({
   name: '',
@@ -177,6 +252,7 @@ const blankForm = () => ({
   baseUrl: '',
   apiKey: '',
   defaultModel: '',
+  modalityModels: blankModalityModels(),
   extraConfig: '',
   enabled: true,
   isDefault: false
@@ -205,6 +281,7 @@ export default {
       deletingId: null,
       form: blankForm(),
       remoteModels: [],
+      remoteModelEntries: [],
       modelsLoading: false,
       modelsWarning: '',
       modelsHint: '',
@@ -238,12 +315,31 @@ export default {
       return true
     },
     modelSelectOptions() {
-      const values = new Set(this.remoteModels || [])
-      const current = (this.form.defaultModel || '').trim()
-      if (current) values.add(current)
-      const meta = this.currentTypeMeta?.defaultModel
-      if (meta) values.add(meta)
-      return Array.from(values).sort()
+      const byId = new Map()
+      for (const m of this.remoteModelEntries || []) {
+        const id = String(m?.id || '').trim()
+        if (id) byId.set(id, m)
+      }
+      const addId = (id) => {
+        const v = String(id || '').trim()
+        if (!v) return
+        if (!byId.has(v)) byId.set(v, { id: v, capabilities: [] })
+      }
+      addId(this.form.defaultModel)
+      addId(this.currentTypeMeta?.defaultModel)
+      return Array.from(byId.values()).sort((a, b) => a.id.localeCompare(b.id))
+    },
+    imageModelOptions() {
+      const filtered = filterModelsByCapability(this.remoteModelEntries, MODALITY_IMAGE)
+      return filtered.length ? filtered : this.modelSelectOptions
+    },
+    audioModelOptions() {
+      const filtered = filterModelsByCapability(this.remoteModelEntries, MODALITY_AUDIO)
+      return filtered.length ? filtered : this.modelSelectOptions
+    },
+    videoModelOptions() {
+      const filtered = filterModelsByCapability(this.remoteModelEntries, MODALITY_VIDEO)
+      return filtered.length ? filtered : this.modelSelectOptions
     }
   },
   watch: {
@@ -258,6 +354,7 @@ export default {
       if (!val) {
         this.clearModelsFetchTimer()
         this.remoteModels = []
+        this.remoteModelEntries = []
         this.modelsWarning = ''
         this.modelsHint = ''
         this.modelsSource = ''
@@ -282,6 +379,11 @@ export default {
     }
   },
   methods: {
+    modelOptionLabel(m) {
+      const id = String(m?.id || '').trim()
+      const caps = formatModelCapabilities(m?.capabilities)
+      return caps ? `${id}（${caps}）` : id
+    },
     typeLabel(type) {
       const meta = this.providerTypes.find((t) => t.type === type)
       return meta?.label || type
@@ -309,6 +411,7 @@ export default {
     async refreshModels() {
       if (!this.canFetchModels) {
         this.remoteModels = []
+        this.remoteModelEntries = []
         return
       }
       this.modelsLoading = true
@@ -332,30 +435,37 @@ export default {
         } else {
           res = await discoverAIProviderModels(this.projectId, payload)
         }
-        const ids = Array.isArray(res?.models)
-          ? res.models.map((m) => String(m?.id || '').trim()).filter(Boolean)
+        const entries = Array.isArray(res?.models)
+          ? res.models
+              .map((m) => ({
+                id: String(m?.id || '').trim(),
+                capabilities: Array.isArray(m?.capabilities) ? m.capabilities : [],
+              }))
+              .filter((m) => m.id)
           : []
-        this.remoteModels = ids
+        this.remoteModelEntries = entries
+        this.remoteModels = entries.map((m) => m.id)
         this.modelsSource = res?.source ? String(res.source) : ''
         this.modelsWarning = res?.warning ? String(res.warning) : ''
         const srcLabel = this.modelsSource === 'api' ? '上游 API' : '内置建议'
-        if (ids.length) {
-          this.modelsHint = `已加载 ${ids.length} 个模型（${srcLabel}），点击左侧下拉查看`
-          this.$message.success(`已加载 ${ids.length} 个模型`)
+        if (entries.length) {
+          this.modelsHint = `已加载 ${entries.length} 个模型（${srcLabel}），下拉项括号内为能力标签`
+          this.$message.success(`已加载 ${entries.length} 个模型`)
         } else {
           this.modelsHint = '未获取到模型，请检查 Base URL 与 API Key'
         }
-        if (!this.form.defaultModel && ids.length) {
+        if (!this.form.defaultModel && entries.length) {
           const meta = this.currentTypeMeta
           const preferred = meta?.defaultModel
-          if (preferred && ids.includes(preferred)) {
+          if (preferred && entries.some((m) => m.id === preferred)) {
             this.form.defaultModel = preferred
-          } else if (ids.length === 1) {
-            this.form.defaultModel = ids[0]
+          } else if (entries.length === 1) {
+            this.form.defaultModel = entries[0].id
           }
         }
       } catch (e) {
         this.remoteModels = []
+        this.remoteModelEntries = []
         this.modelsHint = ''
         this.modelsWarning = e?.message ? String(e.message) : '获取模型列表失败'
       } finally {
@@ -395,6 +505,7 @@ export default {
       this.editingId = null
       this.form = blankForm()
       this.remoteModels = []
+      this.remoteModelEntries = []
       this.modelsWarning = ''
       this.modelsHint = ''
       this.modelsSource = ''
@@ -403,12 +514,18 @@ export default {
     openEdit(row) {
       this.editingId = row.id
       const extra = row.extraConfig ? JSON.stringify(row.extraConfig, null, 2) : ''
+      const mm = row.modalityModels || {}
       this.form = {
         name: row.name,
         providerType: row.providerType,
         baseUrl: row.baseUrl,
         apiKey: '',
         defaultModel: row.defaultModel || '',
+        modalityModels: {
+          image: mm.image || '',
+          audio: mm.audio || '',
+          video: mm.video || '',
+        },
         extraConfig: extra,
         enabled: !!row.enabled,
         isDefault: !!row.isDefault
@@ -452,11 +569,18 @@ export default {
         return
       }
 
+      const modalityModels = {
+        image: (this.form.modalityModels?.image || '').trim(),
+        audio: (this.form.modalityModels?.audio || '').trim(),
+        video: (this.form.modalityModels?.video || '').trim(),
+      }
+
       const payload = {
         name,
         providerType: this.form.providerType,
         baseUrl: (this.form.baseUrl || '').trim(),
         defaultModel: (this.form.defaultModel || '').trim(),
+        modalityModels,
         extraConfig: extra || {},
         enabled: !!this.form.enabled,
         isDefault: !!this.form.isDefault

@@ -253,6 +253,7 @@ create table if not exists users (
     password_hash text        not null,
     display_name  text        not null default '',
     email         text        not null default '',
+    avatar_jpeg   bytea,
     active        boolean     not null default true,
     created_at    timestamptz not null default now(),
     updated_at    timestamptz not null default now()
@@ -297,6 +298,157 @@ create table if not exists project_members (
     created_at timestamptz not null default now(),
     primary key (project_id, user_id),
     constraint project_member_role_valid check (role in ('owner', 'developer', 'viewer'))
+);
+
+-- ── Mock Server ───────────────────────────────────────────────────────────────
+
+create table if not exists mock_servers (
+    id          uuid        primary key default gen_random_uuid(),
+    project_id  uuid        not null references projects(id) on delete cascade,
+    name        text        not null,
+    description text        not null default '',
+    port        integer     not null check (port between 1 and 65535),
+    auto_start  boolean     not null default false,
+    created_at  timestamptz not null default now(),
+    updated_at  timestamptz not null default now(),
+    deleted_at  timestamptz
+);
+
+create table if not exists mock_routes (
+    id                uuid        primary key default gen_random_uuid(),
+    mock_server_id    uuid        not null references mock_servers(id) on delete cascade,
+    method            text        not null,
+    path              text        not null,
+    priority          integer     not null default 0,
+    enabled           boolean     not null default true,
+    request_match     jsonb       not null default '{}'::jsonb,
+    response_status   integer     not null default 200 check (response_status between 100 and 599),
+    response_headers  jsonb       not null default '{}'::jsonb,
+    response_body     text        not null default '',
+    response_body_type text       not null default 'json' check (response_body_type in ('json', 'text', 'raw')),
+    delay_millis      integer     not null default 0 check (delay_millis >= 0),
+    created_at        timestamptz not null default now(),
+    updated_at        timestamptz not null default now(),
+    deleted_at        timestamptz
+);
+
+create table if not exists mock_value_sets (
+    id          uuid        primary key default gen_random_uuid(),
+    project_id  uuid        not null references projects(id) on delete cascade,
+    key         text        not null,
+    name        text        not null,
+    description text        not null default '',
+    values      jsonb       not null default '[]'::jsonb,
+    weights     jsonb       not null default '[]'::jsonb,
+    created_at  timestamptz not null default now(),
+    updated_at  timestamptz not null default now(),
+    deleted_at  timestamptz
+);
+
+-- ── AI 提供商、提示词与会话 ─────────────────────────────────────────────────────
+
+create table if not exists ai_providers (
+    id            uuid        primary key default gen_random_uuid(),
+    project_id    uuid        not null references projects(id) on delete cascade,
+    name          text        not null,
+    provider_type text        not null check (provider_type in
+                    ('deepseek', 'xiaomi', 'openai', 'anthropic', 'kimi', 'ollama')),
+    base_url      text        not null default '',
+    api_key       text        not null default '',
+    default_model text        not null default '',
+    extra_config  jsonb       not null default '{}'::jsonb,
+    enabled       boolean     not null default true,
+    is_default    boolean     not null default false,
+    created_at    timestamptz not null default now(),
+    updated_at    timestamptz not null default now(),
+    deleted_at    timestamptz
+);
+
+create table if not exists project_ai_prompts (
+    id            uuid        primary key default gen_random_uuid(),
+    project_id    uuid        not null references projects(id) on delete cascade,
+    provider_id   uuid        references ai_providers(id) on delete set null,
+    action        text        not null check (action in (
+        'generate_params',
+        'generate_assertion',
+        'generate_case_data',
+        'analyze_failure',
+        'analyze_spec_changes',
+        'raw'
+    )),
+    name          text        not null default '',
+    system_prompt text        not null default '',
+    default_model text        not null default '',
+    enabled       boolean     not null default true,
+    created_at    timestamptz not null default now(),
+    updated_at    timestamptz not null default now(),
+    deleted_at    timestamptz
+);
+
+create table if not exists ai_sessions (
+    id          uuid        primary key default gen_random_uuid(),
+    project_id  uuid        not null references projects(id) on delete cascade,
+    user_id     uuid        not null references users(id) on delete cascade,
+    title       text        not null default '',
+    created_at  timestamptz not null default now(),
+    updated_at  timestamptz not null default now(),
+    deleted_at  timestamptz
+);
+
+create table if not exists ai_messages (
+    id                uuid        primary key default gen_random_uuid(),
+    session_id        uuid        not null references ai_sessions(id) on delete cascade,
+    seq               integer     not null,
+    role              text        not null check (role in ('system', 'user', 'assistant', 'tool')),
+    content           text        not null default '',
+    reasoning_content text        not null default '',
+    tool_call_id      text,
+    tool_calls        jsonb,
+    attachments       jsonb,
+    status            text        not null default 'final'
+                      check (status in ('final', 'pending_confirm', 'rejected')),
+    model             text,
+    elapsed_millis    integer,
+    created_at        timestamptz not null default now()
+);
+
+-- ── 测试数据表与 API Key ───────────────────────────────────────────────────────
+
+create table if not exists test_data_tables (
+    id          uuid        primary key default gen_random_uuid(),
+    project_id  uuid        not null references projects(id) on delete cascade,
+    key         text        not null,
+    name        text        not null,
+    description text        not null default '',
+    columns     jsonb       not null default '[]'::jsonb,
+    created_at  timestamptz not null default now(),
+    updated_at  timestamptz not null default now(),
+    deleted_at  timestamptz
+);
+
+create table if not exists test_data_rows (
+    id         uuid        primary key default gen_random_uuid(),
+    table_id   uuid        not null references test_data_tables(id) on delete cascade,
+    row_index  int         not null default 0,
+    values     jsonb       not null default '{}'::jsonb,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+);
+
+create table if not exists api_keys (
+    id           uuid        primary key default gen_random_uuid(),
+    name         text        not null,
+    token_hash   text        not null unique,
+    token_prefix text        not null,
+    token_suffix text        not null,
+    scopes       text[]      not null default array['specs:import']::text[],
+    created_by   uuid        not null references users(id) on delete cascade,
+    enabled      boolean     not null default true,
+    expires_at   timestamptz,
+    last_used_at timestamptz,
+    created_at   timestamptz not null default now(),
+    updated_at   timestamptz not null default now(),
+    deleted_at   timestamptz
 );
 
 create table if not exists script_library_templates (
@@ -491,6 +643,40 @@ select null,
        90
 where not exists (select 1 from script_library_templates where builtin_key = 'common-assert-boolean');
 
+-- ── 兼容旧库（表已存在时 CREATE TABLE 不会补列）────────────────────────────────
+
+alter table users
+    add column if not exists avatar_jpeg bytea;
+
+alter table mock_servers
+    add column if not exists auto_start boolean not null default false;
+
+alter table project_ai_prompts
+    add column if not exists provider_id uuid references ai_providers (id) on delete set null;
+
+alter table project_ai_prompts
+    drop constraint if exists project_ai_prompts_action_check;
+
+alter table project_ai_prompts
+    add constraint project_ai_prompts_action_check
+    check (action in (
+        'generate_params',
+        'generate_assertion',
+        'generate_case_data',
+        'analyze_failure',
+        'analyze_spec_changes',
+        'raw'
+    ));
+
+alter table ai_messages
+    add column if not exists reasoning_content text not null default '';
+
+alter table ai_messages
+    add column if not exists attachments jsonb;
+
+alter table ai_messages
+    add column if not exists usage_details jsonb;
+
 -- ── 索引 ──────────────────────────────────────────────────────────────────────
 
 create index if not exists idx_projects_active
@@ -576,6 +762,12 @@ create index if not exists idx_test_runs_project_status
     on test_runs(project_id, status);
 create index if not exists idx_test_runs_project_active
     on test_runs(project_id, created_at desc) where deleted_at is null;
+create index if not exists idx_test_runs_scenario_finished
+    on test_runs(scenario_id, finished_at desc)
+    where deleted_at is null and scenario_id is not null;
+create index if not exists idx_test_runs_scenario_finished
+    on test_runs(scenario_id, finished_at desc)
+    where deleted_at is null and scenario_id is not null;
 
 create index if not exists idx_test_run_results_run
     on test_run_results(run_id);
@@ -596,8 +788,87 @@ create unique index if not exists idx_script_library_templates_builtin_key
     on script_library_templates (builtin_key)
     where builtin_key is not null;
 
+create index if not exists idx_mock_servers_project_active
+    on mock_servers(project_id, created_at desc) where deleted_at is null;
+
+create unique index if not exists idx_mock_servers_project_name_active
+    on mock_servers(project_id, name) where deleted_at is null;
+
+create unique index if not exists idx_mock_servers_port_active
+    on mock_servers(port) where deleted_at is null;
+
+create index if not exists idx_mock_servers_auto_start_active
+    on mock_servers(auto_start)
+    where deleted_at is null and auto_start = true;
+
+create index if not exists idx_mock_routes_server_active
+    on mock_routes(mock_server_id, method, path, priority desc, created_at asc)
+    where deleted_at is null;
+
+create unique index if not exists ux_mock_value_sets_project_key
+    on mock_value_sets(project_id, key)
+    where deleted_at is null;
+
+create index if not exists idx_mock_value_sets_project_active
+    on mock_value_sets(project_id, created_at desc)
+    where deleted_at is null;
+
+create unique index if not exists idx_ai_providers_project_name_active
+    on ai_providers(project_id, name) where deleted_at is null;
+
+create unique index if not exists idx_ai_providers_project_default_active
+    on ai_providers(project_id) where is_default and deleted_at is null;
+
+create index if not exists idx_ai_providers_project_active
+    on ai_providers(project_id, created_at desc) where deleted_at is null;
+
+create unique index if not exists project_ai_prompts_action_idx
+    on project_ai_prompts(project_id, action) where deleted_at is null;
+
+create index if not exists idx_project_ai_prompts_project_provider
+    on project_ai_prompts(project_id, provider_id)
+    where deleted_at is null;
+
+create index if not exists idx_ai_sessions_owner_active
+    on ai_sessions(project_id, user_id, updated_at desc)
+    where deleted_at is null;
+
+create unique index if not exists ux_ai_messages_session_seq
+    on ai_messages(session_id, seq);
+
+create index if not exists idx_ai_messages_pending
+    on ai_messages(session_id, created_at desc)
+    where status = 'pending_confirm';
+
+create unique index if not exists idx_test_data_tables_project_key_active
+    on test_data_tables(project_id, key) where deleted_at is null;
+
+create index if not exists idx_test_data_tables_project_active
+    on test_data_tables(project_id, created_at desc) where deleted_at is null;
+
+create index if not exists idx_test_data_rows_table_index
+    on test_data_rows(table_id, row_index);
+
+create index if not exists idx_api_keys_active
+    on api_keys(token_hash)
+    where deleted_at is null and enabled = true;
+
+create index if not exists idx_api_keys_created_by
+    on api_keys(created_by, created_at desc)
+    where deleted_at is null;
+
 -- +goose Down
 drop table if exists script_library_templates;
+drop table if exists api_keys;
+drop table if exists test_data_rows;
+drop table if exists test_data_tables;
+drop table if exists ai_messages;
+drop table if exists ai_sessions;
+drop table if exists project_ai_prompts;
+drop table if exists ai_providers;
+drop table if exists mock_value_sets;
+drop table if exists mock_routes;
+drop table if exists mock_servers;
 drop table if exists project_members;
 drop table if exists role_permissions;
 drop table if exists user_roles;

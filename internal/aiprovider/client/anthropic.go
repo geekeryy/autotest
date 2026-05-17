@@ -310,9 +310,15 @@ func parseAnthropicStream(r io.Reader, fallbackModel string, onEvent StreamCallb
 	blocks := map[int]*blockState{}
 	model := fallbackModel
 	finish := ""
+	var usageAcc TokenUsage
 
 	emitDone := func(err error) error {
-		_ = onEvent(StreamEvent{Kind: StreamEventDone, Model: model, Finish: finish})
+		done := StreamEvent{Kind: StreamEventDone, Model: model, Finish: finish}
+		if !usageAcc.IsZero() {
+			u := usageAcc
+			done.Usage = &u
+		}
+		_ = onEvent(done)
 		return err
 	}
 
@@ -369,6 +375,7 @@ func parseAnthropicStream(r io.Reader, fallbackModel string, onEvent StreamCallb
 				Type    string `json:"type"`
 				Message string `json:"message"`
 			} `json:"error"`
+			Usage json.RawMessage `json:"usage"`
 		}
 		if err := json.Unmarshal([]byte(data), &frame); err != nil {
 			continue
@@ -410,6 +417,9 @@ func parseAnthropicStream(r io.Reader, fallbackModel string, onEvent StreamCallb
 		case "message_delta":
 			if frame.Delta.StopReason != "" {
 				finish = frame.Delta.StopReason
+			}
+			if len(frame.Usage) > 0 {
+				usageAcc = usageAcc.MergePreferNonZero(ParseAnthropicUsage(frame.Usage))
 			}
 		case "message_stop":
 			return emitDone(nil)

@@ -60,6 +60,7 @@ func (a *StoreAdapter) AppendMessage(ctx context.Context, sessionID uuid.UUID, i
 		Status:           input.Status,
 		Model:            input.Model,
 		ElapsedMillis:    input.ElapsedMillis,
+		UsageDetails:     input.UsageDetails,
 	})
 	if err != nil {
 		return nil, err
@@ -125,6 +126,7 @@ func toStored(m Message) aiprovider.StoredMessage {
 		ToolCalls:        m.ToolCalls,
 		Status:           m.Status,
 		Model:            m.Model,
+		UsageDetails:     m.UsageDetails,
 		CreatedAt:        m.CreatedAt,
 	}
 }

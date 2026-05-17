@@ -199,10 +199,11 @@ func supportedTypesMeta() []ProviderTypeMeta {
 				"mimo-v2-pro",
 				"mimo-v2-flash",
 				"mimo-v2.5",
+				"mimo-v2-5",
 				"mimo-v2-omni",
 			},
 			APIKeyRequired: true,
-			Notes:          "小米大模型网关（OpenAI 兼容）。含图片消息时平台会自动路由到 MiMo-V2.5（或网关中的 2.5/omni 多模态型号），纯文本可继续使用 Pro/Flash。",
+			Notes:          "小米大模型网关（OpenAI 兼容）。请在「图片/音频/视频模型」中从上游列表选择多模态型号；含图消息将自动切换到已配置的图片模型。",
 		},
 		{
 			Type:           ProviderTypeOpenAI,

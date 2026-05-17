@@ -12,6 +12,8 @@ import TestDataTableList from '../views/data/TestDataTableList.vue'
 import ApiManagement from '../views/cases/ApiManagement.vue'
 import CaseRunWorkspace from '../views/cases/CaseRunWorkspace.vue'
 import ScenarioList from '../views/scenarios/ScenarioList.vue'
+import ScenarioRunReport from '../views/scenarios/ScenarioRunReport.vue'
+import ProjectRunHistory from '../views/reports/ProjectRunHistory.vue'
 import ScriptLibraryList from '../views/scriptlib/ScriptLibraryList.vue'
 import MockValueSetList from '../views/platform/MockValueSetList.vue'
 import TemplateReference from '../views/platform/TemplateReference.vue'
@@ -61,11 +63,25 @@ export const menuRoutes = [
   },
   { path: '/cases/run', redirect: '/run-console' },
   { path: '/cases/:caseID/run', redirect: (to) => ({ path: `/run-console/${to.params.caseID}` }) },
+
   { path: '/scenarios', component: ScenarioList, meta: { title: '场景编排', permission: 'cases:read' } },
   {
     path: '/scenarios/:scenarioID',
     component: ScenarioList,
     meta: { title: '场景编排', permission: 'cases:read', hidden: true, activeMenu: '/scenarios' }
+  },
+  {
+    path: '/runs/:runId',
+    component: ScenarioRunReport,
+    meta: { title: '场景运行报告', permission: 'cases:read', hidden: true, activeMenu: '/reports/runs' }
+  },
+  {
+    path: '/reports',
+    redirect: '/reports/runs',
+    meta: { title: '测试报告', permission: 'cases:read' },
+    children: [
+      { path: '/reports/runs', component: ProjectRunHistory, meta: { title: '运行记录', permission: 'cases:read' } }
+    ]
   },
   {
     path: '/platform',

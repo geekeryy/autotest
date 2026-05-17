@@ -83,6 +83,7 @@ function writeSettings() {
       model: assistantState.selectedModel || '',
       thinkingEnabled: !!assistantState.thinkingEnabled,
       webSearchEnabled: !!assistantState.webSearchEnabled,
+      debugEnabled: !!assistantState.debugEnabled,
     }))
   } catch {
     // ignore
@@ -134,6 +135,7 @@ export const assistantState = reactive({
   selectedModel: '',
   thinkingEnabled: true,
   webSearchEnabled: false,
+  debugEnabled: false,
   pageContext: null,
   splitMode: readSplitMode(),
   focusedPaneId: readFocusedPane(),
@@ -216,6 +218,7 @@ export async function bindProject(projectId) {
   assistantState.selectedModel = ''
   assistantState.thinkingEnabled = true
   assistantState.webSearchEnabled = false
+  assistantState.debugEnabled = false
   if (!projectId) return
   await refreshAssistantProviders()
   await refreshSessions()
@@ -250,6 +253,7 @@ export async function refreshAssistantProviders() {
   assistantState.selectedModel = pickInitialModel(provider, settings)
   assistantState.thinkingEnabled = pickInitialThinking(provider, settings)
   assistantState.webSearchEnabled = pickInitialWebSearch(provider, settings)
+  assistantState.debugEnabled = pickInitialDebug(settings)
   await refreshProviderModels(provider?.id)
   writeSettings()
 }
@@ -290,6 +294,11 @@ export function setAssistantThinking(enabled) {
 
 export function setAssistantWebSearch(enabled) {
   assistantState.webSearchEnabled = !!enabled
+  writeSettings()
+}
+
+export function setAssistantDebug(enabled) {
+  assistantState.debugEnabled = !!enabled
   writeSettings()
 }
 
@@ -412,6 +421,7 @@ export async function sendMessage(text, paneId = 'panel', images = []) {
       thinkingEnabled: assistantState.thinkingEnabled,
       reasoningEffort: assistantState.thinkingEnabled ? 'high' : undefined,
       webSearchEnabled: assistantState.webSearchEnabled,
+      debugEnabled: assistantState.debugEnabled,
       userMessage: message,
       images: imgs.length ? imgs : undefined,
       pageContext: assistantState.pageContext || undefined,
@@ -439,6 +449,7 @@ export async function resolvePendingCall(callId, decision, paneId = 'panel') {
         thinkingEnabled: assistantState.thinkingEnabled,
         reasoningEffort: assistantState.thinkingEnabled ? 'high' : undefined,
         webSearchEnabled: assistantState.webSearchEnabled,
+        debugEnabled: assistantState.debugEnabled,
         pageContext: assistantState.pageContext || undefined,
       },
       paneId
@@ -489,6 +500,10 @@ function pickInitialWebSearch(provider, settings) {
     return settings.webSearchEnabled
   }
   return false
+}
+
+function pickInitialDebug(settings) {
+  return !!settings?.debugEnabled
 }
 
 function rebuildPendingFromMessages(pane) {
@@ -567,9 +582,7 @@ async function streamWith(url, body, paneId = 'panel') {
     return placeholder
   }
 
-  if (showThinking) {
-    ensurePlaceholder(true)
-  }
+  ensurePlaceholder(showThinking)
 
   try {
     await streamPostSSE(
@@ -585,6 +598,13 @@ async function streamWith(url, body, paneId = 'panel') {
           case 'thinking': {
             const p = ensurePlaceholder()
             setPlaceholderThinking(p, !!event.thinking?.active, event.thinking?.elapsedMillis)
+            pane.messages = [...pane.messages]
+            break
+          }
+          case 'usage': {
+            if (!assistantState.debugEnabled || !event.usage) break
+            const p = ensurePlaceholder()
+            p.usageDetails = normalizeUsageDetails(event.usage)
             pane.messages = [...pane.messages]
             break
           }
@@ -654,10 +674,23 @@ async function streamWith(url, body, paneId = 'panel') {
   }
 }
 
+function normalizeUsageDetails(raw) {
+  if (!raw) return null
+  if (typeof raw === 'object') return raw
+  try {
+    return JSON.parse(String(raw))
+  } catch {
+    return null
+  }
+}
+
 function handleMessage(pane, msg, placeholderId) {
   if (!msg || !msg.id) return
+  const prior = pane.messages.find((m) => m.id === placeholderId)
+  const usageDetails = normalizeUsageDetails(msg.usageDetails) || prior?.usageDetails || null
+  const merged = { ...msg, usageDetails }
   const filtered = pane.messages.filter((m) => m.id !== placeholderId && m.id !== msg.id)
-  filtered.push(msg)
+  filtered.push(merged)
   filtered.sort(compareMessages)
   pane.messages = filtered
 

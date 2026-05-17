@@ -62,6 +62,9 @@ type Options struct {
 	// ToolChoice controls model tool selection. Valid values: "", "auto",
 	// "none", "required". Empty string means "auto" when Tools is non-empty.
 	ToolChoice string
+	// CollectUsage requests upstream token-usage metadata when supported
+	// (OpenAI stream_options.include_usage, Anthropic message_delta.usage).
+	CollectUsage bool
 }
 
 // Result is the model response in a provider-agnostic shape.
@@ -119,6 +122,7 @@ type StreamEvent struct {
 	ToolCall         *ToolCall
 	Model            string
 	Finish           string
+	Usage            *TokenUsage
 }
 
 // StreamCallback receives StreamEvents in order. Returning a non-nil error

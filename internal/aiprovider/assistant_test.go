@@ -236,3 +236,34 @@ func TestAssistantThinkingOverride(t *testing.T) {
 func noopRun(ctx context.Context, args json.RawMessage) (any, error) {
 	return nil, nil
 }
+
+func TestBuildHopUsage_PersistsWhenDebugOff(t *testing.T) {
+	cfg := &streamConfig{DebugEnabled: false, Provider: &providerRow{ProviderType: ProviderTypeOpenAI}}
+	usage := client.TokenUsage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15}
+	raw, detail := cfg.buildHopUsage(1, "gpt-4", 120, usage)
+	if len(raw) == 0 || detail == nil || detail.PromptTokens != 10 {
+		t.Fatalf("expected usage persisted, got raw=%q detail=%+v", raw, detail)
+	}
+	if err := cfg.emitUsageIfNeeded(detail); err != nil {
+		t.Fatalf("emitUsageIfNeeded: %v", err)
+	}
+}
+
+func TestBuildHopUsage_EmitsSSEOnlyWhenDebugOn(t *testing.T) {
+	cfg := &streamConfig{DebugEnabled: true, Provider: &providerRow{ProviderType: ProviderTypeOpenAI}}
+	usage := client.TokenUsage{PromptTokens: 3, CompletionTokens: 1, TotalTokens: 4}
+	_, detail := cfg.buildHopUsage(1, "gpt-4", 50, usage)
+	var got *AssistantUsageDetail
+	cfg.Sink = func(ev AssistantStreamEvent) error {
+		if ev.Kind == StreamEventUsage {
+			got = ev.Usage
+		}
+		return nil
+	}
+	if err := cfg.emitUsageIfNeeded(detail); err != nil {
+		t.Fatal(err)
+	}
+	if got == nil || got.PromptTokens != 3 {
+		t.Fatalf("expected usage SSE, got %+v", got)
+	}
+}

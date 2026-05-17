@@ -27,6 +27,13 @@ func (w *responseWriter) Write(b []byte) (int, error) {
 	return n, err
 }
 
+// Flush delegates to the underlying writer so SSE handlers can stream.
+func (w *responseWriter) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
 // RequestLogger logs each HTTP request with a level derived from the status code.
 func RequestLogger(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

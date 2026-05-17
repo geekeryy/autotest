@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>场景运行报告 — {{.Report.Run.Name}}</title>
+  <style>
+    :root { --pass: #16a34a; --fail: #dc2626; --neutral: #64748b; --bg: #f8fafc; --card: #fff; --border: #e2e8f0; }
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; margin: 0; padding: 24px; background: var(--bg); color: #0f172a; line-height: 1.5; }
+    h1 { font-size: 1.35rem; margin: 0 0 8px; }
+    .meta { color: var(--neutral); font-size: 0.875rem; margin-bottom: 20px; }
+    .summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; margin-bottom: 24px; }
+    .summary-card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px; }
+    .summary-card .label { font-size: 0.75rem; color: var(--neutral); }
+    .summary-card .value { font-size: 1.25rem; font-weight: 600; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
+    .badge.passed { background: #dcfce7; color: var(--pass); }
+    .badge.failed { background: #fee2e2; color: var(--fail); }
+    .badge.neutral { background: #f1f5f9; color: var(--neutral); }
+    .step { background: var(--card); border: 1px solid var(--border); border-radius: 8px; margin-bottom: 12px; overflow: hidden; }
+    .step-head { padding: 12px 16px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--border); }
+    .step-body { padding: 12px 16px; font-size: 0.875rem; }
+    .step-body h4 { margin: 12px 0 6px; font-size: 0.8rem; color: var(--neutral); text-transform: uppercase; }
+    pre { background: #0f172a; color: #e2e8f0; padding: 12px; border-radius: 6px; overflow-x: auto; font-size: 0.75rem; white-space: pre-wrap; word-break: break-all; max-height: 400px; overflow-y: auto; }
+    .error { color: var(--fail); margin: 8px 0; }
+    table.assertions { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+    table.assertions th, table.assertions td { border: 1px solid var(--border); padding: 6px 8px; text-align: left; }
+    table.assertions th { background: #f1f5f9; }
+    .footer { margin-top: 24px; font-size: 0.75rem; color: var(--neutral); }
+  </style>
+</head>
+<body>
+  <h1>{{.Report.Run.Name}}</h1>
+  <div class="meta">
+    状态：<span class="badge {{statusClass (printf "%s" .Report.Run.Status)}}">{{statusLabel (printf "%s" .Report.Run.Status)}}</span>
+    · 开始：{{fmtTime .Report.Run.StartedAt}}
+    · 结束：{{fmtTime .Report.Run.FinishedAt}}
+    · 总耗时：{{fmtDuration .Report.Summary.DurationMillis}}
+    · 导出时间：{{.Generated}}
+  </div>
+  <div class="summary">
+    <div class="summary-card"><div class="label">总步骤</div><div class="value">{{.Report.Summary.TotalSteps}}</div></div>
+    <div class="summary-card"><div class="label">通过</div><div class="value" style="color:var(--pass)">{{.Report.Summary.Passed}}</div></div>
+    <div class="summary-card"><div class="label">失败</div><div class="value" style="color:var(--fail)">{{.Report.Summary.Failed}}</div></div>
+    <div class="summary-card"><div class="label">错误</div><div class="value" style="color:var(--fail)">{{.Report.Summary.Error}}</div></div>
+  </div>
+
+  {{range .Report.StepResults}}
+  <div class="step">
+    <div class="step-head">
+      <span class="badge {{statusClass .Result.Status}}">{{statusLabel .Result.Status}}</span>
+      <strong>{{stepLabel .Step .Result.StepID}}</strong>
+      <span style="color:var(--neutral);font-size:0.8rem">{{fmtDuration .Result.DurationMillis}}</span>
+    </div>
+    <div class="step-body">
+      {{if .Result.Error}}<div class="error">{{.Result.Error}}</div>{{end}}
+      {{if .Assertions}}
+      <h4>断言</h4>
+      <table class="assertions">
+        <thead><tr><th>类型</th><th>名称/路径</th><th>状态</th><th>详情</th></tr></thead>
+        <tbody>
+        {{range .Assertions}}
+        <tr>
+          <td>{{index . "type"}}</td>
+          <td>{{or (index . "name") (index . "path") (index . "headerName")}}</td>
+          <td>{{if index . "passed"}}通过{{else}}失败{{end}}</td>
+          <td>{{index . "message"}}</td>
+        </tr>
+        {{end}}
+        </tbody>
+      </table>
+      {{end}}
+      {{if .Result.RequestSnapshot}}
+      <h4>请求</h4>
+      <pre>{{jsonPre .Result.RequestSnapshot}}</pre>
+      {{end}}
+      {{if .Result.ResponseSnapshot}}
+      <h4>响应</h4>
+      <pre>{{jsonPre .Result.ResponseSnapshot}}</pre>
+      {{end}}
+    </div>
+  </div>
+  {{end}}
+
+  <div class="footer">Autotest 场景运行报告 · Run ID: {{.Report.Run.ID}}</div>
+</body>
+</html>

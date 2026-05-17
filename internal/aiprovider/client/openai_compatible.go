@@ -84,12 +84,17 @@ type oaChatRequest struct {
 	Temperature     *float64    `json:"temperature,omitempty"`
 	MaxTokens       int         `json:"max_tokens,omitempty"`
 	Stream          bool        `json:"stream"`
+	StreamOptions   *oaStreamOptions `json:"stream_options,omitempty"`
 	Format          interface{} `json:"response_format,omitempty"`
 	Tools           []oaTool    `json:"tools,omitempty"`
 	ToolChoice      any         `json:"tool_choice,omitempty"`
 	Thinking        any         `json:"thinking,omitempty"`
 	ReasoningEffort string      `json:"reasoning_effort,omitempty"`
 	Reasoning       any         `json:"reasoning,omitempty"`
+}
+
+type oaStreamOptions struct {
+	IncludeUsage bool `json:"include_usage"`
 }
 
 type oaChatResponse struct {
@@ -114,7 +119,8 @@ type oaStreamChunk struct {
 		Delta        oaStreamDelta `json:"delta"`
 		FinishReason string        `json:"finish_reason"`
 	} `json:"choices"`
-	Model string `json:"model"`
+	Model string          `json:"model"`
+	Usage json.RawMessage `json:"usage"`
 	Error *struct {
 		Message string `json:"message"`
 	} `json:"error"`
@@ -282,6 +288,9 @@ func (c *OpenAICompatibleClient) ChatStream(ctx context.Context, messages []Mess
 		MaxTokens:   opts.MaxTokens,
 		Stream:      true,
 	}
+	if opts.CollectUsage {
+		body.StreamOptions = &oaStreamOptions{IncludeUsage: true}
+	}
 	if len(opts.Tools) > 0 {
 		body.Tools = toOATools(opts.Tools)
 		body.ToolChoice = normaliseToolChoice(opts.ToolChoice)
@@ -355,6 +364,7 @@ func parseOpenAIStream(r io.Reader, fallbackModel string, onEvent StreamCallback
 	calls := map[int]*partialCall{}
 	model := fallbackModel
 	finish := ""
+	var usageAcc TokenUsage
 
 	flush := func(err error) error {
 		// Emit completed tool calls in stable index order so downstream
@@ -378,7 +388,12 @@ func parseOpenAIStream(r io.Reader, fallbackModel string, onEvent StreamCallback
 				err = cbErr
 			}
 		}
-		_ = onEvent(StreamEvent{Kind: StreamEventDone, Model: model, Finish: finish})
+		done := StreamEvent{Kind: StreamEventDone, Model: model, Finish: finish}
+		if !usageAcc.IsZero() {
+			u := usageAcc
+			done.Usage = &u
+		}
+		_ = onEvent(done)
 		return err
 	}
 
@@ -407,6 +422,9 @@ func parseOpenAIStream(r io.Reader, fallbackModel string, onEvent StreamCallback
 		}
 		if strings.TrimSpace(chunk.Model) != "" {
 			model = chunk.Model
+		}
+		if len(chunk.Usage) > 0 {
+			usageAcc = usageAcc.MergePreferNonZero(ParseOpenAICompatibleUsage(chunk.Usage))
 		}
 		for _, choice := range chunk.Choices {
 			if choice.Delta.Content != nil {

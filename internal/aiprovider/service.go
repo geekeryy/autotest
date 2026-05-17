@@ -429,6 +429,11 @@ func normalizeCreate(input *CreateInput) error {
 	if input.ProviderType != ProviderTypeOllama && input.APIKey == "" {
 		return ErrProviderEmptyKey
 	}
+	merged, err := mergeInputModalityModels(input.ExtraConfig, input.ModalityModels)
+	if err != nil {
+		return err
+	}
+	input.ExtraConfig = merged
 	if err := validateExtra(input.ExtraConfig); err != nil {
 		return err
 	}
@@ -460,10 +465,26 @@ func normalizeUpdate(input *UpdateInput, existing *providerRow) error {
 	if input.ProviderType != ProviderTypeOllama && effectiveKey == "" {
 		return ErrProviderEmptyKey
 	}
+	merged, err := mergeInputModalityModels(input.ExtraConfig, input.ModalityModels)
+	if err != nil {
+		return err
+	}
+	input.ExtraConfig = merged
 	if err := validateExtra(input.ExtraConfig); err != nil {
 		return err
 	}
 	return nil
+}
+
+func mergeInputModalityModels(extra json.RawMessage, models *ProviderModalityModels) (json.RawMessage, error) {
+	mm := parseModalityModels(extra)
+	if models != nil {
+		mm = *models
+	}
+	mm.Image = strings.TrimSpace(mm.Image)
+	mm.Audio = strings.TrimSpace(mm.Audio)
+	mm.Video = strings.TrimSpace(mm.Video)
+	return mergeModalityModelsIntoExtra(extra, mm)
 }
 
 func validProviderType(t string) bool {

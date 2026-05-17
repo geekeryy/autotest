@@ -35,6 +35,8 @@
 - [步骤删除与历史槽位](design/scenario-orchestration.md)：涉及删除、恢复、排序、保存丢失或刷新后查不到步骤的请求，优先检查软删除与 `(scenario_id, step_order)` 槽位释放；同槽位新保存必须创建全新记录。
 - [控制流](design/scenario-orchestration.md)：涉及 For 循环、条件分支、子步骤展示、`step_seq` 引用、嵌套、跳过分支或失败传播的请求，先判断是否会破坏控制步骤到子步骤的稳定引用和最大嵌套限制。
 - [步骤克隆与运行结果](design/scenario-orchestration.md)：涉及跨场景克隆、深拷贝、控制流子树复制、运行结果面板、详情/断言/步骤输出展示的请求，先判断克隆是否需要重映射 `step_seq`，以及结果展示是否依赖运行快照。
+- [测试报告与运行历史](design/scenario-orchestration.md)：涉及场景运行历史列表、独立报告页、HTML/JSON 导出、通过率趋势或失败步骤统计的请求，先确认仅展示已落库步骤结果（不展示 skipped）；权限与场景读取一致（项目 viewer + `cases:read` 路由）。
+- [测试报告与运行历史](design/scenario-orchestration.md)：涉及运行历史列表、报告详情页、导出、统计口径或历史报告是否展示跳过步骤的请求，先判断是读 `test_runs` 持久化还是仅内存中的本次运行面板。
 
 ### Mock、模板变量与测试数据
 
@@ -47,13 +49,13 @@
 
 ### AI 能力
 
-- [AI 提供商](design/ai-capabilities.md)：涉及 provider 类型、Base URL、API Key 脱敏、默认模型、extraConfig、thinking/reasoning、启用状态或默认提供商的请求，先判断配置是项目级还是全局；API 不应返回明文 Key。模型候选列表应通过上游官方 list-models API 动态获取（含 discover 探测），`/ai-provider-types` 仅保留类型元数据与离线 fallback。
+- [AI 提供商](design/ai-capabilities.md)：涉及 provider 类型、Base URL、API Key 脱敏、文本/多模态默认模型（`modalityModels`）、模型能力标签、extraConfig、thinking/reasoning、启用状态或默认提供商的请求，先判断配置是项目级还是全局；API 不应返回明文 Key。模型列表应通过上游 list-models 动态获取并展示 `capabilities`；含图对话路由到用户配置的图片模型，不在代码中写死型号名。`/ai-provider-types` 仅保留类型元数据与离线 fallback。
 - [项目级 Prompt](design/ai-capabilities.md)：涉及 action 级 System Prompt、默认模型、provider 绑定或回退逻辑的请求，先判断 providerId 为空是否应跟随项目默认提供商；绑定 provider 必须属于同项目且未删除。
 - [AI 生成请求参数](design/ai-capabilities.md)：涉及 `generate_params`、上下文构造、pathVarNames、currentRequest 保留、Mock Value Sets 注入或模型输出格式的请求，先区分非 LLM 的 `GET /cases/{id}/generate-params` 采样接口与 LLM `/ai/chat` action，并注意下方覆盖范围冲突仍待决策。
 - [AI 生成断言与测试数据](design/ai-capabilities.md)：涉及 `generate_assertion` 或 `generate_case_data` 的请求，先判断是否需要非空测试意图、项目 Prompt/provider 配置和明确中文错误；生成结果应由用户预览或追加，不应静默覆盖已有内容。
 - [AI 智能分析](design/ai-capabilities.md)：涉及失败原因分析或 spec 变更影响分析的请求，先判断输入应来自本次运行快照、断言失败明细或 spec diff 摘要；分析结果当前不写库，且分析输出统一为中文 Markdown 由前端 `MarkdownView` 渲染。
 - [AI Tool Calling 框架](design/ai-capabilities.md)：涉及让 AI 通过内置工具拉系统状态、扩展工具集、改变工具权限边界或 mutating 工具确认机制的请求，先判断目标是否落在 `internal/aitools` Registry；分析类 action 仅允许只读工具，mutating 工具（如 `update_case_assertions`、场景编排相关写工具）只能通过浮窗对话流程并经过用户 confirm 才会执行。
-- [全局 AI 助理浮窗](design/ai-capabilities.md)：涉及登录后管理后台 AI 助理浮窗、provider/model 选择、深度思考/联网搜索开关、Xiaomi 图片上传与多模态消息、SSE 对话流、会话/消息持久化、跨用户隔离或 mutating 工具人在回路确认的请求，先判断需求是否会改变 `ai_sessions`/`ai_messages` 表结构、SSE 事件 schema 或会话隔离边界；浮窗会话按 `(project_id, user_id)` 严格隔离，分析类 action 不暴露写工具。
+- [全局 AI 助理浮窗](design/ai-capabilities.md)：涉及登录后管理后台 AI 助理浮窗、provider/model 选择、深度思考/联网搜索开关、Token 用量持久化与汇总（仪表盘/会话详情）、Debug 开关下浮窗每轮 token/缓存详情展示、会话列表查看会话详情（对话统计与 Token 汇总）、Xiaomi 图片上传与多模态消息、SSE 对话流、会话/消息持久化、跨用户隔离或 mutating 工具人在回路确认的请求，先判断需求是否会改变 `ai_sessions`/`ai_messages` 表结构、SSE 事件 schema 或会话隔离边界；浮窗会话按 `(project_id, user_id)` 严格隔离，分析类 action 不暴露写工具。
 - [AI 场景生成与编排](design/ai-capabilities.md)：涉及让 AI 帮用户生成测试场景、追加/修改/删除/重排步骤、生成接口请求模板或一键运行的请求，先判断是工具集扩展还是运行触发；AI 通过 `list_* / get_*` 探查后调用 `create_scenario_with_steps`（API/Script/For/Condition 四种步骤）一次性创建完整场景，控制流子步骤引用使用 `stepOrder`，由平台转换为内部 `step_seq`；运行触发始终由用户在场景页手动点击，AI 不暴露任何"运行"工具。服务和环境的 create/update 不通过 AI 工具暴露——平台基础结构由用户手工维护，AI 只读相关元信息。
 - [AI 会话权限与项目隔离](design/ai-capabilities.md)：涉及 AI 工具调用是否能跨项目、是否能越用户访问数据的请求，先确认每个 SSE 会话由 `(projectId, userId)` 绑定；任何接受 `projectId` 的工具均通过 `aitools.ResolveProjectID` 校验，按 `caseId/scenarioId/stepId` 操作的工具在查到对象后反向校验其 `projectId` 必须等于会话项目，违反时直接拒绝执行。
 - [AI 助理页面上下文](design/ai-capabilities.md)：涉及 AI 浮窗感知用户当前页面、把 `scenarioId/caseId/serviceId` 等当作默认对象的请求，先确认前端按路由切换调 `bindPage` 写入 `assistantState.pageContext`，每次 `POST /ai/chat/stream` 与 `/tool-calls/{id}/confirm` 都附带这份快照；后端把它作为额外 system 消息注入 LLM 上下文，但工具仍以参数为权威，页面上下文不参与权限判定。

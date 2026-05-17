@@ -16,18 +16,24 @@ import (
 )
 
 type Handler struct {
-	service      *Service
-	scenarioRepo scenarioRepository
+	service        *Service
+	scenarioRepo   scenarioRepository
+	projectService *project.ServiceLayer
 }
 
-func NewHandler(service *Service, scenarioRepo scenarioRepository) *Handler {
-	return &Handler{service: service, scenarioRepo: scenarioRepo}
+func NewHandler(service *Service, scenarioRepo scenarioRepository, projectService *project.ServiceLayer) *Handler {
+	return &Handler{service: service, scenarioRepo: scenarioRepo, projectService: projectService}
 }
 
 func (h *Handler) Register(r chi.Router) {
 	r.Post("/cases/{caseID}/run", h.runCase)
 	r.Post("/scenarios/{scenarioID}/run", h.runScenario)
+	r.Get("/projects/{projectID}/runs", h.listProjectRuns)
+	r.Get("/scenarios/{scenarioID}/runs", h.listScenarioRuns)
+	r.Get("/scenarios/{scenarioID}/runs/stats", h.scenarioRunStats)
 	r.Get("/runs/{runID}/result", h.getRunResult)
+	r.Get("/runs/{runID}/report", h.getScenarioRunReport)
+	r.Get("/runs/{runID}/export", h.exportScenarioRun)
 }
 
 func (h *Handler) getRunResult(w http.ResponseWriter, r *http.Request) {

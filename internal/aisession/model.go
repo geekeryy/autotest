@@ -61,6 +61,7 @@ type Message struct {
 	Status           string          `json:"status"`
 	Model            string          `json:"model,omitempty"`
 	ElapsedMillis    int             `json:"elapsedMillis,omitempty"`
+	UsageDetails     json.RawMessage `json:"usageDetails,omitempty"`
 	CreatedAt        time.Time       `json:"createdAt"`
 }
 
@@ -91,6 +92,7 @@ type AppendMessageInput struct {
 	Status           string
 	Model            string
 	ElapsedMillis    int
+	UsageDetails     json.RawMessage
 }
 
 // ConfirmDecision captures the user's choice for a pending mutating tool

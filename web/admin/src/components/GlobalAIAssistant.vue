@@ -38,21 +38,13 @@
         :class="{ 'ai-resize-handle--active': resizing }"
       />
 
-      <!-- Header：侧栏模式完整顶栏；独立页仅在流式回复时显示状态条 -->
-      <header v-if="isPanelLayout || state.streaming" class="ai-header" :class="{ 'ai-header--page': isPageLayout }">
-        <div v-if="isPanelLayout" class="ai-header-left">
+      <!-- Header：仅侧栏浮窗模式显示顶栏 -->
+      <header v-if="isPanelLayout" class="ai-header">
+        <div class="ai-header-left">
           <el-icon class="ai-header-icon"><ChatLineRound /></el-icon>
           <span class="ai-header-title">AI 助理</span>
-          <el-tag v-if="state.streaming" size="small" type="primary" effect="plain" class="ai-streaming-tag">
-            <span class="ai-streaming-dot" />
-            回复中
-          </el-tag>
         </div>
-        <div v-else-if="isPageLayout && state.streaming" class="ai-header-page-status">
-          <span class="ai-streaming-dot" />
-          <span>AI 正在回复…</span>
-        </div>
-        <div v-if="isPanelLayout" class="ai-header-actions">
+        <div class="ai-header-actions">
           <el-tooltip content="新建会话" placement="bottom">
             <button class="ai-icon-btn" @click="onNewSession">
               <el-icon><Plus /></el-icon>
@@ -73,6 +65,8 @@
                 variant="history"
                 :active="session.id === state.activeSessionId"
                 @select="() => onSelectSession(session.id)"
+                @detail="onSessionDetail"
+                @rename="onRenameSession"
                 @delete="onDeleteSession"
               />
             </div>
@@ -100,10 +94,9 @@
       <div
         v-if="isPageLayout && paneBarLabel"
         class="ai-pane-bar"
-        :class="{ 'ai-pane-bar--focused': paneFocused, 'ai-pane-bar--streaming': state.streaming }"
+        :class="{ 'ai-pane-bar--focused': paneFocused }"
       >
         <span class="ai-pane-bar__title">{{ paneBarLabel }}</span>
-        <span v-if="state.streaming" class="ai-pane-bar__status">回复中</span>
       </div>
 
       <div v-if="pageContextHint && isPanelLayout" class="ai-page-context">
@@ -249,7 +242,18 @@
                   {{ formatThinkingElapsed(item.msg) }}
                 </span>
               </div>
+              <div
+                v-else-if="item.msg.role === 'assistant' && item.msg.streaming && !item.msg.content"
+                class="ai-replying-state"
+              >
+                <span class="ai-streaming-dot" />
+                <span class="ai-replying-label">AI 正在回复…</span>
+              </div>
               <MarkdownView v-if="item.msg.role === 'assistant' && item.msg.content" :source="item.msg.content" />
+              <AIUsageDebugPanel
+                v-if="item.msg.role === 'assistant' && state.debugEnabled && item.msg.usageDetails"
+                :usage="item.msg.usageDetails"
+              />
             </template>
           </div>
         </template>
@@ -312,7 +316,7 @@
               </button>
             </el-tooltip>
             <el-tooltip
-              v-if="String(selectedProvider?.providerType || '').toLowerCase() === 'xiaomi'"
+              v-if="supportsMultimodal"
               :content="multimodalTooltip"
               placement="top"
             >
@@ -380,6 +384,11 @@
       </footer>
       </div>
     </div>
+    <AISessionDetailDrawer
+      v-model="sessionDetailVisible"
+      :project-id="currentProjectId"
+      :session-id="sessionDetailId"
+    />
   </component>
 </template>
 
@@ -405,6 +414,8 @@ import {
 } from '@element-plus/icons-vue'
 import MarkdownView from './MarkdownView.vue'
 import AIToolCallConfirm from './AIToolCallConfirm.vue'
+import AIUsageDebugPanel from './AIUsageDebugPanel.vue'
+import AISessionDetailDrawer from './AISessionDetailDrawer.vue'
 import ModelSettingsPopover from './ModelSettingsPopover.vue'
 import SessionListItem from './SessionListItem.vue'
 import {
@@ -415,6 +426,7 @@ import {
   newSession,
   refreshAssistantProviders,
   removeSession,
+  renameSession,
   resolvePendingCall,
   selectSession,
   sendMessage,
@@ -425,7 +437,6 @@ import { authState } from '../auth'
 import { projectState } from '../utils/currentProject'
 import { getToolDisplayName } from '../utils/aiToolLabels'
 import { parseMessageAttachments, pickImageAttachments } from '../utils/aiImageAttachment'
-import { XIAOMI_VISION_MODEL_PREFERRED } from '../utils/aiModelCapabilities'
 
 const MIN_WIDTH = 480
 const MAX_WIDTH = 880
@@ -442,7 +453,14 @@ const PAGE_PROMPT_SUGGESTIONS = [
 
 export default {
   name: 'GlobalAIAssistant',
-  components: { MarkdownView, AIToolCallConfirm, ModelSettingsPopover, SessionListItem },
+  components: {
+    MarkdownView,
+    AIToolCallConfirm,
+    AIUsageDebugPanel,
+    AISessionDetailDrawer,
+    ModelSettingsPopover,
+    SessionListItem,
+  },
   props: {
     layout: {
       type: String,
@@ -475,6 +493,8 @@ export default {
       expandedToolGroupIds: {},
       nowTick: Date.now(),
       thinkingTimer: null,
+      sessionDetailVisible: false,
+      sessionDetailId: '',
     }
   },
   computed: {
@@ -665,11 +685,12 @@ export default {
       return String(this.selectedProvider?.providerType || '').toLowerCase() === 'xiaomi'
     },
     supportsMultimodal() {
-      return String(this.selectedProvider?.providerType || '').toLowerCase() === 'xiaomi'
+      return !!String(this.selectedProvider?.modalityModels?.image || '').trim()
     },
     multimodalTooltip() {
       if (!this.supportsMultimodal) return ''
-      return `添加图片（JPEG/PNG/GIF/WebP，单张≤5MB）；含图时由平台自动使用 ${XIAOMI_VISION_MODEL_PREFERRED}`
+      const model = String(this.selectedProvider?.modalityModels?.image || '').trim()
+      return `添加图片（JPEG/PNG/GIF/WebP，单张≤5MB）；含图时自动切换到提供商配置的图片模型${model ? `（${model}）` : ''}`
     },
     composerHasToolbar() {
       return this.supportsThinking || this.supportsWebSearch || this.supportsMultimodal
@@ -805,6 +826,29 @@ export default {
     },
     async onSelectSession(id) {
       await selectSession(id)
+    },
+    onSessionDetail(session) {
+      if (!session?.id) return
+      this.sessionDetailId = session.id
+      this.sessionDetailVisible = true
+    },
+    async onRenameSession(session) {
+      if (!session?.id) return
+      try {
+        const { value } = await ElMessageBox.prompt('请输入新的会话名称', '重命名会话', {
+          confirmButtonText: '保存',
+          cancelButtonText: '取消',
+          inputValue: session.title || '',
+          inputPattern: /\S/,
+          inputErrorMessage: '名称不能为空',
+        })
+        const title = String(value || '').trim()
+        if (!title) return
+        await renameSession(session.id, title)
+        ElMessage.success('会话已重命名')
+      } catch {
+        // 用户取消
+      }
     },
     async onDeleteSession(session) {
       try {
@@ -1037,21 +1081,6 @@ export default {
   overflow: hidden;
 }
 
-.ai-header--page {
-  min-height: 44px;
-  padding: 10px 20px;
-  border-bottom: 1px solid #eef0f3;
-  background: var(--app-surface-subtle);
-}
-
-.ai-header-page-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  color: #646a73;
-}
-
 .ai-pane-bar {
   flex-shrink: 0;
   display: flex;
@@ -1067,19 +1096,10 @@ export default {
   box-shadow: inset 0 -2px 0 var(--el-color-primary);
 }
 
-.ai-pane-bar--streaming .ai-pane-bar__status {
-  color: var(--el-color-primary);
-}
-
 .ai-pane-bar__title {
   font-size: 13px;
   font-weight: 600;
   color: #1f2329;
-}
-
-.ai-pane-bar__status {
-  font-size: 12px;
-  color: var(--app-text-muted);
 }
 
 .ai-panel--page .ai-body {
@@ -1218,13 +1238,6 @@ export default {
   font-weight: 600;
   color: var(--el-text-color-primary, #303133);
   white-space: nowrap;
-}
-
-.ai-streaming-tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
 }
 
 .ai-streaming-dot {
@@ -1596,7 +1609,8 @@ export default {
   50% { opacity: 0; }
 }
 
-.ai-thinking-state {
+.ai-thinking-state,
+.ai-replying-state {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -1608,6 +1622,10 @@ export default {
   color: var(--el-text-color-secondary, #606266);
   font-size: 13px;
   line-height: 1.4;
+}
+
+.ai-replying-label {
+  font-weight: 500;
 }
 
 .ai-thinking-orb {
@@ -2048,23 +2066,10 @@ export default {
   gap: 6px;
 }
 
-.ai-model-settings-popper .ai-model-settings-row--model {
-  flex-direction: row;
-  align-items: flex-end;
-  gap: 8px;
-}
-
-.ai-model-settings-popper .ai-model-settings-col {
+.ai-model-settings-popper .ai-model-settings-row--model .ai-model-settings-model {
   flex: 1;
   min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.ai-model-settings-popper .ai-model-settings-row--model .ai-model-select {
-  flex: 1;
-  min-width: 0;
+  width: 100%;
 }
 
 .ai-model-settings-popper .ai-model-refresh-btn {
@@ -2101,5 +2106,9 @@ export default {
 .ai-model-settings-popper .ai-provider-select,
 .ai-model-settings-popper .ai-model-select {
   width: 100%;
+}
+
+.ai-assistant-model-dropdown.el-popper {
+  min-width: 360px;
 }
 </style>

@@ -4,6 +4,8 @@ import (
 	"encoding/base64"
 	"strings"
 	"testing"
+
+	"autotest/internal/aiprovider/client"
 )
 
 func TestNormalizeUserImages_RejectsOversizedDataURL(t *testing.T) {
@@ -26,15 +28,15 @@ func TestNormalizeUserImages_AcceptsHTTPS(t *testing.T) {
 	}
 }
 
-func TestModelSupportsVision_Xiaomi(t *testing.T) {
-	if !modelSupportsVision(ProviderTypeXiaomi, "mimo-v2.5") {
-		t.Fatal("2.5 model should support vision")
+func TestModelSupportsModality_FromGateway(t *testing.T) {
+	gateway := []client.ModelInfo{
+		{ID: "mm", Capabilities: []string{client.ModalityImage}},
 	}
-	if !modelSupportsVision(ProviderTypeXiaomi, "mimo-v2-omni") {
-		t.Fatal("omni model should support vision")
+	if !modelSupportsModality("xiaomi", "mm", client.ModalityImage, gateway) {
+		t.Fatal("expected image capability")
 	}
-	if modelSupportsVision(ProviderTypeXiaomi, "mimo-v2-pro") {
-		t.Fatal("pro model should not support vision")
+	if modelSupportsModality("xiaomi", "text-only", client.ModalityImage, gateway) {
+		t.Fatal("text-only should not match")
 	}
 }
 

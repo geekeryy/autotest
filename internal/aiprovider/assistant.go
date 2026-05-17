@@ -57,6 +57,9 @@ type AssistantStreamRequest struct {
 	// shape) and is **not** persisted — every request brings the latest
 	// snapshot so the AI sees the live state, not a stale one.
 	PageContext json.RawMessage `json:"pageContext,omitempty"`
+	// DebugEnabled streams per-hop usage events over SSE for the chat UI.
+	// Token usage is always collected and persisted regardless of this flag.
+	DebugEnabled *bool `json:"debugEnabled,omitempty"`
 }
 
 // StreamEventKind enumerates the events emitted by ChatStreamWithTools.
@@ -73,6 +76,7 @@ const (
 	StreamEventDone           StreamEventKind = "done"            // 本次流结束
 	StreamEventError          StreamEventKind = "error"           // 致命错误（流提前结束）
 	StreamEventSession        StreamEventKind = "session"         // 会话元数据更新（如 AI 生成标题）
+	StreamEventUsage          StreamEventKind = "usage"           // 单轮 LLM 调用的 token / 缓存明细（debug）
 )
 
 // AssistantStreamEvent is the high-level event that the SSE handler
@@ -97,6 +101,8 @@ type AssistantStreamEvent struct {
 	Error string `json:"error,omitempty"`
 	// Session is set when Kind == StreamEventSession.
 	Session *StoredSession `json:"session,omitempty"`
+	// Usage is set when Kind == StreamEventUsage (debug mode).
+	Usage *AssistantUsageDetail `json:"usage,omitempty"`
 }
 
 // AssistantThinkingState reports reasoning activity without exposing the
@@ -135,8 +141,9 @@ type PersistedMessage struct {
 	ToolCallID  string          `json:"toolCallId,omitempty"`
 	ToolCalls  json.RawMessage `json:"toolCalls,omitempty"`
 	Status     string          `json:"status"`
-	Model      string          `json:"model,omitempty"`
-	CreatedAt  time.Time       `json:"createdAt"`
+	Model        string          `json:"model,omitempty"`
+	UsageDetails json.RawMessage `json:"usageDetails,omitempty"`
+	CreatedAt    time.Time       `json:"createdAt"`
 }
 
 // SessionStore decouples the streaming engine from the concrete aisession
@@ -178,6 +185,7 @@ type StoredMessage struct {
 	ToolCalls        json.RawMessage `json:"toolCalls,omitempty"`
 	Status           string          `json:"status"`
 	Model            string          `json:"model,omitempty"`
+	UsageDetails     json.RawMessage `json:"usageDetails,omitempty"`
 	CreatedAt        time.Time       `json:"createdAt"`
 }
 
@@ -192,6 +200,7 @@ type StoredMessageInput struct {
 	Status           string
 	Model            string
 	ElapsedMillis    int
+	UsageDetails     json.RawMessage
 }
 
 // StoredToolCall represents a single tool call entry persisted inside
@@ -234,6 +243,10 @@ type streamConfig struct {
 	// threading the request through every helper.
 	PageContext    json.RawMessage
 	VisionEnabled  bool
+	// TurnHasImages is true when the current chat request included images
+	// (set before runStreamLoop even if history reload lags).
+	TurnHasImages bool
+	DebugEnabled  bool
 }
 
 // ChatStreamWithTools is the entry point for SSE assistant chats. The
@@ -284,8 +297,10 @@ func (s *Service) ChatStreamWithTools(
 	if err != nil {
 		return s.streamFail(sink, err)
 	}
-	if len(imageAtts) > 0 && !assistantAllowsImages(provider) {
-		return s.streamFail(sink, errors.New("当前 AI 提供商不支持图片理解，请切换为 Xiaomi"))
+	if len(imageAtts) > 0 {
+		if err := providerSupportsImageInput(provider); err != nil {
+			return s.streamFail(sink, err)
+		}
 	}
 	if userText == "" && len(imageAtts) == 0 {
 		return s.streamFail(sink, errors.New("userMessage 不能为空"))
@@ -308,6 +323,7 @@ func (s *Service) ChatStreamWithTools(
 	if err := sink(AssistantStreamEvent{Kind: StreamEventMessage, Message: toPersisted(userMsg)}); err != nil {
 		return err
 	}
+	cfg.TurnHasImages = len(imageAtts) > 0
 
 	titleDone := closedDoneChan()
 	if session, err := store.GetSession(ctx, projectID, userID, req.SessionID); err == nil {
@@ -347,6 +363,7 @@ func (s *Service) ContinueAfterConfirm(
 	reasoningEffort string,
 	webSearchEnabled *bool,
 	pageContext json.RawMessage,
+	debugEnabled *bool,
 	store SessionStore,
 	tools []aitools.Tool,
 	sink StreamCallback,
@@ -389,6 +406,7 @@ func (s *Service) ContinueAfterConfirm(
 		ReasoningEffort:  reasoningEffort,
 		WebSearchEnabled: webSearchEnabled,
 		PageContext:      pageContext,
+		DebugEnabled:     debugEnabled,
 	}, provider, cli, store, sink, tools)
 	if err != nil {
 		return s.streamFail(sink, err)
@@ -481,6 +499,15 @@ func (s *Service) prepareStreamConfig(
 	model := resolveAssistantModel(provider, req.Model)
 	thinking := assistantThinkingOverride(provider, req.ThinkingEnabled, req.ReasoningEffort)
 	toolDefs := mergeAssistantToolDefs(aitools.Describe(tools), provider, req.WebSearchEnabled)
+	debugEnabled := req.DebugEnabled != nil && *req.DebugEnabled
+	baseOpts := client.Options{
+		Model:       model,
+		Temperature: temperature,
+		MaxTokens:   maxTokens,
+		Thinking:    thinking,
+		Tools:       toolDefs,
+	}
+	baseOpts.CollectUsage = true
 	return &streamConfig{
 		ProjectID: projectID,
 		SessionID: req.SessionID,
@@ -491,16 +518,11 @@ func (s *Service) prepareStreamConfig(
 		Sink:      sink,
 		Tools:     toolMap,
 		ToolDefs:  toolDefs,
-		BaseOpts: client.Options{
-			Model:       model,
-			Temperature: temperature,
-			MaxTokens:   maxTokens,
-			Thinking:    thinking,
-			Tools:       toolDefs,
-		},
+		BaseOpts:       baseOpts,
 		HopBudget:      MaxToolHops,
 		PageContext:    req.PageContext,
-		VisionEnabled:  modelSupportsVision(provider.ProviderType, model),
+		VisionEnabled:  false,
+		DebugEnabled:   debugEnabled,
 	}, nil
 }
 
@@ -536,12 +558,16 @@ func (s *Service) runStreamLoop(ctx context.Context, cfg *streamConfig) error {
 	if err != nil {
 		return s.streamFail(cfg.Sink, fmt.Errorf("加载会话历史失败: %w", err))
 	}
-	applyXiaomiVisionRouting(cfg, history)
+	if err := s.applyModalityRouting(ctx, cfg, history); err != nil {
+		return s.streamFail(cfg.Sink, err)
+	}
 
 	messages := buildClientMessages(history, cfg.PageContext, cfg.VisionEnabled)
+	initialHopBudget := cfg.HopBudget
 
 	for cfg.HopBudget > 0 {
 		cfg.HopBudget--
+		hopIndex := initialHopBudget - cfg.HopBudget
 
 		streamingCli, ok := cfg.Cli.(client.StreamingClient)
 		if !ok {
@@ -555,6 +581,7 @@ func (s *Service) runStreamLoop(ctx context.Context, cfg *streamConfig) error {
 			model        = cfg.Provider.DefaultModel
 			finish       string
 			start        = time.Now()
+			hopUsage     client.TokenUsage
 		)
 		thinkingActive := false
 		var thinkingStartedAt time.Time
@@ -599,6 +626,9 @@ func (s *Service) runStreamLoop(ctx context.Context, cfg *streamConfig) error {
 					model = ev.Model
 				}
 				finish = ev.Finish
+				if ev.Usage != nil {
+					hopUsage = hopUsage.MergePreferNonZero(*ev.Usage)
+				}
 				return nil
 			}
 			return nil
@@ -615,6 +645,7 @@ func (s *Service) runStreamLoop(ctx context.Context, cfg *streamConfig) error {
 		}
 
 		elapsed := int(time.Since(start).Milliseconds())
+		usageRaw, usageDetail := cfg.buildHopUsage(hopIndex, model, elapsed, hopUsage)
 
 		// Xiaomi web_search is executed by the provider; strip it before our loop.
 		toolCalls = filterProviderNativeToolCalls(toolCalls)
@@ -628,9 +659,13 @@ func (s *Service) runStreamLoop(ctx context.Context, cfg *streamConfig) error {
 				Status:           storedStatusFinal,
 				Model:            model,
 				ElapsedMillis:    elapsed,
+				UsageDetails:     usageRaw,
 			})
 			if err != nil {
 				return s.streamFail(cfg.Sink, fmt.Errorf("持久化助理消息失败: %w", err))
+			}
+			if err := cfg.emitUsageIfNeeded(usageDetail); err != nil {
+				return err
 			}
 			if err := cfg.Sink(AssistantStreamEvent{Kind: StreamEventMessage, Message: toPersisted(msg)}); err != nil {
 				return err
@@ -657,9 +692,13 @@ func (s *Service) runStreamLoop(ctx context.Context, cfg *streamConfig) error {
 				Status:           storedStatusPendingConfirm,
 				Model:            model,
 				ElapsedMillis:    elapsed,
+				UsageDetails:     usageRaw,
 			})
 			if err != nil {
 				return s.streamFail(cfg.Sink, fmt.Errorf("持久化挂起助理消息失败: %w", err))
+			}
+			if err := cfg.emitUsageIfNeeded(usageDetail); err != nil {
+				return err
 			}
 			if err := cfg.Sink(AssistantStreamEvent{Kind: StreamEventMessage, Message: toPersisted(msg)}); err != nil {
 				return err
@@ -687,9 +726,13 @@ func (s *Service) runStreamLoop(ctx context.Context, cfg *streamConfig) error {
 			Status:           storedStatusFinal,
 			Model:            model,
 			ElapsedMillis:    elapsed,
+			UsageDetails:     usageRaw,
 		})
 		if err != nil {
 			return s.streamFail(cfg.Sink, fmt.Errorf("持久化助理消息失败: %w", err))
+		}
+		if err := cfg.emitUsageIfNeeded(usageDetail); err != nil {
+			return err
 		}
 		if err := cfg.Sink(AssistantStreamEvent{Kind: StreamEventMessage, Message: toPersisted(assistantMsg)}); err != nil {
 			return err
@@ -1011,21 +1054,38 @@ func keepOnlyCall(raw json.RawMessage, callID string) json.RawMessage {
 	return body
 }
 
+func (cfg *streamConfig) buildHopUsage(hop int, model string, elapsedMillis int, usage client.TokenUsage) (json.RawMessage, *AssistantUsageDetail) {
+	providerType := ""
+	if cfg.Provider != nil {
+		providerType = cfg.Provider.ProviderType
+	}
+	detail := usageDetailFromClient(providerType, model, hop, elapsedMillis, usage)
+	return marshalUsageDetail(detail), detail
+}
+
+func (cfg *streamConfig) emitUsageIfNeeded(detail *AssistantUsageDetail) error {
+	if !cfg.DebugEnabled || detail == nil {
+		return nil
+	}
+	return cfg.Sink(AssistantStreamEvent{Kind: StreamEventUsage, Usage: detail})
+}
+
 // toPersisted is the StoredMessage -> PersistedMessage adapter.
 func toPersisted(m *StoredMessage) *PersistedMessage {
 	if m == nil {
 		return nil
 	}
 	return &PersistedMessage{
-		ID:          m.ID,
-		Seq:         m.Seq,
-		Role:        m.Role,
-		Content:     m.Content,
-		Attachments: m.Attachments,
-		ToolCallID:  m.ToolCallID,
-		ToolCalls:  m.ToolCalls,
-		Status:     m.Status,
-		Model:      m.Model,
-		CreatedAt:  m.CreatedAt,
+		ID:           m.ID,
+		Seq:          m.Seq,
+		Role:         m.Role,
+		Content:      m.Content,
+		Attachments:  m.Attachments,
+		ToolCallID:   m.ToolCallID,
+		ToolCalls:    m.ToolCalls,
+		Status:       m.Status,
+		Model:        m.Model,
+		UsageDetails: m.UsageDetails,
+		CreatedAt:    m.CreatedAt,
 	}
 }

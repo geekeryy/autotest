@@ -62,3 +62,12 @@
 - 管理后台场景运行结果面板支持拖拽调整高度。
 - 步骤结果保留「详情」「断言」「步骤输出」Tab。
 - 详情中请求与响应左右排版，并支持 JSON 折叠与语法高亮。
+
+## 测试报告与运行历史
+
+- 每次场景运行写入 `test_runs` / `test_run_results`；历史报告仅展示**已落库的执行步骤**（未进入分支而跳过的步骤不在历史中展示）。
+- **运行记录**（管理后台 `/reports/runs`）：按当前项目分页列出场景运行记录，支持场景、状态、时间范围筛选；可跳转报告详情。
+- **报告详情**（`/runs/{runId}`）：可分享深链（需登录且具备项目 viewer 权限）；含运行摘要、步骤时间线（For 循环多轮为多条记录）、详情/断言/输出；支持导出 JSON/HTML；失败时可调用 AI 分析；返回导航至项目运行记录列表。
+- **导出**：`GET /runs/{runId}/export?format=json|html`，HTML 为单文件内联样式，超长 body 截断（与 AI 分析一致）。
+- 场景编辑器提供「查看完整报告」入口（打开 `/runs/{runId}`）；运行记录统一从侧栏 **测试报告 → 运行记录** 进入。
+- API：`GET /projects/{id}/runs`（项目运行列表）、`GET /scenarios/{id}/runs`、`GET /scenarios/{id}/runs/stats`（场景维度，供后续扩展）、`GET /runs/{id}/report`、`GET /runs/{id}/export?format=json|html`；保留 `GET /runs/{id}/result`。

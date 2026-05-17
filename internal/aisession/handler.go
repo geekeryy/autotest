@@ -26,17 +26,48 @@ func NewHandler(service *Service, projectHandler *project.Handler) *Handler {
 	return &Handler{service: service, projectHandler: projectHandler}
 }
 
-// Register mounts session routes under /projects/{projectID}/ai/sessions.
-// All routes require project viewer role at minimum.
+// Register mounts AI session routes and token usage summary.
+// All project routes require project viewer role at minimum.
 func (h *Handler) Register(r chi.Router) {
 	r.Route("/projects/{projectID}/ai/sessions", func(r chi.Router) {
 		r.Use(h.projectHandler.RequireProjectRole(project.ProjectRoleViewer))
+		// 静态路径须在 /{sessionID} 之前注册，避免与 UUID 冲突。
+		r.Get("/token-usage", h.tokenUsage)
 		r.Get("/", h.list)
 		r.Post("/", h.create)
 		r.Get("/{sessionID}", h.get)
+		r.Get("/{sessionID}/stats", h.stats)
 		r.Patch("/{sessionID}", h.rename)
 		r.Delete("/{sessionID}", h.delete)
 	})
+	r.Get("/me/ai/token-usage", h.tokenUsageAllProjects)
+}
+
+func (h *Handler) tokenUsage(w http.ResponseWriter, r *http.Request) {
+	projectID, userID, ok := h.ids(w, r)
+	if !ok {
+		return
+	}
+	stats, err := h.service.GetTokenUsageSummary(r.Context(), projectID, userID)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, stats)
+}
+
+func (h *Handler) tokenUsageAllProjects(w http.ResponseWriter, r *http.Request) {
+	principal := auth.PrincipalFromContext(r.Context())
+	if principal == nil {
+		httpx.Error(w, http.StatusUnauthorized, errors.New("missing principal"))
+		return
+	}
+	stats, err := h.service.GetTokenUsageSummary(r.Context(), uuid.Nil, principal.UserID)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, stats)
 }
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
@@ -70,6 +101,23 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusCreated, session)
+}
+
+func (h *Handler) stats(w http.ResponseWriter, r *http.Request) {
+	projectID, userID, ok := h.ids(w, r)
+	if !ok {
+		return
+	}
+	sessionID, ok := parseSessionID(w, r)
+	if !ok {
+		return
+	}
+	detail, err := h.service.GetSessionDetail(r.Context(), projectID, userID, sessionID)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, detail)
 }
 
 func (h *Handler) get(w http.ResponseWriter, r *http.Request) {

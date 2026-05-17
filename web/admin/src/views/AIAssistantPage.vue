@@ -35,6 +35,8 @@
           :focused="isSessionInFocusedPane(session.id)"
           :tags="sessionPaneTags(session.id)"
           @select="() => onSelectSession(session.id)"
+          @detail="onSessionDetail"
+          @rename="onRenameSession"
           @delete="onDeleteSession"
         />
       </div>
@@ -108,6 +110,11 @@
       <p class="ds-main-empty__title">选择项目后开始对话</p>
       <p class="ds-main-empty__desc">在页面右上角选择测试项目，即可使用 AI 助理查询与编排。</p>
     </div>
+    <AISessionDetailDrawer
+      v-model="sessionDetailVisible"
+      :project-id="currentProjectId"
+      :session-id="sessionDetailId"
+    />
   </WorkspaceLayout>
 </template>
 
@@ -116,6 +123,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { ChatLineRound, Plus, Setting } from '@element-plus/icons-vue'
 import GlobalAIAssistant from '../components/GlobalAIAssistant.vue'
 import ModelSettingsPopover from '../components/ModelSettingsPopover.vue'
+import AISessionDetailDrawer from '../components/AISessionDetailDrawer.vue'
 import SessionListItem from '../components/SessionListItem.vue'
 import WorkspaceLayout from '../components/WorkspaceLayout.vue'
 import {
@@ -125,6 +133,7 @@ import {
   isSessionOpenInPane,
   newSession,
   removeSession,
+  renameSession,
   selectSession,
   setFocusedPane,
   setSplitMode,
@@ -137,6 +146,7 @@ export default {
   components: {
     GlobalAIAssistant,
     ModelSettingsPopover,
+    AISessionDetailDrawer,
     SessionListItem,
     WorkspaceLayout,
     ChatLineRound,
@@ -146,6 +156,8 @@ export default {
   data() {
     return {
       sessionsLoading: false,
+      sessionDetailVisible: false,
+      sessionDetailId: '',
       viewportWidth: typeof window !== 'undefined' ? window.innerWidth : 1200,
       narrowPaneTab: 'left',
     }
@@ -212,6 +224,29 @@ export default {
     },
     onSplitModeChange(value) {
       setSplitMode(!!value)
+    },
+    onSessionDetail(session) {
+      if (!session?.id) return
+      this.sessionDetailId = session.id
+      this.sessionDetailVisible = true
+    },
+    async onRenameSession(session) {
+      if (!session?.id) return
+      try {
+        const { value } = await ElMessageBox.prompt('请输入新的会话名称', '重命名会话', {
+          confirmButtonText: '保存',
+          cancelButtonText: '取消',
+          inputValue: session.title || '',
+          inputPattern: /\S/,
+          inputErrorMessage: '名称不能为空',
+        })
+        const title = String(value || '').trim()
+        if (!title) return
+        await renameSession(session.id, title)
+        ElMessage.success('会话已重命名')
+      } catch {
+        // 用户取消
+      }
     },
     focusPane(paneId) {
       setFocusedPane(paneId)

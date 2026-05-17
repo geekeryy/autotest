@@ -120,6 +120,17 @@ export const upsertScenarioStep = (scenarioId, stepOrder, data) =>
 export const deleteScenarioStep = (scenarioId, stepId) => request.delete(`/scenarios/${scenarioId}/steps/${stepId}`)
 export const runScenario = (scenarioId, data) => request.post(`/scenarios/${scenarioId}/run`, data)
 
+export const getScenario = (scenarioId) => request.get(`/scenarios/${scenarioId}`)
+export const listScenarioRuns = (scenarioId, params = {}) =>
+  request.get(`/scenarios/${scenarioId}/runs`, { params })
+export const listProjectRuns = (projectId, params = {}) =>
+  request.get(`/projects/${projectId}/runs`, { params })
+export const getScenarioRunStats = (scenarioId, params = {}) =>
+  request.get(`/scenarios/${scenarioId}/runs/stats`, { params })
+export const getScenarioRunReport = (runId) => request.get(`/runs/${runId}/report`)
+export const exportScenarioRun = (runId, format = 'json') =>
+  request.get(`/runs/${runId}/export`, { params: { format }, responseType: 'blob' })
+
 // AI providers (per-project) and AI invocation
 export const listAIProviderTypes = () => request.get('/ai-provider-types').then(asList)
 export const listAIProviders = (projectId) => request.get(`/projects/${projectId}/ai-providers`).then(asList)
@@ -157,6 +168,11 @@ export const createAISession = (projectId, data = {}) =>
   request.post(`/projects/${projectId}/ai/sessions`, data)
 export const getAISession = (projectId, sessionId) =>
   request.get(`/projects/${projectId}/ai/sessions/${sessionId}`)
+export const getAISessionStats = (projectId, sessionId) =>
+  request.get(`/projects/${projectId}/ai/sessions/${sessionId}/stats`)
+export const getAIProjectTokenUsage = (projectId) =>
+  request.get(`/projects/${projectId}/ai/sessions/token-usage`)
+export const getAIMyTokenUsage = () => request.get('/me/ai/token-usage')
 export const renameAISession = (projectId, sessionId, data) =>
   request.patch(`/projects/${projectId}/ai/sessions/${sessionId}`, data)
 export const deleteAISession = (projectId, sessionId) =>

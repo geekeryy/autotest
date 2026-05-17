@@ -13,9 +13,10 @@ import (
 
 // ModelInfo is a single model entry returned to the UI.
 type ModelInfo struct {
-	ID          string `json:"id"`
-	DisplayName string `json:"displayName,omitempty"`
-	OwnedBy     string `json:"ownedBy,omitempty"`
+	ID           string   `json:"id"`
+	DisplayName  string   `json:"displayName,omitempty"`
+	OwnedBy      string   `json:"ownedBy,omitempty"`
+	Capabilities []string `json:"capabilities,omitempty"`
 }
 
 // ListModels queries the upstream provider for available model IDs.
@@ -72,8 +73,8 @@ func listOpenAIModels(ctx context.Context, c *OpenAICompatibleClient) ([]ModelIn
 
 func parseOpenAIModelsPayload(raw []byte) ([]ModelInfo, error) {
 	var payload struct {
-		Data   []openAIModelRow `json:"data"`
-		Models []openAIModelRow `json:"models"`
+		Data   []json.RawMessage `json:"data"`
+		Models []json.RawMessage `json:"models"`
 	}
 	if err := json.Unmarshal(raw, &payload); err != nil {
 		return nil, fmt.Errorf("decode models response: %w", err)
@@ -83,7 +84,11 @@ func parseOpenAIModelsPayload(raw []byte) ([]ModelInfo, error) {
 		rows = payload.Models
 	}
 	out := make([]ModelInfo, 0, len(rows))
-	for _, item := range rows {
+	for _, rowRaw := range rows {
+		var item openAIModelRow
+		if err := json.Unmarshal(rowRaw, &item); err != nil {
+			continue
+		}
 		id := strings.TrimSpace(item.ID)
 		if id == "" {
 			id = strings.TrimSpace(item.Name)
@@ -91,7 +96,12 @@ func parseOpenAIModelsPayload(raw []byte) ([]ModelInfo, error) {
 		if id == "" {
 			continue
 		}
-		out = append(out, ModelInfo{ID: id, OwnedBy: strings.TrimSpace(item.OwnedBy)})
+		caps := InferModelCapabilities(id, ModelCapabilitiesFromMetadata(rowRaw))
+		out = append(out, ModelInfo{
+			ID:           id,
+			OwnedBy:      strings.TrimSpace(item.OwnedBy),
+			Capabilities: caps,
+		})
 	}
 	return out, nil
 }
@@ -274,8 +284,6 @@ func filterAndSortModels(models []ModelInfo) []ModelInfo {
 		}
 		lower := strings.ToLower(id)
 		if strings.Contains(lower, "embed") ||
-			strings.Contains(lower, "whisper") ||
-			strings.Contains(lower, "tts") ||
 			strings.Contains(lower, "dall-e") ||
 			strings.Contains(lower, "moderation") {
 			continue
@@ -285,6 +293,9 @@ func filterAndSortModels(models []ModelInfo) []ModelInfo {
 		}
 		seen[id] = struct{}{}
 		m.ID = id
+		if len(m.Capabilities) == 0 {
+			m.Capabilities = InferModelCapabilities(id, nil)
+		}
 		out = append(out, m)
 	}
 	sort.Slice(out, func(i, j int) bool {

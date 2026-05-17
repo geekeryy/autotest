@@ -146,6 +146,7 @@ func (h *Handler) confirmToolCall(w http.ResponseWriter, r *http.Request) {
 		ReasoningEffort  string          `json:"reasoningEffort,omitempty"`
 		WebSearchEnabled *bool           `json:"webSearchEnabled,omitempty"`
 		PageContext      json.RawMessage `json:"pageContext,omitempty"`
+		DebugEnabled     *bool           `json:"debugEnabled,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		httpx.Error(w, http.StatusBadRequest, err)
@@ -170,7 +171,7 @@ func (h *Handler) confirmToolCall(w http.ResponseWriter, r *http.Request) {
 	if err := h.service.ContinueAfterConfirm(
 		callerCtx, projectID, principal.UserID,
 		body.SessionID, callID, decision,
-		body.ProviderID, body.Model, body.ThinkingEnabled, body.ReasoningEffort, body.WebSearchEnabled, body.PageContext,
+		body.ProviderID, body.Model, body.ThinkingEnabled, body.ReasoningEffort, body.WebSearchEnabled, body.PageContext, body.DebugEnabled,
 		h.sessionStore, h.assistantTools, sink,
 	); err != nil {
 		_ = err

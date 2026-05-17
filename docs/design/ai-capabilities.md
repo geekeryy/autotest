@@ -7,7 +7,8 @@
 - 平台支持项目级 AI 提供商配置。
 - 提供商类型包括 deepseek、xiaomi、openai、anthropic、kimi、ollama。
 - 每个项目可维护多份 AI 提供商配置。
-- 配置包含名称、Base URL、API Key 脱敏、默认模型、extraConfig、启用状态与是否默认。
+- 配置包含名称、Base URL、API Key 脱敏、**文本默认模型**、按能力配置的默认模型（`modalityModels.image` / `audio` / `video`，存于 `extra_config`）、extraConfig、启用状态与是否默认。
+- `GET .../models` 与 discover 返回的每条模型含 `capabilities` 标签（`text` / `image` / `audio` / `video`）：优先解析上游元数据，否则按模型 id 中的通用能力关键词推断；**不在代码中写死具体型号名称**。
 - 同一项目最多一个默认提供商。
 - DeepSeek 与 Xiaomi 走 OpenAI 兼容协议时默认启用 thinking/reasoning：DeepSeek 请求携带 `thinking.type=enabled` 与 `reasoning_effort`，Xiaomi 请求携带 `reasoning.effort`。默认 effort 为 `high`；可通过 `extraConfig.thinking=false` 或 `extraConfig.thinking.enabled=false` 关闭，也可通过 `extraConfig.reasoning_effort` / `extraConfig.reasoningEffort` 或 `extraConfig.thinking.effort` 覆盖强度。
 - 模型下拉不再依赖 `/ai-provider-types` 的静态列表：已保存配置走 `GET /projects/{projectId}/ai-providers/{providerId}/models`；创建/编辑表单在填写 Base URL 与 API Key 后走 `POST .../ai-providers/models/discover`（编辑时 apiKey 留空则复用库内密钥）。OpenAI 兼容类型调用上游 `GET {baseUrl}/models`，Anthropic 调用 `GET {baseUrl}/models`，Ollama 在 `/v1/models` 不可用时回退 `GET /api/tags`；上游失败时返回内置 fallback 列表与 `warning`。
@@ -115,15 +116,19 @@
 - 登录后管理后台提供一个全局 AI 助理浮窗，对话上下文按「当前项目 + 当前登录用户」隔离，跨用户/跨项目互不可见。
 - 浮窗对话挂载在统一的 `assistant_chat` action 上，使用独立 system prompt（`assistantChatSystem`），引导模型以 Markdown 回应并主动调用工具补充上下文。
 - 浮窗输入区提供本次对话的 AI 设置：用户可选择当前项目下已启用的 AI 提供商，并在该提供商的推荐模型列表中选择或手工输入模型名；请求会携带 `providerId` 与 `model`，未选择时回退项目默认提供商和 provider 默认模型。
+- 平台在支持的提供商上**始终**收集上游 `usage` 元数据并写入 `ai_messages.usage_details`（OpenAI 兼容流式请求启用 `stream_options.include_usage`；Anthropic 从 `message_delta.usage` 解析），供首页仪表盘、会话详情 Token 汇总等统计使用。
+- 模型设置中提供 **Debug** 开关（按项目本地持久化）。开启后请求携带 `debugEnabled=true`，后端额外通过 SSE `usage` 事件推送每轮明细；前端在浮窗每条 assistant 回复下展示输入/输出/合计 Token、**缓存命中**（归并 `cached_tokens`、`prompt_cache_hit_tokens`、`cache_read_input_tokens` 等）、**缓存未命中**、**缓存写入**、推理 Token 与耗时，并可展开查看上游原始 JSON。关闭 Debug 不影响用量落库与汇总统计。
 - 当所选提供商为 DeepSeek 或 Xiaomi 时，浮窗参考 DeepSeek Chat 暴露「深度思考」开关。该开关按请求发送 `thinkingEnabled` 与 `reasoningEffort=high`，关闭时本轮不发送 thinking/reasoning 参数；其它 provider 不展示该开关。
 - 当所选提供商为 Xiaomi 时，浮窗额外暴露「联网搜索」开关。开启后请求在 tools 中附带小米内置 `web_search` 工具（由平台执行并注入结果，assistant 循环不本地执行该工具）；关闭时不附带。联网搜索按次计费，与 Token 计费独立。
-- 当所选提供商为 Xiaomi 时，输入区支持上传图片（JPEG/PNG/GIF/WebP，单张 ≤5MB，每条消息最多 4 张）。前端以 base64 data URL 随 `POST /ai/chat/stream` 的 `images` 字段提交；后端校验后写入 `ai_messages.attachments`，并以 OpenAI 多模态 `content` 数组（`text` + `image_url`）调用模型。行业常见做法是**按能力自动路由**：用户可在设置里默认选 `mimo-v2-pro` 等文本模型，一旦会话历史含图片，服务端在本轮请求中自动将 upstream `model` 改为 `mimo-v2.5`（若网关列表仅有 `mimo-v2-5` / `mimo-v2-omni` 则按候选匹配），**不要求用户手动改下拉框**。纯文本轮次仍用用户所选模型。历史会话加载时通过 `attachments` 字段回显缩略图。
+- 输入区支持上传图片（JPEG/PNG/GIF/WebP，单张 ≤5MB，每条消息最多 4 张），**前提是当前提供商已在设置中配置 `modalityModels.image`**。前端以 base64 data URL 随 `POST /ai/chat/stream` 的 `images` 提交；后端写入 `ai_messages.attachments`，并以 OpenAI 多模态 `content`（`text` + `image_url`）调用模型。含图时服务端按提供商配置的**图片默认模型**自动切换（与上游 `/models` 列表按 id 规范化匹配），纯文本轮次仍用用户所选或文本默认模型；不要求用户手动改下拉框。历史会话通过 `attachments` 回显缩略图。音频/视频路由字段已预留，待附件类型扩展后生效。
 - 深度思考开启后，前端在 assistant 占位消息中展示「正在深度思考」状态与耗时；后端仅通过 SSE `thinking` 事件同步 active/inactive 状态，不向前端暴露 `reasoning_content` 文本。
-- 浮窗会话由 `ai_sessions` 与 `ai_messages` 两张表持久化（migration 012）：
+- 浮窗会话由 `ai_sessions` 与 `ai_messages` 两张表持久化（见 `migrations/001_schema.sql`）：
   - `ai_sessions` 记录会话归属与标题；标题由后端在**第 1、2 条用户消息**时自动生成（第 1 条为主、第 2 条为辅精炼），第 3 条及之后不再更新；采用 few-shot「只输出标题」提示词，且不使用 reasoning 链作为标题；若模型仍输出分析口吻（如「首先，用户的指令是…」）则后处理剥离或回退为首问截断。
   - `ai_messages` 记录所有 LLM 对话轮（system/user/assistant/tool）与 `tool_calls` 元数据，并通过 `status` 字段区分 `final` / `pending_confirm` / `rejected`。
 - 浮窗的 API 入口：
   - `GET/POST /projects/{projectID}/ai/sessions`、`GET/PATCH/DELETE /projects/{projectID}/ai/sessions/{sessionID}`：会话 CRUD。
+  - `GET /projects/{projectID}/ai/sessions/{sessionID}/stats`：会话详情统计（对话条数、工具调用、待确认、模型列表、Token 汇总）；Token 汇总来自 `usage_details`（有上游用量数据的 assistant 轮次）。
+  - `GET /projects/{projectID}/ai/sessions/token-usage`：当前用户在项目内的 AI Token 消耗汇总（跨会话聚合）；`GET /me/ai/token-usage` 为全部项目汇总。供首页仪表盘展示，数据口径同上。
   - `POST /projects/{projectID}/ai/chat/stream`：发起对话并以 SSE 返回模型增量输出（含工具调用事件）。
   - `POST /projects/{projectID}/ai/tool-calls/{callID}/confirm`：用户对挂起的写工具调用做出 approve/reject 决策，并以同样的 SSE schema 恢复对话。
 
@@ -136,6 +141,7 @@
   - `tool_call`：只读工具被立即执行前的通知（含 `id`/`name`/`arguments`/`mutating=false`）。
   - `tool_result`：单次工具执行的结果（成功或失败均以 JSON 字符串放在 `content` 中）。
   - `pending_confirm`：写工具调用挂起，等待用户在 UI 上确认。负载里的 `toolCall.mutating=true`，调用真正执行前不会改动平台数据。
+  - `usage`：单轮 LLM 调用的 token / 缓存明细（仅 `debugEnabled` 时推送，用于浮窗实时展示；负载为 `AssistantUsageDetail`）。用量仍会写入 `ai_messages.usage_details`。
   - `done`：本次流结束，`finish` 字段在 `stop` / `tool_calls` / `pending_confirm` / `hop_budget_exhausted` / `error` 之中。
   - `session`：会话元数据更新（如自动生成的标题）；前端据此刷新侧栏会话名。
   - `error`：致命错误；前端应在收到后展示错误并允许重试。

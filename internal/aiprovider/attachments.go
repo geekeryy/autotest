@@ -116,13 +116,6 @@ func clientImagesFromAttachments(atts []MessageAttachment) []client.ImageAttachm
 	return out
 }
 
-func assistantAllowsImages(provider *providerRow) bool {
-	if provider == nil {
-		return false
-	}
-	return strings.EqualFold(strings.TrimSpace(provider.ProviderType), ProviderTypeXiaomi)
-}
-
 // resolveAssistantModel picks the model id for this assistant turn.
 func resolveAssistantModel(provider *providerRow, requested string) string {
 	if m := strings.TrimSpace(requested); m != "" {
@@ -134,14 +127,6 @@ func resolveAssistantModel(provider *providerRow, requested string) string {
 		}
 	}
 	return ""
-}
-
-// modelSupportsVision reports whether the provider model accepts image_url input.
-func modelSupportsVision(providerType, model string) bool {
-	if !strings.EqualFold(strings.TrimSpace(providerType), ProviderTypeXiaomi) {
-		return false
-	}
-	return isXiaomiVisionModel(model)
 }
 
 func historyHasImageAttachments(history []StoredMessage) bool {

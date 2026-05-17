@@ -1,7 +1,7 @@
 <template>
   <el-popover
     :placement="placement"
-    :width="300"
+    :width="400"
     trigger="click"
     popper-class="ai-model-settings-popper"
     :popper-style="{ padding: '12px' }"
@@ -41,6 +41,7 @@
             filterable
             allow-create
             default-first-option
+            popper-class="ai-assistant-model-dropdown"
             :disabled="controlsDisabled || !state.selectedProviderId"
             @change="onModelChange"
           >
@@ -57,12 +58,26 @@
           </el-button>
         </div>
       </div>
+      
       <p v-if="state.modelsWarning" class="ai-model-settings-hint ai-model-settings-hint--warn">
         {{ state.modelsWarning }}
       </p>
       <p v-else-if="state.remoteModelList.length" class="ai-model-settings-hint">
         已加载 {{ state.remoteModelList.length }} 个模型，点击下拉查看
       </p>
+      <div class="ai-model-settings-row ai-model-settings-row--debug">
+        <div class="ai-model-settings-debug">
+          <el-switch
+            :model-value="state.debugEnabled"
+            inline-prompt
+            active-text="开"
+            inactive-text="关"
+            :disabled="controlsDisabled"
+            @change="onDebugChange"
+          />
+          <span class="ai-model-settings-debug-hint">Debug：在对话中显示每轮 Token 与缓存详情</span>
+        </div>
+      </div>
     </div>
   </el-popover>
 </template>
@@ -72,6 +87,7 @@ import { ElMessage } from 'element-plus'
 import {
   assistantState,
   refreshProviderModels,
+  setAssistantDebug,
   setAssistantModel,
   setAssistantProvider,
 } from '../stores/aiAssistant'
@@ -116,6 +132,9 @@ export default {
     onModelChange(value) {
       setAssistantModel(value)
     },
+    onDebugChange(value) {
+      setAssistantDebug(value)
+    },
     async onRefreshModels() {
       const id = assistantState.selectedProviderId
       if (!id) return
@@ -153,8 +172,19 @@ export default {
   gap: 8px;
 }
 
-.ai-model-settings-model :deep(.el-select) {
+.ai-provider-select,
+.ai-model-select {
+  width: 100%;
+}
+
+.ai-model-settings-model {
   flex: 1;
+  min-width: 0;
+  width: 100%;
+}
+
+.ai-model-settings-model :deep(.el-select) {
+  width: 100%;
 }
 
 .ai-model-settings-hint {
@@ -166,5 +196,18 @@ export default {
 
 .ai-model-settings-hint--warn {
   color: var(--el-color-warning);
+}
+
+.ai-model-settings-debug {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.ai-model-settings-debug-hint {
+  font-size: var(--app-font-size-small);
+  color: var(--app-text-muted);
+  line-height: 1.4;
 }
 </style>

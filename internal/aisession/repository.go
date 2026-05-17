@@ -139,6 +139,44 @@ func (r *Repository) TouchSession(ctx context.Context, sessionID uuid.UUID) erro
 	return err
 }
 
+// ListAssistantUsageDetails returns usage_details JSON for assistant messages
+// owned by userID, optionally scoped to projectID when projectID is not nil.
+func (r *Repository) ListAssistantUsageDetails(ctx context.Context, userID uuid.UUID, projectID *uuid.UUID) ([][]byte, error) {
+	if r.DB == nil {
+		return nil, fmt.Errorf("database unavailable")
+	}
+	query := `
+		select m.usage_details
+		from ai_messages m
+		inner join ai_sessions s on s.id = m.session_id
+		where s.user_id = $1
+		  and s.deleted_at is null
+		  and m.role = 'assistant'
+		  and m.usage_details is not null
+	`
+	args := []any{userID}
+	if projectID != nil && *projectID != uuid.Nil {
+		query += ` and s.project_id = $2`
+		args = append(args, *projectID)
+	}
+	rows, err := r.DB.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list assistant usage details: %w", err)
+	}
+	defer rows.Close()
+	var out [][]byte
+	for rows.Next() {
+		var raw []byte
+		if err := rows.Scan(&raw); err != nil {
+			return nil, err
+		}
+		if len(raw) > 0 {
+			out = append(out, raw)
+		}
+	}
+	return out, rows.Err()
+}
+
 // ListMessages returns every message of a session in seq order.
 func (r *Repository) ListMessages(ctx context.Context, sessionID uuid.UUID) ([]Message, error) {
 	if r.DB == nil {
@@ -146,7 +184,7 @@ func (r *Repository) ListMessages(ctx context.Context, sessionID uuid.UUID) ([]M
 	}
 	rows, err := r.DB.Query(ctx, `
 		select id, session_id, seq, role, content, attachments, reasoning_content, tool_call_id, tool_calls,
-		       status, model, elapsed_millis, created_at
+		       status, model, elapsed_millis, usage_details, created_at
 		from ai_messages
 		where session_id = $1
 		order by seq asc
@@ -198,19 +236,23 @@ func (r *Repository) AppendMessage(ctx context.Context, sessionID uuid.UUID, inp
 	if len(input.Attachments) > 0 {
 		attachments = input.Attachments
 	}
+	var usageDetails any
+	if len(input.UsageDetails) > 0 {
+		usageDetails = input.UsageDetails
+	}
 	row := r.DB.QueryRow(ctx, `
 		insert into ai_messages (
 			session_id, seq, role, content, attachments, reasoning_content, tool_call_id, tool_calls,
-			status, model, elapsed_millis
+			status, model, elapsed_millis, usage_details
 		)
 		values (
 			$1,
 			(select coalesce(max(seq), 0) + 1 from ai_messages where session_id = $1),
-			$2, $3, $4, $5, $6, $7, $8, $9, $10
+			$2, $3, $4, $5, $6, $7, $8, $9, $10, $11
 		)
 		returning id, session_id, seq, role, content, attachments, reasoning_content, tool_call_id, tool_calls,
-		          status, model, elapsed_millis, created_at
-	`, sessionID, input.Role, input.Content, attachments, input.ReasoningContent, toolCallID, toolCalls, status, model, elapsed)
+		          status, model, elapsed_millis, usage_details, created_at
+	`, sessionID, input.Role, input.Content, attachments, input.ReasoningContent, toolCallID, toolCalls, status, model, elapsed, usageDetails)
 	return scanMessage(row)
 }
 
@@ -271,7 +313,7 @@ func (r *Repository) FindPendingToolCall(ctx context.Context, sessionID uuid.UUI
 	}
 	rows, err := r.DB.Query(ctx, `
 		select id, session_id, seq, role, content, attachments, reasoning_content, tool_call_id, tool_calls,
-		       status, model, elapsed_millis, created_at
+		       status, model, elapsed_millis, usage_details, created_at
 		from ai_messages
 		where session_id = $1 and status = 'pending_confirm'
 		order by seq desc
@@ -333,10 +375,11 @@ func scanMessage(row rowScanner) (*Message, error) {
 	var model pgtype.Text
 	var elapsed pgtype.Int4
 	var attachments []byte
+	var usageDetails []byte
 	if err := row.Scan(
 		&m.ID, &m.SessionID, &m.Seq, &m.Role, &m.Content, &attachments,
 		&m.ReasoningContent, &toolCallID, &toolCalls, &m.Status,
-		&model, &elapsed, &m.CreatedAt,
+		&model, &elapsed, &usageDetails, &m.CreatedAt,
 	); err != nil {
 		return nil, err
 	}
@@ -354,6 +397,9 @@ func scanMessage(row rowScanner) (*Message, error) {
 	}
 	if elapsed.Valid {
 		m.ElapsedMillis = int(elapsed.Int32)
+	}
+	if len(usageDetails) > 0 {
+		m.UsageDetails = json.RawMessage(usageDetails)
 	}
 	return &m, nil
 }

@@ -1,36 +1,58 @@
 <template>
-  <component
-    :is="rootTag"
-    type="button"
+  <div
     class="session-list-item"
     :class="itemClasses"
+    role="button"
+    tabindex="0"
     @click="onSelect"
+    @keydown.enter.prevent="onSelect"
   >
-    <span class="session-list-item__title-row">
-      <span class="session-list-item__title">{{ session.title || '新对话' }}</span>
-      <span v-if="tags.length" class="session-list-item__tags">
-        <span v-for="tag in tags" :key="tag" class="session-list-item__tag">{{ tag }}</span>
+    <div class="session-list-item__body">
+      <span class="session-list-item__title-row">
+        <span class="session-list-item__title">{{ session.title || '新对话' }}</span>
+        <span v-if="tags.length" class="session-list-item__tags">
+          <span v-for="tag in tags" :key="tag" class="session-list-item__tag">{{ tag }}</span>
+        </span>
       </span>
-    </span>
-    <span class="session-list-item__meta">{{ timeLabel }}</span>
-    <button
-      type="button"
-      class="session-list-item__delete"
-      title="删除会话"
-      @click.stop="onDelete"
+      <span v-if="showMeta" class="session-list-item__meta">{{ timeLabel }}</span>
+    </div>
+    <el-dropdown
+      trigger="click"
+      placement="bottom-end"
+      popper-class="session-list-item-menu"
+      @command="onMenuCommand"
+      @click.stop
     >
-      <el-icon><Delete /></el-icon>
-    </button>
-  </component>
+      <el-icon class="session-list-item__action" title="更多操作" @click.stop>
+        <MoreFilled />
+      </el-icon>
+      <template #dropdown>
+        <el-dropdown-menu>
+          <el-dropdown-item command="detail">
+            <el-icon><InfoFilled /></el-icon>
+            <span>会话详情</span>
+          </el-dropdown-item>
+          <el-dropdown-item command="rename">
+            <el-icon><EditPen /></el-icon>
+            <span>重命名</span>
+          </el-dropdown-item>
+          <el-dropdown-item command="delete" divided class="session-list-item-menu__danger">
+            <el-icon><Delete /></el-icon>
+            <span>删除</span>
+          </el-dropdown-item>
+        </el-dropdown-menu>
+      </template>
+    </el-dropdown>
+  </div>
 </template>
 
 <script>
-import { Delete } from '@element-plus/icons-vue'
+import { Delete, EditPen, InfoFilled, MoreFilled } from '@element-plus/icons-vue'
 import { formatRelativeTime, formatSessionTime } from '../utils/useRelativeTime'
 
 export default {
   name: 'SessionListItem',
-  components: { Delete },
+  components: { Delete, EditPen, InfoFilled, MoreFilled },
   props: {
     session: { type: Object, required: true },
     active: { type: Boolean, default: false },
@@ -38,9 +60,8 @@ export default {
     tags: { type: Array, default: () => [] },
     /** sidebar | history */
     variant: { type: String, default: 'sidebar' },
-    rootTag: { type: String, default: 'button' },
   },
-  emits: ['select', 'delete'],
+  emits: ['select', 'delete', 'detail', 'rename'],
   computed: {
     itemClasses() {
       return {
@@ -48,6 +69,9 @@ export default {
         'session-list-item--focused': this.focused,
         'session-list-item--history': this.variant === 'history',
       }
+    },
+    showMeta() {
+      return this.variant === 'sidebar'
     },
     timeLabel() {
       const fn = this.variant === 'history' ? formatSessionTime : formatRelativeTime
@@ -58,8 +82,18 @@ export default {
     onSelect() {
       this.$emit('select', this.session)
     },
-    onDelete() {
-      this.$emit('delete', this.session)
+    onMenuCommand(command) {
+      if (command === 'detail') {
+        this.$emit('detail', this.session)
+        return
+      }
+      if (command === 'rename') {
+        this.$emit('rename', this.session)
+        return
+      }
+      if (command === 'delete') {
+        this.$emit('delete', this.session)
+      }
     },
   },
 }
@@ -67,14 +101,13 @@ export default {
 
 <style scoped>
 .session-list-item {
-  position: relative;
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
   width: 100%;
   margin-bottom: 2px;
-  padding: 10px 36px 10px 12px;
+  padding: 8px 10px;
   border: none;
   border-radius: 10px;
   background: transparent;
@@ -83,9 +116,11 @@ export default {
   transition: background 0.15s ease;
   font: inherit;
   color: inherit;
+  outline: none;
 }
 
-.session-list-item:hover {
+.session-list-item:hover,
+.session-list-item:focus-visible {
   background: var(--app-surface-subtle);
 }
 
@@ -94,9 +129,18 @@ export default {
 }
 
 .session-list-item--history {
-  padding: 8px 32px 8px 10px;
+  padding: 7px 8px;
   border-radius: 8px;
   margin-bottom: 0;
+}
+
+.session-list-item__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
 }
 
 .session-list-item__title-row {
@@ -120,7 +164,6 @@ export default {
 
 .session-list-item--history .session-list-item__title {
   font-size: 13px;
-  font-weight: 500;
 }
 
 .session-list-item__meta {
@@ -144,37 +187,78 @@ export default {
   background: var(--app-focus-ring);
 }
 
-.session-list-item__delete {
-  position: absolute;
-  right: 6px;
-  top: 50%;
-  transform: translateY(-50%);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  border: none;
+.session-list-item__action {
+  flex-shrink: 0;
+  width: 23px;
+  height: 23px;
+  font-size: 20px;
+  padding: 4px;
   border-radius: 6px;
-  background: transparent;
   color: var(--app-text-muted);
+  opacity: 0;
   cursor: pointer;
-  opacity: 0.55;
   transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
 }
 
-.session-list-item:hover .session-list-item__delete,
-.session-list-item.active .session-list-item__delete {
-  opacity: 0.85;
+.session-list-item:hover .session-list-item__action,
+.session-list-item:focus-within .session-list-item__action,
+.session-list-item.active .session-list-item__action {
+  opacity: 0.45;
 }
 
-.session-list-item__delete:hover {
-  background: color-mix(in srgb, var(--el-color-danger) 12%, transparent);
-  color: var(--el-color-danger);
+.session-list-item:hover .session-list-item__action:hover,
+.session-list-item:focus-within .session-list-item__action:hover,
+.session-list-item.active .session-list-item__action:hover {
   opacity: 1;
+  background: color-mix(in srgb, var(--app-text-color) 8%, transparent);
+  color: var(--app-text-color);
 }
 
 .session-list-item--focused.active {
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--el-color-primary) 35%, transparent);
+}
+</style>
+
+<style>
+.session-list-item-menu.el-popper {
+  padding: 4px 0;
+}
+
+.session-list-item-menu .el-dropdown-menu {
+  display: flex;
+  flex-direction: column;
+  min-width: 148px;
+  padding: 4px 0;
+}
+
+.session-list-item-menu .el-dropdown-menu__item {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 14px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.session-list-item-menu .el-dropdown-menu__item .el-icon {
+  flex-shrink: 0;
+  margin: 0;
+  font-size: 18px;
+}
+
+.session-list-item-menu .el-dropdown-menu__item > span {
+  flex: 1;
+  font-size: 14px;
+}
+
+.session-list-item-menu__danger {
+  color: var(--el-color-danger);
+}
+
+.session-list-item-menu__danger .el-icon {
+  color: var(--el-color-danger);
 }
 </style>

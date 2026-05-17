@@ -217,6 +217,8 @@ const icons = {
   '/cases': 'Document',
   '/spec-import': 'Upload',
   '/run-console': 'Monitor',
+  '/reports': 'DataLine',
+  '/reports/runs': 'List',
   '/platform': 'Files',
   '/script-library': 'Notebook',
   '/mock-value-sets': 'Collection',

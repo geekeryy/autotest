@@ -36,6 +36,51 @@ func (s *Service) ListSessions(ctx context.Context, projectID, userID uuid.UUID)
 	return s.repo.ListSessions(ctx, projectID, userID)
 }
 
+// GetTokenUsageSummary aggregates usage_details for the user's assistant
+// messages. When projectID is uuid.Nil, all projects for the user are included.
+func (s *Service) GetTokenUsageSummary(ctx context.Context, projectID, userID uuid.UUID) (SessionTokenUsageStats, error) {
+	if userID == uuid.Nil {
+		return SessionTokenUsageStats{}, errors.New("userId 不能为空")
+	}
+	var scope *uuid.UUID
+	if projectID != uuid.Nil {
+		scope = &projectID
+	}
+	raw, err := s.repo.ListAssistantUsageDetails(ctx, userID, scope)
+	if err != nil {
+		return SessionTokenUsageStats{}, err
+	}
+	out := SessionTokenUsageStats{}
+	for _, body := range raw {
+		var detail messageUsageDetail
+		if err := json.Unmarshal(body, &detail); err != nil {
+			continue
+		}
+		accumulateUsageDetail(&out, detail)
+	}
+	if !out.HasUsageData {
+		out.Hint = tokenUsageEmptyHint
+	}
+	return out, nil
+}
+
+// GetSessionDetail returns session metadata with conversation and token stats.
+func (s *Service) GetSessionDetail(ctx context.Context, projectID, userID, sessionID uuid.UUID) (*SessionDetail, error) {
+	if projectID == uuid.Nil || userID == uuid.Nil || sessionID == uuid.Nil {
+		return nil, errors.New("projectId / userId / sessionId 不能为空")
+	}
+	session, err := s.repo.GetSession(ctx, projectID, userID, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	messages, err := s.repo.ListMessages(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	detail := BuildSessionDetail(*session, messages)
+	return &detail, nil
+}
+
 // GetSession returns a session + its messages enforcing ownership.
 func (s *Service) GetSession(ctx context.Context, projectID, userID, sessionID uuid.UUID) (*Session, []Message, error) {
 	if projectID == uuid.Nil || userID == uuid.Nil || sessionID == uuid.Nil {

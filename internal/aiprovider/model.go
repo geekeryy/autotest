@@ -52,8 +52,9 @@ type Provider struct {
 	BaseURL       string          `json:"baseUrl"`
 	APIKeyMasked  string          `json:"apiKeyMasked"`
 	APIKeyPresent bool            `json:"apiKeyPresent"`
-	DefaultModel  string          `json:"defaultModel,omitempty"`
-	ExtraConfig   json.RawMessage `json:"extraConfig,omitempty"`
+	DefaultModel   string                  `json:"defaultModel,omitempty"`
+	ModalityModels ProviderModalityModels `json:"modalityModels,omitempty"`
+	ExtraConfig    json.RawMessage         `json:"extraConfig,omitempty"`
 	Enabled       bool            `json:"enabled"`
 	IsDefault     bool            `json:"isDefault"`
 	CreatedAt     time.Time       `json:"createdAt"`
@@ -66,10 +67,11 @@ type CreateInput struct {
 	ProviderType string          `json:"providerType"`
 	BaseURL      string          `json:"baseUrl"`
 	APIKey       string          `json:"apiKey"`
-	DefaultModel string          `json:"defaultModel"`
-	ExtraConfig  json.RawMessage `json:"extraConfig"`
-	Enabled      *bool           `json:"enabled"`
-	IsDefault    bool            `json:"isDefault"`
+	DefaultModel   string                   `json:"defaultModel"`
+	ModalityModels *ProviderModalityModels `json:"modalityModels,omitempty"`
+	ExtraConfig    json.RawMessage          `json:"extraConfig"`
+	Enabled        *bool                    `json:"enabled"`
+	IsDefault      bool                     `json:"isDefault"`
 }
 
 // UpdateInput is the payload for PUT /projects/{projectID}/ai-providers/{providerID}.
@@ -79,10 +81,11 @@ type UpdateInput struct {
 	ProviderType string          `json:"providerType"`
 	BaseURL      string          `json:"baseUrl"`
 	APIKey       *string         `json:"apiKey"`
-	DefaultModel string          `json:"defaultModel"`
-	ExtraConfig  json.RawMessage `json:"extraConfig"`
-	Enabled      *bool           `json:"enabled"`
-	IsDefault    bool            `json:"isDefault"`
+	DefaultModel   string                   `json:"defaultModel"`
+	ModalityModels *ProviderModalityModels `json:"modalityModels,omitempty"`
+	ExtraConfig    json.RawMessage          `json:"extraConfig"`
+	Enabled        *bool                    `json:"enabled"`
+	IsDefault      bool                     `json:"isDefault"`
 }
 
 // ChatRequest is the payload for POST /projects/{projectID}/ai/chat.
@@ -170,6 +173,7 @@ func (p providerRow) toAPI() *Provider {
 	if len(p.ExtraConfig) > 0 {
 		out.ExtraConfig = json.RawMessage(p.ExtraConfig)
 	}
+	out.ModalityModels = providerModalityModels(&p)
 	return out
 }
 

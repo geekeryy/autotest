@@ -65,6 +65,7 @@ type PromptService interface {
 type ReportService interface {
 	GetRun(ctx context.Context, runID uuid.UUID) (*report.Run, error)
 	ListResults(ctx context.Context, runID uuid.UUID) ([]report.Result, error)
+	LoadScenarioStepIndex(ctx context.Context, scenarioID uuid.UUID) (map[uuid.UUID]report.StepMeta, error)
 }
 
 // Handler implements the two AI analysis endpoints.
@@ -162,13 +163,13 @@ func (h *Handler) analyzeFailure(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stepNamesByID := map[uuid.UUID]stepInfo{}
+	stepNamesByID := map[uuid.UUID]report.StepMeta{}
 	if run.ScenarioID != nil && *run.ScenarioID != uuid.Nil {
 		stepNamesByID, err = h.loadScenarioStepIndex(r.Context(), *run.ScenarioID)
 		if err != nil {
 			// Step-name lookup is best-effort — log via header-less default
 			// and continue with bare step IDs so the analysis can still run.
-			stepNamesByID = map[uuid.UUID]stepInfo{}
+			stepNamesByID = map[uuid.UUID]report.StepMeta{}
 		}
 	}
 
@@ -199,47 +200,14 @@ func (h *Handler) analyzeFailure(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, resp)
 }
 
-// stepInfo is the projection used to label scenario step results in the AI
-// context. The step ID is the join key; the rest is descriptive metadata.
-type stepInfo struct {
-	StepSeq    int
-	StepOrder  int
-	Name       string
-	StepType   string
-	TestCaseID *uuid.UUID
-}
-
-func (h *Handler) loadScenarioStepIndex(ctx context.Context, scenarioID uuid.UUID) (map[uuid.UUID]stepInfo, error) {
-	if h.repo.DB == nil {
-		return nil, errors.New("database unavailable")
-	}
-	rows, err := h.repo.DB.Query(ctx, `
-		select id, test_case_id, step_seq, step_order, name, step_type
-		from test_scenario_steps
-		where scenario_id = $1 and deleted_at is null
-	`, scenarioID)
-	if err != nil {
-		return nil, fmt.Errorf("查询场景步骤失败: %w", err)
-	}
-	defer rows.Close()
-	out := map[uuid.UUID]stepInfo{}
-	for rows.Next() {
-		var id uuid.UUID
-		var testCaseID *uuid.UUID
-		var info stepInfo
-		if err := rows.Scan(&id, &testCaseID, &info.StepSeq, &info.StepOrder, &info.Name, &info.StepType); err != nil {
-			return nil, fmt.Errorf("扫描场景步骤失败: %w", err)
-		}
-		info.TestCaseID = testCaseID
-		out[id] = info
-	}
-	return out, rows.Err()
+func (h *Handler) loadScenarioStepIndex(ctx context.Context, scenarioID uuid.UUID) (map[uuid.UUID]report.StepMeta, error) {
+	return h.reports.LoadScenarioStepIndex(ctx, scenarioID)
 }
 
 // buildFailureContext assembles the structured payload sent to the model. We
 // trim large response bodies to keep prompt size manageable while still
 // retaining enough evidence for root-cause analysis.
-func buildFailureContext(run *report.Run, results []report.Result, stepIndex map[uuid.UUID]stepInfo) map[string]any {
+func buildFailureContext(run *report.Run, results []report.Result, stepIndex map[uuid.UUID]report.StepMeta) map[string]any {
 	ctx := map[string]any{
 		"run": map[string]any{
 			"id":            run.ID,
@@ -262,9 +230,9 @@ func buildFailureContext(run *report.Run, results []report.Result, stepIndex map
 	stepResults := make([]map[string]any, 0, len(results))
 	assertionFailures := []map[string]any{}
 	for _, result := range results {
-		entry := buildResultSummary(result, stepIndex)
+		entry := report.BuildResultSummaryEntry(result, stepIndex, report.DefaultSummaryMaxBodyChars)
 		stepResults = append(stepResults, entry)
-		assertionFailures = append(assertionFailures, extractAssertionFailures(result)...)
+		assertionFailures = append(assertionFailures, report.ExtractAssertionFailures(result)...)
 	}
 
 	if run.ScenarioID != nil && *run.ScenarioID != uuid.Nil {
@@ -284,109 +252,6 @@ func buildFailureContext(run *report.Run, results []report.Result, stepIndex map
 		ctx["assertionFailures"] = assertionFailures
 	}
 	return ctx
-}
-
-const (
-	maxBodyChars = 8000
-)
-
-// buildResultSummary turns a single test_run_results row into a JSON-friendly
-// summary. Long bodies are truncated with a marker so the model is aware the
-// content was abridged rather than empty.
-func buildResultSummary(result report.Result, stepIndex map[uuid.UUID]stepInfo) map[string]any {
-	out := map[string]any{
-		"id":             result.ID,
-		"testCaseId":     result.TestCaseID,
-		"status":         string(result.Status),
-		"durationMillis": result.DurationMillis,
-	}
-	if result.StepID != nil {
-		out["stepId"] = *result.StepID
-		if info, ok := stepIndex[*result.StepID]; ok {
-			out["step"] = map[string]any{
-				"stepSeq":    info.StepSeq,
-				"stepOrder":  info.StepOrder,
-				"name":       info.Name,
-				"stepType":   info.StepType,
-				"testCaseId": info.TestCaseID,
-			}
-		}
-	}
-	if result.Error != "" {
-		out["error"] = result.Error
-	}
-	if reqSnap := truncateJSON(result.RequestSnapshot, maxBodyChars); reqSnap != nil {
-		out["requestSnapshot"] = reqSnap
-	}
-	if respSnap := truncateJSON(result.ResponseSnapshot, maxBodyChars); respSnap != nil {
-		out["responseSnapshot"] = respSnap
-	}
-	if assertions := decodeJSON(result.Assertions); assertions != nil {
-		out["assertions"] = assertions
-	}
-	return out
-}
-
-// truncateJSON decodes raw JSON (snapshot bodies) and replaces over-long
-// string bodies with a `"<...truncated N chars>"` marker so the prompt does
-// not blow past provider input limits. For non-string bodies (objects /
-// arrays) we keep them intact since they are usually structured and small.
-func truncateJSON(raw json.RawMessage, maxBody int) any {
-	value := decodeJSON(raw)
-	if value == nil {
-		return nil
-	}
-	asMap, ok := value.(map[string]any)
-	if !ok {
-		return value
-	}
-	if body, ok := asMap["body"]; ok {
-		if asString, ok := body.(string); ok && len(asString) > maxBody {
-			asMap["body"] = asString[:maxBody] + fmt.Sprintf("…<truncated %d chars>", len(asString)-maxBody)
-		}
-	}
-	return asMap
-}
-
-func decodeJSON(raw json.RawMessage) any {
-	if len(raw) == 0 {
-		return nil
-	}
-	var value any
-	if err := json.Unmarshal(raw, &value); err != nil {
-		return string(raw)
-	}
-	return value
-}
-
-// extractAssertionFailures flattens the per-result `assertions` array into a
-// top-level `assertionFailures` list so the model can quickly see the
-// failures without traversing every step. We only include failed entries.
-func extractAssertionFailures(result report.Result) []map[string]any {
-	value := decodeJSON(result.Assertions)
-	asSlice, ok := value.([]any)
-	if !ok {
-		return nil
-	}
-	out := []map[string]any{}
-	for _, entry := range asSlice {
-		asMap, ok := entry.(map[string]any)
-		if !ok {
-			continue
-		}
-		if passed, ok := asMap["passed"].(bool); ok && passed {
-			continue
-		}
-		copy := map[string]any{
-			"resultId":   result.ID,
-			"testCaseId": result.TestCaseID,
-		}
-		for k, v := range asMap {
-			copy[k] = v
-		}
-		out = append(out, copy)
-	}
-	return out
 }
 
 // ── analyze_spec_changes ───────────────────────────────────────────────────
