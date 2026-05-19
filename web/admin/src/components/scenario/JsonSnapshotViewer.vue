@@ -1,5 +1,5 @@
 <template>
-  <div v-if="lines.length" class="json-viewer snapshot-pre">
+  <div v-if="lines.length" class="json-viewer code-view">
     <div
       v-for="line in lines"
       :key="line.id"
@@ -56,28 +56,89 @@ export default {
 
 <style scoped>
 .json-viewer {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 12px;
+  min-height: 96px;
   max-height: 320px;
   overflow: auto;
-  background: #0f172a;
-  color: #e2e8f0;
-  padding: 8px;
-  border-radius: 6px;
+  padding: 10px 0;
+  border: 1px solid var(--app-border-color, var(--el-border-color));
+  border-radius: 10px;
+  background: var(--app-code-bg, var(--el-fill-color-light));
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: var(--app-font-size-small, 12px);
+  line-height: 1.7;
 }
-.json-line { line-height: 1.45; white-space: pre; }
+
+.json-line {
+  display: flex;
+  align-items: baseline;
+  gap: 0;
+  white-space: pre;
+  padding-right: 10px;
+}
+
+.json-toggle,
+.json-toggle-ph {
+  flex: 0 0 14px;
+  width: 14px;
+  height: 14px;
+  position: relative;
+  top: 1px;
+}
+
 .json-toggle {
-  display: inline-block;
-  width: 12px;
   cursor: pointer;
-  margin-right: 4px;
+  border-radius: 2px;
+  flex-shrink: 0;
 }
-.json-toggle::before { content: '▼'; font-size: 9px; }
-.json-toggle.is-collapsed::before { content: '▶'; }
-.json-toggle-ph { display: inline-block; width: 16px; }
-.json-key { color: #7dd3fc; }
-.json-value.json-string { color: #86efac; }
-.json-value.json-number { color: #fcd34d; }
-.json-value.json-boolean { color: #f9a8d4; }
-.json-value.json-null { color: #94a3b8; }
+
+.json-toggle:hover {
+  background: var(--el-fill-color);
+}
+
+.json-toggle::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  border: 3.5px solid transparent;
+  border-top: 4.5px solid #94a3b8;
+  border-bottom: 0;
+  transform: translate(-50%, -20%);
+  transition: transform 0.12s;
+}
+
+.json-toggle.is-collapsed::before {
+  transform: translate(-50%, -50%) rotate(-90deg);
+}
+
+.json-key {
+  color: #1e40af;
+}
+
+.json-colon,
+.json-bracket,
+.json-comma {
+  color: var(--el-text-color-regular);
+}
+
+.json-value.json-string {
+  color: #16a34a;
+}
+
+.json-value.json-number {
+  color: #c2410c;
+}
+
+.json-value.json-boolean {
+  color: #7c3aed;
+}
+
+.json-value.json-null {
+  color: #94a3b8;
+}
+
+.json-collapsed-preview {
+  color: #94a3b8;
+  font-style: italic;
+}
 </style>
