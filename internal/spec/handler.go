@@ -1,21 +1,30 @@
 package spec
 
 import (
+	"context"
 	"io"
 	"net/http"
 
+	"autotest/internal/auth"
 	"autotest/internal/httpx"
+	"autotest/internal/logx"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
 
-type Handler struct {
-	service *Service
+// ImportNotifier 在 API Key 成功导入 Swagger 后写入站内通知；由 internal/notification 实现。
+type ImportNotifier interface {
+	CreateSpecImportNotification(ctx context.Context, userID, projectID, serviceID uuid.UUID, summary *ImportSummary) error
 }
 
-func NewHandler(service *Service) *Handler {
-	return &Handler{service: service}
+type Handler struct {
+	service  *Service
+	notifier ImportNotifier
+}
+
+func NewHandler(service *Service, notifier ImportNotifier) *Handler {
+	return &Handler{service: service, notifier: notifier}
 }
 
 // Register 挂载只读接口（list specs / list endpoints）。
@@ -74,7 +83,21 @@ func (h *Handler) importSpec(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, err)
 		return
 	}
+	h.notifyImportIfAPIKey(r, projectID, serviceID, summary)
 	httpx.JSON(w, http.StatusCreated, summary)
+}
+
+func (h *Handler) notifyImportIfAPIKey(r *http.Request, projectID, serviceID uuid.UUID, summary *ImportSummary) {
+	if h.notifier == nil || summary == nil {
+		return
+	}
+	principal := auth.PrincipalFromContext(r.Context())
+	if principal == nil || principal.Source != auth.SourceAPIKey {
+		return
+	}
+	if err := h.notifier.CreateSpecImportNotification(r.Context(), principal.UserID, projectID, serviceID, summary); err != nil {
+		logx.Warn("create spec import notification", "err", err, "userId", principal.UserID, "projectId", projectID, "serviceId", serviceID)
+	}
 }
 
 func (h *Handler) listEndpoints(w http.ResponseWriter, r *http.Request) {

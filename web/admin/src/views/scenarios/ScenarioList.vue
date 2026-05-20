@@ -75,6 +75,7 @@
           :data-sources="dataSources"
           :project-id="projectId"
           :service-id="serviceId"
+          @environments-updated="onEnvironmentsUpdated"
         />
       </template>
 
@@ -290,6 +291,10 @@ export default {
 
     scenarioById(id) {
       return this.scenarios.find((s) => s.id === id) || { id, name: '' }
+    },
+
+    onEnvironmentsUpdated(envs) {
+      this.environments = Array.isArray(envs) ? envs : []
     },
 
     openScenario(sc, options = {}) {

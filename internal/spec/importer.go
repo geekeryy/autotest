@@ -117,8 +117,7 @@ func collectEndpoints(doc *openapi3.T) []Endpoint {
 
 			req := requestSchema(op.operation, doc.Security)
 			resp := responseSchema(op.operation)
-			fingerprint := endpointFingerprint(op.method, path, op.operation.OperationID)
-			endpoints = append(endpoints, Endpoint{
+			ep := Endpoint{
 				Method:         strings.ToUpper(op.method),
 				Path:           path,
 				OperationID:    op.operation.OperationID,
@@ -126,8 +125,9 @@ func collectEndpoints(doc *openapi3.T) []Endpoint {
 				Tags:           append([]string(nil), op.operation.Tags...),
 				RequestSchema:  req,
 				ResponseSchema: resp,
-				Fingerprint:    fingerprint,
-			})
+			}
+			ep.Fingerprint = endpointFingerprint(ep)
+			endpoints = append(endpoints, ep)
 		}
 	}
 	return endpoints
@@ -444,6 +444,31 @@ func mustJSON(value any) json.RawMessage {
 	return raw
 }
 
-func endpointFingerprint(method, path, operationID string) string {
-	return HashContent([]byte(strings.ToUpper(method) + "\x00" + path + "\x00" + operationID))
+type endpointFingerprintPayload struct {
+	Method         string          `json:"method"`
+	Path           string          `json:"path"`
+	OperationID    string          `json:"operationId,omitempty"`
+	Summary        string          `json:"summary,omitempty"`
+	Tags           []string        `json:"tags,omitempty"`
+	RequestSchema  json.RawMessage `json:"requestSchema"`
+	ResponseSchema json.RawMessage `json:"responseSchema"`
+}
+
+func endpointFingerprint(ep Endpoint) string {
+	tags := append([]string(nil), ep.Tags...)
+	sort.Strings(tags)
+	payload := endpointFingerprintPayload{
+		Method:         strings.ToUpper(ep.Method),
+		Path:           ep.Path,
+		OperationID:    ep.OperationID,
+		Summary:        ep.Summary,
+		Tags:           tags,
+		RequestSchema:  ep.RequestSchema,
+		ResponseSchema: ep.ResponseSchema,
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return HashContent([]byte(strings.ToUpper(ep.Method) + "\x00" + ep.Path + "\x00" + ep.OperationID))
+	}
+	return HashContent(raw)
 }

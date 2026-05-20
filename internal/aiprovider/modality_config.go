@@ -91,15 +91,6 @@ func resolveConfiguredModelID(configured string, gatewayModels []client.ModelInf
 	return configured
 }
 
-func findFirstModelWithCapability(gatewayModels []client.ModelInfo, modality string) string {
-	for _, m := range gatewayModels {
-		if client.ModelHasCapability(m.Capabilities, modality) {
-			return strings.TrimSpace(m.ID)
-		}
-	}
-	return ""
-}
-
 func modelInfoByID(gatewayModels []client.ModelInfo, modelID string) *client.ModelInfo {
 	want := normalizeModelID(modelID)
 	for i := range gatewayModels {

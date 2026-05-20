@@ -75,38 +75,12 @@ func (s *Service) applyModalityRouting(ctx context.Context, cfg *streamConfig, h
 	return nil
 }
 
-func pickModalityModel(current, configured, modality string, gateway []client.ModelInfo) (string, error) {
-	current = strings.TrimSpace(current)
-	if current != "" {
-		if info := modelInfoByID(gateway, current); info != nil && client.ModelHasCapability(info.Capabilities, modality) {
-			return info.ID, nil
-		}
-	}
+func pickModalityModel(_ string, configured, modality string, gateway []client.ModelInfo) (string, error) {
 	configured = strings.TrimSpace(configured)
-	if configured == "" {
-		if auto := findFirstModelWithCapability(gateway, modality); auto != "" {
-			return auto, nil
-		}
-		return "", fmt.Errorf("未配置%s模型：请在 AI 提供商设置中为「%s」选择默认模型", modalityLabel(modality), modalityLabel(modality))
+	if configured != "" {
+		return resolveConfiguredModelID(configured, gateway), nil
 	}
-	resolved := resolveConfiguredModelID(configured, gateway)
-	if info := modelInfoByID(gateway, resolved); info != nil && !client.ModelHasCapability(info.Capabilities, modality) {
-		return "", fmt.Errorf("提供商配置的 %s 模型「%s」在上游列表中未标注 %s 能力，请重新选择", modalityLabel(modality), resolved, modalityLabel(modality))
-	}
-	return resolved, nil
-}
-
-func modalityLabel(modality string) string {
-	switch modality {
-	case client.ModalityImage:
-		return "图片"
-	case client.ModalityAudio:
-		return "音频"
-	case client.ModalityVideo:
-		return "视频"
-	default:
-		return modality
-	}
+	return "", fmt.Errorf("未配置%s模型：请在 AI 提供商设置中为「%s」选择默认模型", client.ModalityLabelZH(modality), client.ModalityLabelZH(modality))
 }
 
 func providerSupportsImageInput(provider *providerRow) error {
@@ -120,17 +94,3 @@ func providerSupportsImageInput(provider *providerRow) error {
 	return fmt.Errorf("当前 AI 提供商未配置图片模型：请在「AI 提供商」设置中指定图片默认模型")
 }
 
-func providerAllowsImageUpload(provider *providerRow) bool {
-	return providerSupportsImageInput(provider) == nil
-}
-
-func modelSupportsModality(providerType, model, modality string, gateway []client.ModelInfo) bool {
-	model = strings.TrimSpace(model)
-	if model == "" {
-		return false
-	}
-	if info := modelInfoByID(gateway, model); info != nil {
-		return client.ModelHasCapability(info.Capabilities, modality)
-	}
-	return client.ModelHasCapability(client.InferModelCapabilities(model, nil), modality)
-}

@@ -17,6 +17,17 @@
 - 服务与环境、场景编排、API 管理与运行控制台等页面复用当前全局项目。
 - 浏览器默认记住上次选择的全局项目和运行环境，并在下次打开时优先恢复仍然有效的选择。
 
+## 站内通知
+
+- 管理后台顶栏「项目」选择器与「外观」按钮之间提供通知铃铛入口，展示未读角标与下拉列表。
+- 通知按登录用户隔离：仅 JWT 用户可调用 `GET /notifications`、`GET /notifications/stream`、`PATCH /notifications/{id}/read`、`POST /notifications/read-all`、`POST /notifications/clear-all`；API Key 来源不可访问通知接口（`RejectAPIKey`）。
+- 不新增 RBAC 权限点；后端按 `principal.UserID` 过滤读写。
+- 实时推送：`GET /notifications/stream` 返回 `text/event-stream`，连接建立时先发 `snapshot`（`items` + `unreadCount`），新通知写入后推送 `notification`（单条 + `unreadCount`），`POST /notifications/clear-all` 成功后推送空 `snapshot`（`items: []`、`unreadCount: 0`）；15s 注释心跳保活；与 AI 助理 SSE 一样绕过全局 HTTP 超时。
+- 前端登录后订阅 SSE，断线指数退避重连；标签页重新可见时仅 REST 拉取一次作同步，打开下拉时立即刷新列表；下拉提供「全部标为已读」与「一键清空」（调用 `clear-all`，本地立即清空列表与角标）。
+- `spec_import` 通知正文展示**本次实际变动**接口数（新增 + 更新，且 `SyncEndpoints` 仅在 fingerprint 变化或恢复软删时计为更新），不将 OpenAPI 文档总路径数当作「更新数量」；`payload` 含 `changedEndpoints`、`createdEndpoints`、`updatedEndpoints` 等字段。
+- 点击单条通知：标为已读、若 `payload.projectId` 与当前全局项目不同则切换项目，并跳转到 `/cases`（API 管理）。
+- 表结构 `type` 预留扩展其他事件类型。
+
 ## 服务与环境管理
 
 - 服务与环境管理页基于当前全局项目展示服务与环境配置。

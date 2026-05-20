@@ -120,6 +120,7 @@
                 <el-option v-for="project in projectState.projects" :key="project.id" :label="project.name" :value="project.id" />
               </el-select>
             </div>
+            <NotificationBell />
             <el-popover placement="bottom-end" :width="420" trigger="click">
               <template #reference>
                 <el-button>
@@ -193,6 +194,7 @@ import { menuRoutes } from '../router'
 import { loadGlobalProjects, projectState, setCurrentProjectId } from '../utils/currentProject'
 import BrandLogo from '../components/BrandLogo.vue'
 import GlobalAIAssistant from '../components/GlobalAIAssistant.vue'
+import NotificationBell from '../components/NotificationBell.vue'
 import {
   FONT_SIZE_OPTIONS,
   PALETTE_OPTIONS,
@@ -269,6 +271,7 @@ export default {
   components: {
     BrandLogo,
     GlobalAIAssistant,
+    NotificationBell,
     ChatLineRound,
     Menu,
   },

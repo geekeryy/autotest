@@ -111,46 +111,6 @@ func capabilityKeys(seen map[string]struct{}) []string {
 	return out
 }
 
-// InferModelCapabilities supplements upstream metadata with generic id hints.
-// It never matches specific vendor model names—only capability keywords.
-func InferModelCapabilities(modelID string, fromMetadata []string) []string {
-	seen := map[string]struct{}{}
-	for _, c := range fromMetadata {
-		seen[strings.ToLower(strings.TrimSpace(c))] = struct{}{}
-	}
-	id := strings.ToLower(strings.TrimSpace(modelID))
-	if id == "" {
-		return capabilityKeys(seen)
-	}
-	// Default: chat models are assumed text-capable unless metadata says otherwise.
-	if len(seen) == 0 {
-		seen[ModalityText] = struct{}{}
-	}
-	keywordModalities := []struct {
-		modality string
-		words    []string
-	}{
-		{ModalityImage, []string{"vision", "visual", "vl-", "-vl", "image", "multimodal", "omni"}},
-		{ModalityAudio, []string{"audio", "speech", "whisper", "asr", "tts", "voice"}},
-		{ModalityVideo, []string{"video"}},
-	}
-	for _, km := range keywordModalities {
-		for _, w := range km.words {
-			if strings.Contains(id, w) {
-				seen[km.modality] = struct{}{}
-				break
-			}
-		}
-	}
-	// Dedicated non-chat endpoints filtered elsewhere may only expose one modality.
-	if _, audio := seen[ModalityAudio]; audio {
-		if strings.Contains(id, "whisper") || strings.Contains(id, "tts") {
-			delete(seen, ModalityText)
-		}
-	}
-	return capabilityKeys(seen)
-}
-
 // ModelHasCapability reports whether tags include a modality (text is assumed
 // when tags are empty).
 func ModelHasCapability(capabilities []string, modality string) bool {
@@ -172,6 +132,20 @@ func ModelHasCapability(capabilities []string, modality string) bool {
 		}
 	}
 	return false
+}
+
+// ModalityLabelZH returns a short Chinese label for user-facing errors.
+func ModalityLabelZH(modality string) string {
+	switch modality {
+	case ModalityImage:
+		return "图片"
+	case ModalityAudio:
+		return "音频"
+	case ModalityVideo:
+		return "视频"
+	default:
+		return modality
+	}
 }
 
 func hasNonTextOnlyCapabilities(capabilities []string) bool {

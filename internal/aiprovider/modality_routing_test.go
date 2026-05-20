@@ -21,19 +21,6 @@ func TestPickModalityModel_UsesConfiguredImageModel(t *testing.T) {
 	}
 }
 
-func TestPickModalityModel_KeepsCapableCurrent(t *testing.T) {
-	gateway := []client.ModelInfo{
-		{ID: "mm-large", Capabilities: []string{client.ModalityText, client.ModalityImage}},
-	}
-	got, err := pickModalityModel("mm-large", "", client.ModalityImage, gateway)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != "mm-large" {
-		t.Fatalf("got %q", got)
-	}
-}
-
 func TestPickModalityModel_MissingConfig(t *testing.T) {
 	_, err := pickModalityModel("text-pro", "", client.ModalityImage, nil)
 	if err == nil {

@@ -71,7 +71,11 @@
               />
             </div>
           </el-popover>
-          <ModelSettingsPopover placement="bottom-end" :busy="state.streaming || state.pendingCalls.length > 0">
+          <ModelSettingsPopover
+            pane-id="panel"
+            placement="bottom-end"
+            :busy="state.streaming || state.pendingCalls.length > 0"
+          >
             <template #reference>
               <button
                 type="button"
@@ -97,6 +101,51 @@
         :class="{ 'ai-pane-bar--focused': paneFocused }"
       >
         <span class="ai-pane-bar__title">{{ paneBarLabel }}</span>
+        <div class="ai-pane-bar__actions">
+          <el-tooltip content="关闭此屏" placement="bottom" :show-after="400">
+            <button
+              type="button"
+              class="ai-pane-bar__btn ai-pane-bar__btn--close"
+              :disabled="!canRemoveThisPane"
+              aria-label="关闭此屏"
+              @click="onRemoveThisPane"
+            >
+              <el-icon><Close /></el-icon>
+            </button>
+          </el-tooltip>
+          <el-tooltip
+            v-if="showAddPane"
+            content="添加分屏"
+            placement="bottom"
+            :show-after="400"
+          >
+            <button
+              type="button"
+              class="ai-pane-bar__btn ai-pane-bar__btn--add"
+              :disabled="!canAddPane"
+              aria-label="添加分屏"
+              @click="onAddPaneClick"
+            >
+              <el-icon><Plus /></el-icon>
+            </button>
+          </el-tooltip>
+        </div>
+      </div>
+      <div
+        v-else-if="isPageLayout && showAddPane"
+        class="ai-pane-add-fallback"
+      >
+        <el-tooltip content="添加分屏" placement="bottom" :show-after="400">
+          <button
+            type="button"
+            class="ai-pane-bar__btn ai-pane-bar__btn--add"
+            :disabled="!canAddPane"
+            aria-label="添加分屏"
+            @click="onAddPaneClick"
+          >
+            <el-icon><Plus /></el-icon>
+          </button>
+        </el-tooltip>
       </div>
 
       <div v-if="pageContextHint && isPanelLayout" class="ai-page-context">
@@ -377,9 +426,27 @@
             </button>
           </div>
         </div>
-        <div class="ai-composer-footer">
+        <div class="ai-composer-footer" :class="{ 'ai-composer-footer--page': isPageLayout }">
           <span class="ai-composer-hint" v-if="state.pendingCalls.length">先处理上方等待确认的写操作</span>
           <span class="ai-composer-hint" v-else>Enter 换行 · {{ sendShortcutHint }} 发送</span>
+          <ModelSettingsPopover
+            v-if="isPageLayout"
+            :pane-id="paneId"
+            placement="top-end"
+            :busy="state.streaming || state.pendingCalls.length > 0"
+          >
+            <template #reference>
+              <button
+                type="button"
+                class="ai-composer-settings-btn"
+                :disabled="state.streaming || state.pendingCalls.length > 0"
+                :title="modelSettingsSummary"
+                aria-label="模型设置"
+              >
+                <el-icon><Setting /></el-icon>
+              </button>
+            </template>
+          </ModelSettingsPopover>
         </div>
       </footer>
       </div>
@@ -430,13 +497,25 @@ import {
   resolvePendingCall,
   selectSession,
   sendMessage,
-  setAssistantThinking,
-  setAssistantWebSearch,
+  setPaneThinking,
+  setPaneWebSearch,
+  canRemoveWorkspacePane,
+  isWorkspacePaneId,
+  removeWorkspacePane,
+  workspacePaneLabel,
 } from '../stores/aiAssistant'
 import { authState } from '../auth'
 import { projectState } from '../utils/currentProject'
 import { getToolDisplayName } from '../utils/aiToolLabels'
 import { parseMessageAttachments, pickImageAttachments } from '../utils/aiImageAttachment'
+import {
+  collectModelOptionIds,
+  formatProviderLabel,
+  imageUploadTooltip,
+  providerHasImageModel,
+  providerSupportsThinking,
+  providerSupportsWebSearch,
+} from '../utils/aiProvider'
 
 const MIN_WIDTH = 480
 const MAX_WIDTH = 880
@@ -450,6 +529,8 @@ const PAGE_PROMPT_SUGGESTIONS = [
   '帮我生成一个登录后下单的测试场景',
   '查询某个接口的请求模板与断言',
 ]
+
+const WORKSPACE_PANE_PATTERN = /^w[0-5]$/
 
 export default {
   name: 'GlobalAIAssistant',
@@ -470,7 +551,7 @@ export default {
     paneId: {
       type: String,
       default: 'panel',
-      validator: (v) => v === 'panel' || v === 'left' || v === 'right',
+      validator: (v) => v === 'panel' || WORKSPACE_PANE_PATTERN.test(v),
     },
     paneTitle: {
       type: String,
@@ -480,7 +561,16 @@ export default {
       type: Boolean,
       default: false,
     },
+    showAddPane: {
+      type: Boolean,
+      default: false,
+    },
+    canAddPane: {
+      type: Boolean,
+      default: false,
+    },
   },
+  emits: ['add-pane'],
   data() {
     return {
       draft: '',
@@ -510,6 +600,13 @@ export default {
         pendingCalls: pane.pendingCalls,
         streaming: pane.streaming,
         error: pane.error,
+        selectedProviderId: pane.selectedProviderId,
+        selectedModel: pane.selectedModel,
+        thinkingEnabled: pane.thinkingEnabled,
+        webSearchEnabled: pane.webSearchEnabled,
+        debugEnabled: pane.debugEnabled,
+        remoteModelList: pane.remoteModelList,
+        modelsWarning: pane.modelsWarning,
       }
     },
     isPageLayout() {
@@ -570,9 +667,11 @@ export default {
     },
     paneBarLabel() {
       if (this.paneTitle) return this.paneTitle
-      if (this.paneId === 'right') return '对话 B'
-      if (this.paneId === 'left') return '对话 A'
+      if (isWorkspacePaneId(this.paneId)) return workspacePaneLabel(this.paneId)
       return ''
+    },
+    canRemoveThisPane() {
+      return canRemoveWorkspacePane(this.paneId)
     },
     displayTimeline() {
       const items = []
@@ -661,7 +760,7 @@ export default {
       return assistantState.providers.filter((p) => p.enabled !== false)
     },
     selectedProvider() {
-      return this.providerOptions.find((p) => p.id === assistantState.selectedProviderId) || null
+      return this.providerOptions.find((p) => p.id === this.state.selectedProviderId) || null
     },
     selectedProviderMeta() {
       const provider = this.selectedProvider
@@ -669,28 +768,23 @@ export default {
       return assistantState.providerTypes.find((t) => t.type === provider.providerType) || null
     },
     modelOptions() {
-      const values = new Set()
-      for (const model of assistantState.remoteModelList || []) {
-        if (String(model || '').trim()) values.add(String(model).trim())
-      }
-      if (this.selectedProvider?.defaultModel) values.add(this.selectedProvider.defaultModel)
-      if (assistantState.selectedModel) values.add(assistantState.selectedModel)
-      return Array.from(values).sort()
+      return collectModelOptionIds({
+        remoteModelList: this.state.remoteModelList,
+        selectedModel: this.state.selectedModel,
+        defaultModel: this.selectedProvider?.defaultModel,
+      })
     },
     supportsThinking() {
-      const t = String(this.selectedProvider?.providerType || '').toLowerCase()
-      return t === 'deepseek' || t === 'xiaomi'
+      return providerSupportsThinking(this.selectedProvider)
     },
     supportsWebSearch() {
-      return String(this.selectedProvider?.providerType || '').toLowerCase() === 'xiaomi'
+      return providerSupportsWebSearch(this.selectedProvider)
     },
     supportsMultimodal() {
-      return !!String(this.selectedProvider?.modalityModels?.image || '').trim()
+      return providerHasImageModel(this.selectedProvider)
     },
     multimodalTooltip() {
-      if (!this.supportsMultimodal) return ''
-      const model = String(this.selectedProvider?.modalityModels?.image || '').trim()
-      return `添加图片（JPEG/PNG/GIF/WebP，单张≤5MB）；含图时自动切换到提供商配置的图片模型${model ? `（${model}）` : ''}`
+      return imageUploadTooltip(this.selectedProvider)
     },
     composerHasToolbar() {
       return this.supportsThinking || this.supportsWebSearch || this.supportsMultimodal
@@ -700,20 +794,20 @@ export default {
     },
     modelSettingsSummary() {
       const provider = this.selectedProvider
-        ? this.providerLabel(this.selectedProvider)
+        ? formatProviderLabel(this.selectedProvider)
         : '未选提供商'
-      const model = String(assistantState.selectedModel || '').trim() || '未选模型'
+      const model = String(this.state.selectedModel || '').trim() || '未选模型'
       return `${provider} · ${model}`
     },
     thinkingTooltip() {
       if (!this.supportsThinking) return ''
-      return assistantState.thinkingEnabled
+      return this.state.thinkingEnabled
         ? '深度思考已开启：模型将进行更充分推理（响应可能更慢）'
         : '深度思考已关闭：点击开启更充分推理'
     },
     webSearchTooltip() {
       if (!this.supportsWebSearch) return ''
-      return assistantState.webSearchEnabled
+      return this.state.webSearchEnabled
         ? '联网搜索已开启：可检索互联网实时信息（按次计费）'
         : '联网搜索已关闭：点击开启实时检索'
     },
@@ -781,6 +875,14 @@ export default {
     },
     close() {
       closeAssistant()
+    },
+    onRemoveThisPane() {
+      if (!canRemoveWorkspacePane(this.paneId)) return
+      removeWorkspacePane(this.paneId)
+    },
+    onAddPaneClick() {
+      if (!this.canAddPane) return
+      this.$emit('add-pane')
     },
     applyPrompt(text) {
       this.draft = text
@@ -866,15 +968,13 @@ export default {
       await resolvePendingCall(callId, { approve, reason }, this.paneId)
     },
     onToggleThinking() {
-      setAssistantThinking(!assistantState.thinkingEnabled)
+      setPaneThinking(this.paneId, !this.state.thinkingEnabled)
     },
     onToggleWebSearch() {
-      setAssistantWebSearch(!assistantState.webSearchEnabled)
+      setPaneWebSearch(this.paneId, !this.state.webSearchEnabled)
     },
     providerLabel(provider) {
-      if (!provider) return ''
-      const suffix = provider.isDefault ? ' · 默认' : ''
-      return `${provider.name || provider.providerType}${suffix}`
+      return formatProviderLabel(provider)
     },
     scrollToBottom() {
       const el = this.$refs.bodyEl
@@ -1081,8 +1181,13 @@ export default {
   overflow: hidden;
 }
 
+.ai-panel-host--page {
+  position: relative;
+}
+
 .ai-pane-bar {
   flex-shrink: 0;
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1097,9 +1202,70 @@ export default {
 }
 
 .ai-pane-bar__title {
+  flex: 1;
+  min-width: 0;
   font-size: 13px;
   font-weight: 600;
   color: #1f2329;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-pane-bar__actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.ai-pane-bar__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--app-text-muted, #909399);
+  font-size: 15px;
+  cursor: pointer;
+  transition:
+    color 0.15s ease,
+    background 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.ai-pane-bar__btn:hover:not(:disabled) {
+  background: var(--el-fill-color-light, #f5f7fa);
+  border-color: var(--app-border-color, #e2e8f0);
+  color: var(--el-text-color-primary, #303133);
+}
+
+.ai-pane-bar__btn--close:hover:not(:disabled) {
+  color: var(--el-color-danger, #f56c6c);
+  background: color-mix(in srgb, var(--el-color-danger, #f56c6c) 10%, transparent);
+  border-color: color-mix(in srgb, var(--el-color-danger, #f56c6c) 22%, transparent);
+}
+
+.ai-pane-bar__btn--add:hover:not(:disabled) {
+  color: var(--el-color-primary);
+  background: var(--el-color-primary-light-9, #f5f9ff);
+  border-color: var(--el-color-primary-light-5);
+}
+
+.ai-pane-bar__btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.ai-pane-add-fallback {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 20;
 }
 
 .ai-panel--page .ai-body {
@@ -1153,7 +1319,45 @@ export default {
 .ai-panel--page .ai-composer-footer {
   max-width: 820px;
   margin: 8px auto 0;
-  text-align: center;
+  padding: 0 2px;
+}
+
+.ai-composer-footer--page {
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ai-composer-footer--page .ai-composer-hint {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+}
+
+.ai-composer-settings-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--app-text-muted, #909399);
+  font-size: 16px;
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.ai-composer-settings-btn:hover:not(:disabled) {
+  color: var(--el-color-primary);
+  background: color-mix(in srgb, var(--el-color-primary) 10%, transparent);
+}
+
+.ai-composer-settings-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .ai-panel--page .ai-message--assistant :deep(.markdown-view) {
@@ -2054,60 +2258,6 @@ export default {
 </style>
 
 <style>
-.ai-model-settings-popper .ai-model-settings {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.ai-model-settings-popper .ai-model-settings-row {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.ai-model-settings-popper .ai-model-settings-row--model .ai-model-settings-model {
-  flex: 1;
-  min-width: 0;
-  width: 100%;
-}
-
-.ai-model-settings-popper .ai-model-refresh-btn {
-  flex-shrink: 0;
-  border: none;
-  background: transparent;
-  color: var(--el-color-primary);
-  font-size: 12px;
-  cursor: pointer;
-  padding: 6px 4px;
-}
-
-.ai-model-settings-popper .ai-model-refresh-btn:disabled {
-  color: var(--el-text-color-disabled);
-  cursor: not-allowed;
-}
-
-.ai-model-settings-popper .ai-model-settings-hint {
-  margin: 0;
-  font-size: 11px;
-  color: var(--el-text-color-secondary, #909399);
-  line-height: 1.4;
-}
-
-.ai-model-settings-popper .ai-model-settings-hint--warn {
-  color: var(--el-color-warning);
-}
-
-.ai-model-settings-popper .ai-model-settings-label {
-  font-size: 12px;
-  color: var(--el-text-color-secondary, #909399);
-}
-
-.ai-model-settings-popper .ai-provider-select,
-.ai-model-settings-popper .ai-model-select {
-  width: 100%;
-}
-
 .ai-assistant-model-dropdown.el-popper {
   min-width: 360px;
 }

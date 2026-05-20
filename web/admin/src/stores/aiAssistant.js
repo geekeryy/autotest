@@ -1,8 +1,8 @@
 // Global AI assistant store
 // =========================
 //
-// Conversation state is split into panes so the workspace page can run two
-// chats side-by-side while the floating panel keeps its own pane (`panel`).
+// Conversation state is split into panes: floating `panel` and workspace `w0`..`w5`
+// (up to 6 side-by-side chats on the AI assistant page).
 
 import { reactive } from 'vue'
 import {
@@ -16,14 +16,42 @@ import {
   renameAISession,
 } from '../api'
 import { streamPostSSE } from '../utils/aiStream'
+import {
+  providerDefaultModel,
+  providerSupportsThinking,
+  providerSupportsWebSearch,
+} from '../utils/aiProvider'
 
 const STORAGE_KEY = 'autotest.ai-assistant.sessionId'
 const SETTINGS_KEY = 'autotest.ai-assistant.settings'
 const SPLIT_MODE_KEY = 'autotest.ai-assistant.splitMode'
 const FOCUSED_PANE_KEY = 'autotest.ai-assistant.focusedPane'
+const WORKSPACE_PANES_KEY = 'autotest.ai-assistant.workspacePaneIds'
 
-export const PANE_IDS = ['panel', 'left', 'right']
-export const WORKSPACE_PANE_IDS = ['left', 'right']
+export const MAX_WORKSPACE_PANES = 6
+export const WORKSPACE_PANE_PREFIX = 'w'
+
+const LEGACY_WORKSPACE_MAP = { left: 'w0', right: 'w1' }
+const LEGACY_WORKSPACE_IDS = ['left', 'right']
+
+export function workspacePaneId(index) {
+  return `${WORKSPACE_PANE_PREFIX}${index}`
+}
+
+export function isWorkspacePaneId(paneId) {
+  return /^w\d+$/.test(String(paneId || ''))
+}
+
+function allWorkspacePaneSlots() {
+  return Array.from({ length: MAX_WORKSPACE_PANES }, (_, i) => workspacePaneId(i))
+}
+
+export const PANE_IDS = ['panel', ...allWorkspacePaneSlots()]
+
+export function getWorkspacePaneIds() {
+  return [...assistantState.workspacePaneIds]
+}
+
 
 function createPaneState() {
   return {
@@ -34,30 +62,55 @@ function createPaneState() {
     error: '',
     abortController: null,
     requestSeq: 0,
+    selectedProviderId: '',
+    selectedModel: '',
+    thinkingEnabled: true,
+    webSearchEnabled: false,
+    debugEnabled: false,
+    remoteModelList: [],
+    modelsWarning: '',
   }
+}
+
+function createInitialPanes() {
+  const panes = { panel: createPaneState() }
+  for (const id of allWorkspacePaneSlots()) {
+    panes[id] = createPaneState()
+  }
+  return panes
+}
+
+function migrateLegacyPaneId(paneId) {
+  return LEGACY_WORKSPACE_MAP[paneId] || paneId
 }
 
 function readActiveId(projectId, paneId = 'panel') {
   if (!projectId) return ''
+  const id = migrateLegacyPaneId(paneId)
   try {
     const legacy = window.localStorage.getItem(`${STORAGE_KEY}:${projectId}`)
-    const key = `${STORAGE_KEY}:${projectId}:${paneId}`
-    const raw = window.localStorage.getItem(key) || (paneId === 'panel' ? legacy : '')
+    const key = `${STORAGE_KEY}:${projectId}:${id}`
+    let raw = window.localStorage.getItem(key)
+    if (!raw && LEGACY_WORKSPACE_MAP[paneId]) {
+      raw = window.localStorage.getItem(`${STORAGE_KEY}:${projectId}:${paneId}`)
+    }
+    if (!raw && id === 'panel') raw = legacy
     return raw || ''
   } catch {
     return ''
   }
 }
 
-function writeActiveId(projectId, paneId, id) {
+function writeActiveId(projectId, paneId, sessionId) {
   if (!projectId) return
+  const id = migrateLegacyPaneId(paneId)
   try {
-    const key = `${STORAGE_KEY}:${projectId}:${paneId}`
-    if (id) window.localStorage.setItem(key, id)
+    const key = `${STORAGE_KEY}:${projectId}:${id}`
+    if (sessionId) window.localStorage.setItem(key, sessionId)
     else window.localStorage.removeItem(key)
-    if (paneId === 'panel') {
+    if (id === 'panel') {
       const legacyKey = `${STORAGE_KEY}:${projectId}`
-      if (id) window.localStorage.setItem(legacyKey, id)
+      if (sessionId) window.localStorage.setItem(legacyKey, sessionId)
       else window.localStorage.removeItem(legacyKey)
     }
   } catch {
@@ -65,32 +118,45 @@ function writeActiveId(projectId, paneId, id) {
   }
 }
 
-function readSettings(projectId) {
+function readSettings(projectId, paneId) {
   if (!projectId) return {}
+  const id = migrateLegacyPaneId(paneId)
   try {
-    const raw = window.localStorage.getItem(`${SETTINGS_KEY}:${projectId}`)
+    let raw = window.localStorage.getItem(`${SETTINGS_KEY}:${projectId}:${id}`)
+    if (!raw && LEGACY_WORKSPACE_MAP[paneId]) {
+      raw = window.localStorage.getItem(`${SETTINGS_KEY}:${projectId}:${paneId}`)
+    }
+    if (!raw && id === 'w0') {
+      raw = window.localStorage.getItem(`${SETTINGS_KEY}:${projectId}`)
+    }
     return raw ? JSON.parse(raw) || {} : {}
   } catch {
     return {}
   }
 }
 
-function writeSettings() {
+function writePaneSettings(paneId) {
   if (!assistantState.projectId) return
+  const pane = getPane(paneId)
+  if (!pane) return
+  const id = migrateLegacyPaneId(paneId)
   try {
-    window.localStorage.setItem(`${SETTINGS_KEY}:${assistantState.projectId}`, JSON.stringify({
-      providerId: assistantState.selectedProviderId || '',
-      model: assistantState.selectedModel || '',
-      thinkingEnabled: !!assistantState.thinkingEnabled,
-      webSearchEnabled: !!assistantState.webSearchEnabled,
-      debugEnabled: !!assistantState.debugEnabled,
-    }))
+    window.localStorage.setItem(
+      `${SETTINGS_KEY}:${assistantState.projectId}:${id}`,
+      JSON.stringify({
+        providerId: pane.selectedProviderId || '',
+        model: pane.selectedModel || '',
+        thinkingEnabled: !!pane.thinkingEnabled,
+        webSearchEnabled: !!pane.webSearchEnabled,
+        debugEnabled: !!pane.debugEnabled,
+      })
+    )
   } catch {
     // ignore
   }
 }
 
-function readSplitMode() {
+function readSplitModeLegacy() {
   try {
     return window.localStorage.getItem(SPLIT_MODE_KEY) === '1'
   } catch {
@@ -98,9 +164,34 @@ function readSplitMode() {
   }
 }
 
-function writeSplitMode(value) {
+function writeSplitModeFlag(enabled) {
   try {
-    window.localStorage.setItem(SPLIT_MODE_KEY, value ? '1' : '0')
+    window.localStorage.setItem(SPLIT_MODE_KEY, enabled ? '1' : '0')
+  } catch {
+    // ignore
+  }
+}
+
+function readWorkspacePaneIds() {
+  try {
+    const raw = window.localStorage.getItem(WORKSPACE_PANES_KEY)
+    if (raw) {
+      const parsed = JSON.parse(raw)
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        const valid = parsed.filter((id) => isWorkspacePaneId(id)).slice(0, MAX_WORKSPACE_PANES)
+        if (valid.length) return valid
+      }
+    }
+  } catch {
+    // ignore
+  }
+  if (readSplitModeLegacy()) return ['w0', 'w1']
+  return ['w0']
+}
+
+function writeWorkspacePaneIds(ids) {
+  try {
+    window.localStorage.setItem(WORKSPACE_PANES_KEY, JSON.stringify(ids))
   } catch {
     // ignore
   }
@@ -109,19 +200,25 @@ function writeSplitMode(value) {
 function readFocusedPane() {
   try {
     const raw = window.localStorage.getItem(FOCUSED_PANE_KEY)
-    return raw === 'right' ? 'right' : 'left'
+    if (!raw) return 'w0'
+    if (raw === 'left') return 'w0'
+    if (raw === 'right') return 'w1'
+    if (isWorkspacePaneId(raw) || raw === 'panel') return raw
+    return 'w0'
   } catch {
-    return 'left'
+    return 'w0'
   }
 }
 
 function writeFocusedPane(paneId) {
   try {
-    window.localStorage.setItem(FOCUSED_PANE_KEY, paneId === 'right' ? 'right' : 'left')
+    window.localStorage.setItem(FOCUSED_PANE_KEY, migrateLegacyPaneId(paneId))
   } catch {
     // ignore
   }
 }
+
+const initialWorkspacePaneIds = readWorkspacePaneIds()
 
 export const assistantState = reactive({
   open: false,
@@ -129,34 +226,32 @@ export const assistantState = reactive({
   sessions: [],
   providers: [],
   providerTypes: [],
-  remoteModelList: [],
-  modelsWarning: '',
-  selectedProviderId: '',
-  selectedModel: '',
-  thinkingEnabled: true,
-  webSearchEnabled: false,
-  debugEnabled: false,
   pageContext: null,
-  splitMode: readSplitMode(),
+  workspacePaneIds: initialWorkspacePaneIds,
   focusedPaneId: readFocusedPane(),
-  panes: {
-    panel: createPaneState(),
-    left: createPaneState(),
-    right: createPaneState(),
+  panes: createInitialPanes(),
+})
+
+Object.defineProperty(assistantState, 'splitMode', {
+  get() {
+    return assistantState.workspacePaneIds.length > 1
   },
+  enumerable: true,
+  configurable: true,
 })
 
 const inFlightCallIds = new Set()
 
 export function getPane(paneId = 'panel') {
-  return assistantState.panes[paneId] || assistantState.panes.panel
+  const id = migrateLegacyPaneId(paneId)
+  return assistantState.panes[id] || assistantState.panes.panel
 }
 
 export function anyPaneStreaming(paneIds = PANE_IDS) {
   return paneIds.some((id) => getPane(id).streaming)
 }
 
-export function paneSessionIds(paneIds = WORKSPACE_PANE_IDS) {
+export function paneSessionIds(paneIds = assistantState.workspacePaneIds) {
   return paneIds.map((id) => getPane(id).activeSessionId).filter(Boolean)
 }
 
@@ -164,18 +259,104 @@ export function isSessionOpenInPane(sessionId, paneId) {
   return !!sessionId && getPane(paneId).activeSessionId === sessionId
 }
 
-export function setSplitMode(enabled) {
-  assistantState.splitMode = !!enabled
-  writeSplitMode(assistantState.splitMode)
-  if (assistantState.splitMode && assistantState.focusedPaneId !== 'left' && assistantState.focusedPaneId !== 'right') {
-    setFocusedPane('left')
+export function isSessionOpenInOtherPane(sessionId, paneId) {
+  if (!sessionId) return false
+  return assistantState.workspacePaneIds.some(
+    (id) => id !== migrateLegacyPaneId(paneId) && isSessionOpenInPane(sessionId, id)
+  )
+}
+
+/** @deprecated use isSessionOpenInOtherPane */
+export function isSessionOpenInOtherWorkspacePane(sessionId, paneId) {
+  return isSessionOpenInOtherPane(sessionId, paneId)
+}
+
+/** Stable 1-based index from slot id w0..w5 (not workspacePaneIds position). */
+export function workspacePaneSlotNumber(paneId) {
+  const m = String(migrateLegacyPaneId(paneId) || '').match(/^w(\d+)$/)
+  if (!m) return 0
+  const n = Number(m[1])
+  if (!Number.isFinite(n) || n < 0 || n >= MAX_WORKSPACE_PANES) return 0
+  return n + 1
+}
+
+export function workspacePaneLabel(paneId) {
+  const num = workspacePaneSlotNumber(paneId)
+  return num > 0 ? `对话 ${num}` : ''
+}
+
+export function workspacePaneTag(paneId) {
+  const num = workspacePaneSlotNumber(paneId)
+  return num > 0 ? String(num) : ''
+}
+
+export function canRemoveWorkspacePane(paneId) {
+  const id = migrateLegacyPaneId(paneId)
+  const ids = assistantState.workspacePaneIds
+  if (!ids.includes(id)) return false
+  if (ids.length <= 1) return false
+  const pane = getPane(id)
+  if (pane?.streaming) return false
+  return true
+}
+
+export function setWorkspaceSplitMode(enabled) {
+  const on = !!enabled
+  if (on) {
+    if (assistantState.workspacePaneIds.length < 2) {
+      assistantState.workspacePaneIds = ['w0', 'w1']
+    }
+  } else {
+    assistantState.workspacePaneIds = ['w0']
+    setFocusedPane('w0')
+  }
+  writeWorkspacePaneIds(assistantState.workspacePaneIds)
+  writeSplitModeFlag(on)
+  if (on && !assistantState.workspacePaneIds.includes(assistantState.focusedPaneId)) {
+    setFocusedPane(assistantState.workspacePaneIds[0])
   }
 }
 
+/** @deprecated use setWorkspaceSplitMode */
+export function setSplitMode(enabled) {
+  setWorkspaceSplitMode(enabled)
+}
+
 export function setFocusedPane(paneId) {
-  if (paneId !== 'left' && paneId !== 'right') return
-  assistantState.focusedPaneId = paneId
-  writeFocusedPane(paneId)
+  const id = migrateLegacyPaneId(paneId)
+  if (!assistantState.workspacePaneIds.includes(id) && id !== 'panel') return
+  assistantState.focusedPaneId = id
+  writeFocusedPane(id)
+}
+
+export function addWorkspacePane() {
+  if (assistantState.workspacePaneIds.length >= MAX_WORKSPACE_PANES) return false
+  const used = new Set(assistantState.workspacePaneIds)
+  const next = allWorkspacePaneSlots().find((id) => !used.has(id))
+  if (!next) return false
+  assistantState.workspacePaneIds = [...assistantState.workspacePaneIds, next]
+  writeWorkspacePaneIds(assistantState.workspacePaneIds)
+  writeSplitModeFlag(true)
+  return true
+}
+
+export function removeWorkspacePane(paneId) {
+  const id = migrateLegacyPaneId(paneId)
+  const ids = assistantState.workspacePaneIds
+  if (!ids.includes(id)) return false
+  if (ids.length <= 1) return false
+  const pane = getPane(id)
+  if (pane.streaming) return false
+
+  assistantState.workspacePaneIds = ids.filter((p) => p !== id)
+  writeWorkspacePaneIds(assistantState.workspacePaneIds)
+  writeSplitModeFlag(assistantState.workspacePaneIds.length > 1)
+  resetPane(pane)
+
+  if (assistantState.focusedPaneId === id) {
+    setFocusedPane(assistantState.workspacePaneIds[0] || 'w0')
+  }
+  return true
 }
 
 function resetPane(pane) {
@@ -204,6 +385,23 @@ function cancelAllStreaming() {
   }
 }
 
+async function applyProviderSettingsToPane(paneId) {
+  if (!assistantState.projectId) return
+  const pane = getPane(paneId)
+  const settings = readSettings(assistantState.projectId, paneId)
+  const available = assistantState.providers.filter((p) => p.enabled !== false)
+  const savedProvider = available.find((p) => p.id === settings.providerId)
+  const fallbackProvider = available.find((p) => p.isDefault) || available[0] || null
+  const provider = savedProvider || fallbackProvider
+  pane.selectedProviderId = provider?.id || ''
+  pane.selectedModel = pickInitialModel(provider, settings)
+  pane.thinkingEnabled = pickInitialThinking(provider, settings)
+  pane.webSearchEnabled = pickInitialWebSearch(provider, settings)
+  pane.debugEnabled = pickInitialDebug(settings)
+  await refreshPaneProviderModels(paneId, provider?.id)
+  writePaneSettings(paneId)
+}
+
 export async function bindProject(projectId) {
   if (assistantState.projectId === projectId) return
   cancelAllStreaming()
@@ -214,25 +412,24 @@ export async function bindProject(projectId) {
   }
   assistantState.providers = []
   assistantState.providerTypes = []
-  assistantState.selectedProviderId = ''
-  assistantState.selectedModel = ''
-  assistantState.thinkingEnabled = true
-  assistantState.webSearchEnabled = false
-  assistantState.debugEnabled = false
   if (!projectId) return
   await refreshAssistantProviders()
   await refreshSessions()
-  for (const paneId of PANE_IDS) {
+  const restoreIds = [...PANE_IDS, ...LEGACY_WORKSPACE_IDS]
+  const seen = new Set()
+  for (const paneId of restoreIds) {
+    const canonical = migrateLegacyPaneId(paneId)
+    if (seen.has(canonical)) continue
+    seen.add(canonical)
     const desired = readActiveId(projectId, paneId)
     if (desired && assistantState.sessions.some((s) => s.id === desired)) {
-      await selectSession(desired, paneId, { restoreOnly: true })
+      await selectSession(desired, canonical, { restoreOnly: true })
     }
   }
 }
 
 export async function refreshAssistantProviders() {
   if (!assistantState.projectId) return
-  const settings = readSettings(assistantState.projectId)
   try {
     const [providers, providerTypes] = await Promise.all([
       listAIProviders(assistantState.projectId),
@@ -245,61 +442,87 @@ export async function refreshAssistantProviders() {
     assistantState.providerTypes = []
   }
 
-  const available = assistantState.providers.filter((p) => p.enabled !== false)
-  const savedProvider = available.find((p) => p.id === settings.providerId)
-  const fallbackProvider = available.find((p) => p.isDefault) || available[0] || null
-  const provider = savedProvider || fallbackProvider
-  assistantState.selectedProviderId = provider?.id || ''
-  assistantState.selectedModel = pickInitialModel(provider, settings)
-  assistantState.thinkingEnabled = pickInitialThinking(provider, settings)
-  assistantState.webSearchEnabled = pickInitialWebSearch(provider, settings)
-  assistantState.debugEnabled = pickInitialDebug(settings)
-  await refreshProviderModels(provider?.id)
-  writeSettings()
+  await Promise.all([
+    applyProviderSettingsToPane('panel'),
+    ...allWorkspacePaneSlots().map((id) => applyProviderSettingsToPane(id)),
+  ])
 }
 
-export function setAssistantProvider(providerId) {
+export function setPaneProvider(paneId, providerId) {
+  const pane = getPane(paneId)
   const provider = assistantState.providers.find((p) => p.id === providerId) || null
-  assistantState.selectedProviderId = provider?.id || ''
-  assistantState.selectedModel = providerDefaultModel(provider)
-  assistantState.thinkingEnabled = providerSupportsThinking(provider)
-  assistantState.webSearchEnabled = providerSupportsWebSearch(provider)
-  void refreshProviderModels(provider?.id)
-  writeSettings()
+  pane.selectedProviderId = provider?.id || ''
+  pane.selectedModel = providerDefaultModel(provider, assistantState.providerTypes)
+  pane.thinkingEnabled = providerSupportsThinking(provider)
+  pane.webSearchEnabled = providerSupportsWebSearch(provider)
+  void refreshPaneProviderModels(paneId, provider?.id)
+  writePaneSettings(paneId)
 }
 
-export async function refreshProviderModels(providerId) {
-  assistantState.remoteModelList = []
-  assistantState.modelsWarning = ''
-  if (!providerId || !assistantState.projectId) return
+/** @deprecated use setPaneProvider(paneId, ...) */
+export function setAssistantProvider(providerId, paneId = 'panel') {
+  setPaneProvider(paneId, providerId)
+}
+
+export async function refreshPaneProviderModels(paneId, providerId) {
+  const pane = getPane(paneId)
+  const pid = providerId || pane.selectedProviderId
+  pane.remoteModelList = []
+  pane.modelsWarning = ''
+  if (!pid || !assistantState.projectId) return
   try {
-    const res = await listAIProviderModels(assistantState.projectId, providerId)
+    const res = await listAIProviderModels(assistantState.projectId, pid)
     const ids = Array.isArray(res?.models) ? res.models.map((m) => String(m?.id || '').trim()).filter(Boolean) : []
-    assistantState.remoteModelList = ids
-    assistantState.modelsWarning = res?.warning ? String(res.warning) : ''
+    pane.remoteModelList = ids
+    pane.modelsWarning = res?.warning ? String(res.warning) : ''
   } catch {
-    assistantState.remoteModelList = []
+    pane.remoteModelList = []
   }
 }
 
-export function setAssistantModel(model) {
-  assistantState.selectedModel = String(model || '').trim()
-  writeSettings()
+/** @deprecated use refreshPaneProviderModels */
+export async function refreshProviderModels(providerId, paneId = 'panel') {
+  await refreshPaneProviderModels(paneId, providerId)
 }
 
-export function setAssistantThinking(enabled) {
-  assistantState.thinkingEnabled = !!enabled
-  writeSettings()
+export function setPaneModel(paneId, model) {
+  const pane = getPane(paneId)
+  pane.selectedModel = String(model || '').trim()
+  writePaneSettings(paneId)
 }
 
-export function setAssistantWebSearch(enabled) {
-  assistantState.webSearchEnabled = !!enabled
-  writeSettings()
+export function setAssistantModel(model, paneId = 'panel') {
+  setPaneModel(paneId, model)
 }
 
-export function setAssistantDebug(enabled) {
-  assistantState.debugEnabled = !!enabled
-  writeSettings()
+export function setPaneThinking(paneId, enabled) {
+  const pane = getPane(paneId)
+  pane.thinkingEnabled = !!enabled
+  writePaneSettings(paneId)
+}
+
+export function setAssistantThinking(enabled, paneId = 'panel') {
+  setPaneThinking(paneId, enabled)
+}
+
+export function setPaneWebSearch(paneId, enabled) {
+  const pane = getPane(paneId)
+  pane.webSearchEnabled = !!enabled
+  writePaneSettings(paneId)
+}
+
+export function setAssistantWebSearch(enabled, paneId = 'panel') {
+  setPaneWebSearch(paneId, enabled)
+}
+
+export function setPaneDebug(paneId, enabled) {
+  const pane = getPane(paneId)
+  pane.debugEnabled = !!enabled
+  writePaneSettings(paneId)
+}
+
+export function setAssistantDebug(enabled, paneId = 'panel') {
+  setPaneDebug(paneId, enabled)
 }
 
 export function bindPage(snapshot) {
@@ -342,8 +565,25 @@ export async function refreshSessions() {
   }
 }
 
+/** Conversation turns visible in UI (excludes system messages). */
+function conversationMessageCount(pane) {
+  return pane.messages.filter((m) => m.role !== 'system').length
+}
+
+/** True when the pane already has an active session with no user/assistant/tool turns. */
+export function isPaneSessionEmpty(paneId = 'panel') {
+  const pane = getPane(paneId)
+  if (!pane.activeSessionId || pane.streaming) return false
+  if (pane.pendingCalls.length > 0) return false
+  return conversationMessageCount(pane) === 0
+}
+
 export async function newSession(title = '', paneId = 'panel') {
   if (!assistantState.projectId) return null
+  if (isPaneSessionEmpty(paneId)) {
+    const pane = getPane(paneId)
+    return assistantState.sessions.find((s) => s.id === pane.activeSessionId) || { id: pane.activeSessionId }
+  }
   const created = await createAISession(assistantState.projectId, { title })
   assistantState.sessions = [created, ...assistantState.sessions]
   await selectSession(created.id, paneId)
@@ -416,12 +656,12 @@ export async function sendMessage(text, paneId = 'panel', images = []) {
     `/projects/${assistantState.projectId}/ai/chat/stream`,
     {
       sessionId: pane.activeSessionId,
-      providerId: assistantState.selectedProviderId || undefined,
-      model: assistantState.selectedModel || undefined,
-      thinkingEnabled: assistantState.thinkingEnabled,
-      reasoningEffort: assistantState.thinkingEnabled ? 'high' : undefined,
-      webSearchEnabled: assistantState.webSearchEnabled,
-      debugEnabled: assistantState.debugEnabled,
+      providerId: pane.selectedProviderId || undefined,
+      model: pane.selectedModel || undefined,
+      thinkingEnabled: pane.thinkingEnabled,
+      reasoningEffort: pane.thinkingEnabled ? 'high' : undefined,
+      webSearchEnabled: pane.webSearchEnabled,
+      debugEnabled: pane.debugEnabled,
       userMessage: message,
       images: imgs.length ? imgs : undefined,
       pageContext: assistantState.pageContext || undefined,
@@ -444,12 +684,12 @@ export async function resolvePendingCall(callId, decision, paneId = 'panel') {
         sessionId: pane.activeSessionId,
         approve: !!decision?.approve,
         reason: decision?.reason || '',
-        providerId: assistantState.selectedProviderId || undefined,
-        model: assistantState.selectedModel || undefined,
-        thinkingEnabled: assistantState.thinkingEnabled,
-        reasoningEffort: assistantState.thinkingEnabled ? 'high' : undefined,
-        webSearchEnabled: assistantState.webSearchEnabled,
-        debugEnabled: assistantState.debugEnabled,
+        providerId: pane.selectedProviderId || undefined,
+        model: pane.selectedModel || undefined,
+        thinkingEnabled: pane.thinkingEnabled,
+        reasoningEffort: pane.thinkingEnabled ? 'high' : undefined,
+        webSearchEnabled: pane.webSearchEnabled,
+        debugEnabled: pane.debugEnabled,
         pageContext: assistantState.pageContext || undefined,
       },
       paneId
@@ -459,31 +699,12 @@ export async function resolvePendingCall(callId, decision, paneId = 'panel') {
   }
 }
 
-function providerMeta(provider) {
-  if (!provider) return null
-  return assistantState.providerTypes.find((t) => t.type === provider.providerType) || null
-}
-
-function providerDefaultModel(provider) {
-  if (!provider) return ''
-  return provider.defaultModel || providerMeta(provider)?.defaultModel || ''
-}
-
-function providerSupportsThinking(provider) {
-  const t = String(provider?.providerType || '').toLowerCase()
-  return t === 'deepseek' || t === 'xiaomi'
-}
-
-function providerSupportsWebSearch(provider) {
-  return String(provider?.providerType || '').toLowerCase() === 'xiaomi'
-}
-
 function pickInitialModel(provider, settings) {
   if (!provider) return ''
   if (settings?.providerId === provider.id && typeof settings.model === 'string' && settings.model.trim()) {
     return settings.model.trim()
   }
-  return providerDefaultModel(provider)
+  return providerDefaultModel(provider, assistantState.providerTypes)
 }
 
 function pickInitialThinking(provider, settings) {
@@ -542,7 +763,7 @@ async function streamWith(url, body, paneId = 'panel') {
   pane.streaming = true
   pane.error = ''
   const requestSeq = ++pane.requestSeq
-  const selectedProvider = assistantState.providers.find((p) => p.id === assistantState.selectedProviderId) || null
+  const selectedProvider = assistantState.providers.find((p) => p.id === pane.selectedProviderId) || null
   const showThinking = !!body?.thinkingEnabled && providerSupportsThinking(selectedProvider)
 
   let placeholderId = `streaming-${paneId}-${requestSeq}`
@@ -602,7 +823,7 @@ async function streamWith(url, body, paneId = 'panel') {
             break
           }
           case 'usage': {
-            if (!assistantState.debugEnabled || !event.usage) break
+            if (!pane.debugEnabled || !event.usage) break
             const p = ensurePlaceholder()
             p.usageDetails = normalizeUsageDetails(event.usage)
             pane.messages = [...pane.messages]

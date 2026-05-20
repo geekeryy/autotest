@@ -129,9 +129,6 @@ curl -X POST "http://localhost:8080/api/v1/projects/$PROJ/services/$SVC/specs/im
 - 基于 OpenAPI Spec 自动生成完整测试场景
 - 现在不做 MCP，但保留 MCP 友好的内部结构
 - 自动生成正向、反向用例
-- 代码整合：检查系统架构设计，将重复的代码和功能进行整合，减少代码的冗余，提高代码的复用性
-- 在页面右上角新增一个通知消息功能，后续会有部分异步操作的功能，需要在web端通知用户
-- API Key 新增导入 OpenAPI/Swagger 示例，支持选择项目和服务并填充，生成一个可运行的示例
 - 集成通知（飞书/钉钉/Slack webhook）
 - 认证方式扩展（OAuth2 等）
 - 变量引用与函数计算增强

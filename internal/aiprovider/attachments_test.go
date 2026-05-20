@@ -4,8 +4,6 @@ import (
 	"encoding/base64"
 	"strings"
 	"testing"
-
-	"autotest/internal/aiprovider/client"
 )
 
 func TestNormalizeUserImages_RejectsOversizedDataURL(t *testing.T) {
@@ -25,18 +23,6 @@ func TestNormalizeUserImages_AcceptsHTTPS(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].Type != "image" {
 		t.Fatalf("unexpected: %+v", got)
-	}
-}
-
-func TestModelSupportsModality_FromGateway(t *testing.T) {
-	gateway := []client.ModelInfo{
-		{ID: "mm", Capabilities: []string{client.ModalityImage}},
-	}
-	if !modelSupportsModality("xiaomi", "mm", client.ModalityImage, gateway) {
-		t.Fatal("expected image capability")
-	}
-	if modelSupportsModality("xiaomi", "text-only", client.ModalityImage, gateway) {
-		t.Fatal("text-only should not match")
 	}
 }
 

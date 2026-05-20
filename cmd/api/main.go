@@ -19,6 +19,7 @@ import (
 	"autotest/internal/logx"
 	"autotest/internal/mockserver"
 	"autotest/internal/mockset"
+	"autotest/internal/notification"
 	"autotest/internal/paramsource"
 	"autotest/internal/project"
 	"autotest/internal/projectprompt"
@@ -63,6 +64,8 @@ func main() {
 
 	caseSvc := testcase.NewService(caseRepo, specRepo)
 	specSvc := spec.NewService(specRepo, caseRepo, spec.NewImporter(), generator.NewDefault())
+	notificationRepo := notification.NewRepository(repo)
+	notificationSvc := notification.NewService(notificationRepo)
 
 	scenarioRepo := scenario.NewRepository(repo)
 	scenarioSvc := scenario.NewService(scenarioRepo)
@@ -109,7 +112,7 @@ func main() {
 	api := chi.NewRouter()
 	authHandler := auth.NewHandler(authSvc)
 	projectHandler := project.NewHandler(projectSvc)
-	specHandler := spec.NewHandler(specSvc)
+	specHandler := spec.NewHandler(specSvc, notificationSvc)
 	authHandler.RegisterPublic(api)
 
 	// 主受保护路由组：JWT 与 API Key 共用入口，但默认通过 RejectAPIKey 拒绝 API Key，
@@ -148,6 +151,7 @@ func main() {
 		testdata.NewHandler(testDataSvc, projectHandler).Register(r)
 		runner.NewHandler(runSvc, scenarioRepo, projectSvc).Register(r)
 		apikey.NewHandler(apiKeySvc, authSvc.RequirePermission).Register(r)
+		notification.NewHandler(notificationSvc).Register(r)
 
 		aianalysis.NewHandler(repo, aiProviderSvc, projectPromptSvc, reportRepo, projectHandler).
 			WithTools(aiReadOnly).
@@ -223,6 +227,9 @@ func timeoutExceptStream(d time.Duration) func(http.Handler) http.Handler {
 // timeout middleware is a real safety net for the rest of the API.
 func isStreamPath(path string) bool {
 	if strings.HasSuffix(path, "/chat/stream") {
+		return true
+	}
+	if strings.HasSuffix(path, "/notifications/stream") {
 		return true
 	}
 	if strings.Contains(path, "/tool-calls/") && strings.HasSuffix(path, "/confirm") {

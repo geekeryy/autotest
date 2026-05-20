@@ -148,6 +148,203 @@ paths:
 	if id["description"] != "用户 ID" {
 		t.Fatalf("expected response field description, got %#v", responseBody)
 	}
+	if endpoint.Fingerprint == "" {
+		t.Fatal("expected non-empty fingerprint")
+	}
+}
+
+func TestEndpointFingerprintIdempotentAndDetectsChanges(t *testing.T) {
+	t.Parallel()
+
+	baseDoc := []byte(`
+openapi: 3.0.3
+info:
+  title: Fingerprint API
+  version: 1.0.0
+paths:
+  /items:
+    post:
+      operationId: createItem
+      summary: Create item
+      tags: [items, catalog]
+      parameters:
+        - in: query
+          name: dryRun
+          schema:
+            type: boolean
+      responses:
+        "201":
+          description: created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+`)
+
+	importer := NewImporter()
+	first, err := importer.Import(context.Background(), baseDoc)
+	if err != nil {
+		t.Fatalf("import base: %v", err)
+	}
+	if len(first.Endpoints) != 1 {
+		t.Fatalf("expected 1 endpoint, got %d", len(first.Endpoints))
+	}
+	base := first.Endpoints[0]
+	if base.Fingerprint == "" {
+		t.Fatal("expected fingerprint on import")
+	}
+
+	second, err := importer.Import(context.Background(), baseDoc)
+	if err != nil {
+		t.Fatalf("re-import base: %v", err)
+	}
+	if second.Endpoints[0].Fingerprint != base.Fingerprint {
+		t.Fatalf("expected stable fingerprint on identical spec, got %q vs %q", second.Endpoints[0].Fingerprint, base.Fingerprint)
+	}
+
+	summaryDoc := []byte(`
+openapi: 3.0.3
+info:
+  title: Fingerprint API
+  version: 1.0.0
+paths:
+  /items:
+    post:
+      operationId: createItem
+      summary: Create item (revised)
+      tags: [items, catalog]
+      parameters:
+        - in: query
+          name: dryRun
+          schema:
+            type: boolean
+      responses:
+        "201":
+          description: created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+`)
+	changedSummary, err := importer.Import(context.Background(), summaryDoc)
+	if err != nil {
+		t.Fatalf("import summary change: %v", err)
+	}
+	if changedSummary.Endpoints[0].Fingerprint == base.Fingerprint {
+		t.Fatal("expected fingerprint to change when summary changes")
+	}
+
+	paramsDoc := []byte(`
+openapi: 3.0.3
+info:
+  title: Fingerprint API
+  version: 1.0.0
+paths:
+  /items:
+    post:
+      operationId: createItem
+      summary: Create item
+      tags: [items, catalog]
+      parameters:
+        - in: query
+          name: dryRun
+          required: true
+          schema:
+            type: boolean
+      responses:
+        "201":
+          description: created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+`)
+	changedParams, err := importer.Import(context.Background(), paramsDoc)
+	if err != nil {
+		t.Fatalf("import parameter change: %v", err)
+	}
+	if changedParams.Endpoints[0].Fingerprint == base.Fingerprint {
+		t.Fatal("expected fingerprint to change when parameters change")
+	}
+
+	opIDDoc := []byte(`
+openapi: 3.0.3
+info:
+  title: Fingerprint API
+  version: 1.0.0
+paths:
+  /items:
+    post:
+      operationId: createItemV2
+      summary: Create item
+      tags: [items, catalog]
+      parameters:
+        - in: query
+          name: dryRun
+          schema:
+            type: boolean
+      responses:
+        "201":
+          description: created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+`)
+	changedOpID, err := importer.Import(context.Background(), opIDDoc)
+	if err != nil {
+		t.Fatalf("import operationId change: %v", err)
+	}
+	if changedOpID.Endpoints[0].Fingerprint == base.Fingerprint {
+		t.Fatal("expected fingerprint to change when operationId changes")
+	}
+
+	tagsDoc := []byte(`
+openapi: 3.0.3
+info:
+  title: Fingerprint API
+  version: 1.0.0
+paths:
+  /items:
+    post:
+      operationId: createItem
+      summary: Create item
+      tags: [catalog]
+      parameters:
+        - in: query
+          name: dryRun
+          schema:
+            type: boolean
+      responses:
+        "201":
+          description: created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+`)
+	changedTags, err := importer.Import(context.Background(), tagsDoc)
+	if err != nil {
+		t.Fatalf("import tags change: %v", err)
+	}
+	if changedTags.Endpoints[0].Fingerprint == base.Fingerprint {
+		t.Fatal("expected fingerprint to change when tags change")
+	}
 }
 
 func TestImporterParsesSwagger2Endpoints(t *testing.T) {

@@ -15,6 +15,8 @@
 - 自动生成模板名称优先使用 OpenAPI/Swagger `summary`，缺省回退 `operationId`，再回退 `METHOD PATH`，不拼接生成规则名称。
 - 当前自动生成实际只产出 happy path 模板；其他生成规则属于预留扩展点。
 - 导入 OpenAPI/Swagger 时必须将请求/响应字段约束保留进 `requestSchema` / `responseSchema`。
+- **API Key 导入通知**：当 `POST .../specs/import` 由 API Key（`principal.Source == apikey`）调用且导入成功时，为 API Key 所属用户（`principal.UserID`，即 Key 的 `created_by`）写入一条 `spec_import` 站内通知；通知写入失败仅记 warn 日志，不影响 201 导入响应。
+- **JWT 页面导入不触发通知**：管理后台 API 管理页或历史 Spec 导入组件内的 JWT 手动导入不产生站内通知。
 
 ## API 管理
 

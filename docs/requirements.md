@@ -49,13 +49,14 @@
 
 ### AI 能力
 
-- [AI 提供商](design/ai-capabilities.md)：涉及 provider 类型、Base URL、API Key 脱敏、文本/多模态默认模型（`modalityModels`）、模型能力标签、extraConfig、thinking/reasoning、启用状态或默认提供商的请求，先判断配置是项目级还是全局；API 不应返回明文 Key。模型列表应通过上游 list-models 动态获取并展示 `capabilities`；含图对话路由到用户配置的图片模型，不在代码中写死型号名。`/ai-provider-types` 仅保留类型元数据与离线 fallback。
+- [AI 提供商](design/ai-capabilities.md)：涉及 provider 类型、Base URL、API Key 脱敏、文本/多模态默认模型（`modalityModels`）、模型能力标签、extraConfig、thinking/reasoning、启用状态或默认提供商的请求，先判断配置是项目级还是全局；API 不应返回明文 Key。模型列表应通过上游 list-models 动态获取；`capabilities` 仅来自上游元数据（无则空），多模态路由依赖用户配置的 `modalityModels`，不按模型 id 推断能力。`/ai-provider-types` 仅保留类型元数据与离线 fallback。
 - [项目级 Prompt](design/ai-capabilities.md)：涉及 action 级 System Prompt、默认模型、provider 绑定或回退逻辑的请求，先判断 providerId 为空是否应跟随项目默认提供商；绑定 provider 必须属于同项目且未删除。
 - [AI 生成请求参数](design/ai-capabilities.md)：涉及 `generate_params`、上下文构造、pathVarNames、currentRequest 保留、Mock Value Sets 注入或模型输出格式的请求，先区分非 LLM 的 `GET /cases/{id}/generate-params` 采样接口与 LLM `/ai/chat` action，并注意下方覆盖范围冲突仍待决策。
 - [AI 生成断言与测试数据](design/ai-capabilities.md)：涉及 `generate_assertion` 或 `generate_case_data` 的请求，先判断是否需要非空测试意图、项目 Prompt/provider 配置和明确中文错误；生成结果应由用户预览或追加，不应静默覆盖已有内容。
 - [AI 智能分析](design/ai-capabilities.md)：涉及失败原因分析或 spec 变更影响分析的请求，先判断输入应来自本次运行快照、断言失败明细或 spec diff 摘要；分析结果当前不写库，且分析输出统一为中文 Markdown 由前端 `MarkdownView` 渲染。
 - [AI Tool Calling 框架](design/ai-capabilities.md)：涉及让 AI 通过内置工具拉系统状态、扩展工具集、改变工具权限边界或 mutating 工具确认机制的请求，先判断目标是否落在 `internal/aitools` Registry；分析类 action 仅允许只读工具，mutating 工具（如 `update_case_assertions`、场景编排相关写工具）只能通过浮窗对话流程并经过用户 confirm 才会执行。
-- [全局 AI 助理浮窗](design/ai-capabilities.md)：涉及登录后管理后台 AI 助理浮窗、provider/model 选择、深度思考/联网搜索开关、Token 用量持久化与汇总（仪表盘/会话详情）、Debug 开关下浮窗每轮 token/缓存详情展示、会话列表查看会话详情（对话统计与 Token 汇总）、Xiaomi 图片上传与多模态消息、SSE 对话流、会话/消息持久化、跨用户隔离或 mutating 工具人在回路确认的请求，先判断需求是否会改变 `ai_sessions`/`ai_messages` 表结构、SSE 事件 schema 或会话隔离边界；浮窗会话按 `(project_id, user_id)` 严格隔离，分析类 action 不暴露写工具。
+- [全局 AI 助理浮窗](design/ai-capabilities.md)：涉及登录后管理后台 AI 助理浮窗、provider/model 选择、深度思考/联网搜索开关、Token 用量持久化与汇总（仪表盘/会话详情）、Debug 开关下浮窗每轮 token/缓存详情展示、会话列表查看会话详情（对话统计与 Token 汇总）、Xiaomi 图片上传与多模态消息、SSE 对话流、会话/消息持久化、空会话时「新对话」静默复用（不重复创建）、跨用户隔离或 mutating 工具人在回路确认的请求，先判断需求是否会改变 `ai_sessions`/`ai_messages` 表结构、SSE 事件 schema 或会话隔离边界；浮窗会话按 `(project_id, user_id)` 严格隔离，分析类 action 不暴露写工具。
+- [AI 助理工作区分屏](design/ai-capabilities.md)：涉及工作区最多 6 屏、横向并排、每屏独立 provider/model、工作区主区域 +/各屏 X 增删分屏、同会话不可多屏重复打开或 pane 级设置持久化的请求，先确认是否仅影响前端 `aiAssistant` store 与 `/ai-assistant` 页，不改变 SSE 或表结构。
 - [AI 场景生成与编排](design/ai-capabilities.md)：涉及让 AI 帮用户生成测试场景、追加/修改/删除/重排步骤、生成接口请求模板或一键运行的请求，先判断是工具集扩展还是运行触发；AI 通过 `list_* / get_*` 探查后调用 `create_scenario_with_steps`（API/Script/For/Condition 四种步骤）一次性创建完整场景，控制流子步骤引用使用 `stepOrder`，由平台转换为内部 `step_seq`；运行触发始终由用户在场景页手动点击，AI 不暴露任何"运行"工具。服务和环境的 create/update 不通过 AI 工具暴露——平台基础结构由用户手工维护，AI 只读相关元信息。
 - [AI 会话权限与项目隔离](design/ai-capabilities.md)：涉及 AI 工具调用是否能跨项目、是否能越用户访问数据的请求，先确认每个 SSE 会话由 `(projectId, userId)` 绑定；任何接受 `projectId` 的工具均通过 `aitools.ResolveProjectID` 校验，按 `caseId/scenarioId/stepId` 操作的工具在查到对象后反向校验其 `projectId` 必须等于会话项目，违反时直接拒绝执行。
 - [AI 助理页面上下文](design/ai-capabilities.md)：涉及 AI 浮窗感知用户当前页面、把 `scenarioId/caseId/serviceId` 等当作默认对象的请求，先确认前端按路由切换调 `bindPage` 写入 `assistantState.pageContext`，每次 `POST /ai/chat/stream` 与 `/tool-calls/{id}/confirm` 都附带这份快照；后端把它作为额外 system 消息注入 LLM 上下文，但工具仍以参数为权威，页面上下文不参与权限判定。
@@ -68,6 +69,7 @@
 - [菜单、布局与视觉品牌](design/admin-and-access.md)：涉及侧边栏菜单、收起、滚动区域、字体、配色、头像、退出登录或 logo 的请求，先判断是全局布局约束还是单页样式调整；左侧导航不应单独滚动。
 - [脚本库](design/admin-and-access.md)：涉及断言编辑器、场景脚本步骤、内置模板、项目自定义模板或 AI 生成脚本入口的请求，先判断模板作用域是全平台共享还是当前项目。
 - [用户权限与 API Key](design/admin-and-access.md)：涉及 RBAC 菜单、项目权限、API Key 列表/创建/重置/禁用/过期/审计或 CI/CD 调用的请求，先区分前端路由权限、全局后端权限和项目角色中间件；API Key 当前仅允许 `specs:import`，管理操作只作用于当前登录用户的 Key。用户管理支持上传头像：浏览器端先压成 JPEG，服务端再缩放编码后存入 `users.avatar_jpeg`，列表与 `/auth/me` 等接口在 JSON 中返回 `avatarUrl`（`data:image/jpeg;base64,...`），便于 Bearer 鉴权下直接用于 `<img>` / `el-avatar`。
+- [站内通知](design/admin-and-access.md)：涉及管理后台顶栏通知铃铛、未读角标、通知列表、已读状态、一键清空或 API Key 导入触发的通知写入的请求，先判断是否仅按登录用户隔离（不新增 RBAC 权限）；当前仅 API Key 成功导入 Swagger 时写入 `spec_import` 通知，JWT 页面内手动导入不触发；正文与统计展示**本次实际变动**的接口数（`createdEndpoints + updatedEndpoints`），不含文档内未改动的端点；前端登录后通过 `GET /notifications/stream`（JWT、RejectAPIKey）SSE 实时推送，断线自动重连，页面重新可见时仅做一次 REST 同步；`POST /notifications/clear-all` 硬删除当前用户全部通知并通过 SSE 推送空 `snapshot`。
 
 ## 待用户决策
 

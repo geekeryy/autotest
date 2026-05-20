@@ -17,17 +17,6 @@ export function modalityLabel(modality) {
 
 export function formatModelCapabilities(capabilities) {
   const list = Array.isArray(capabilities) ? capabilities : []
-  if (!list.length) return '文本（推断）'
+  if (!list.length) return ''
   return list.map((c) => modalityLabel(c)).join(' · ')
-}
-
-export function modelHasCapability(model, modality) {
-  const caps = Array.isArray(model?.capabilities) ? model.capabilities : []
-  if (!caps.length && modality === MODALITY_TEXT) return true
-  return caps.includes(modality)
-}
-
-export function filterModelsByCapability(models, modality) {
-  const list = Array.isArray(models) ? models : []
-  return list.filter((m) => modelHasCapability(m, modality))
 }

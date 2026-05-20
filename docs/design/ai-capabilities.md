@@ -8,7 +8,7 @@
 - 提供商类型包括 deepseek、xiaomi、openai、anthropic、kimi、ollama。
 - 每个项目可维护多份 AI 提供商配置。
 - 配置包含名称、Base URL、API Key 脱敏、**文本默认模型**、按能力配置的默认模型（`modalityModels.image` / `audio` / `video`，存于 `extra_config`）、extraConfig、启用状态与是否默认。
-- `GET .../models` 与 discover 返回的每条模型含 `capabilities` 标签（`text` / `image` / `audio` / `video`）：优先解析上游元数据，否则按模型 id 中的通用能力关键词推断；**不在代码中写死具体型号名称**。
+- `GET .../models` 与 discover 返回的每条模型可含 `capabilities` 标签（`text` / `image` / `audio` / `video`），**仅**解析上游响应中的元数据字段，不按模型 id 推断；多模态路由完全依赖用户在 `modalityModels` 中配置的型号。
 - 同一项目最多一个默认提供商。
 - DeepSeek 与 Xiaomi 走 OpenAI 兼容协议时默认启用 thinking/reasoning：DeepSeek 请求携带 `thinking.type=enabled` 与 `reasoning_effort`，Xiaomi 请求携带 `reasoning.effort`。默认 effort 为 `high`；可通过 `extraConfig.thinking=false` 或 `extraConfig.thinking.enabled=false` 关闭，也可通过 `extraConfig.reasoning_effort` / `extraConfig.reasoningEffort` 或 `extraConfig.thinking.effort` 覆盖强度。
 - 模型下拉不再依赖 `/ai-provider-types` 的静态列表：已保存配置走 `GET /projects/{projectId}/ai-providers/{providerId}/models`；创建/编辑表单在填写 Base URL 与 API Key 后走 `POST .../ai-providers/models/discover`（编辑时 apiKey 留空则复用库内密钥）。OpenAI 兼容类型调用上游 `GET {baseUrl}/models`，Anthropic 调用 `GET {baseUrl}/models`，Ollama 在 `/v1/models` 不可用时回退 `GET /api/tags`；上游失败时返回内置 fallback 列表与 `warning`。
@@ -110,6 +110,13 @@
 - 后端 `renderPageContextSystem` 把 `pageContext` 渲染为一条"`## 用户当前页面上下文`"开头的 system 消息，插入到主 system prompt 之后，供 LLM 在用户使用代词或省略对象 ID 时把页面快照里的 `scenarioId/caseId/serviceId` 作为默认对象。
 - **页面上下文只是提示，不是授权依据**：系统 prompt 明确告知 AI 该字段只用于消歧，工具参数仍以模型显式传入为权威，最终的项目归属和权限校验由 `aitools.ResolveProjectID` / `aitools.RequireProjectAccess` 把关。
 - 浮窗 UI 在头部下方显示一行"当前上下文：…"提示，方便用户直观看到 AI 正在感知什么；`pageContext` 为空或只剩占位字段时该提示自动隐藏。
+
+## AI 助理工作区（全页分屏）
+
+- 管理后台提供独立 **AI 助理工作区页**（`/ai-assistant`），与右侧浮窗共用 `assistantState` 与 SSE 对话能力，但工作区 pane（`w0`…`w5`）与浮窗 pane（`panel`）会话、模型设置相互隔离。
+- **分屏**：默认单屏（`w0`）；末屏标题栏 **+** 可增至最多 **6** 屏，**X** 关闭该屏（至少保留 1 屏）。分屏由 `workspacePaneIds.length > 1` 隐式判定，无侧栏开关。窄屏（&lt;900px）时用 Tab「对话 1…6」（按槽位 `w0`…`w5` 固定编号，不随增删重排）切换，宽屏横向并排展示。
+- **每屏独立模型**：各工作区 pane 在分屏标题栏 **设置** 图标打开的 `ModelSettingsPopover` 中选择 **提供商 + 模型** 与 Debug；深度思考、联网搜索、图片附件仍在本屏 composer 工具栏中，读写各自 pane 的 `thinkingEnabled` / `webSearchEnabled` / `debugEnabled`。（浮窗 pane 的模型与 Debug 在顶栏同一 Popover 中。）切换提供商/模型时 Popover 保持打开，仅点击外部区域或再次点击设置按钮时关闭。
+- **会话**：同一会话不可在多个工作区分屏同时打开；会话列表 tag 显示所在分屏序号（1…6）。pane 级设置与会话 activeId 按 `w0`…`w5` 持久化；自旧版 `left`/`right` 迁移为 `w0`/`w1`。**新对话**：当前 pane 已有活跃会话且无任何 user/assistant/tool 轮次（与 UI 可见消息口径一致，不含 system）时，触发「新对话」不再 POST 创建会话，静默复用当前空会话；浮窗 pane（`panel`）同理。
 
 ## 全局 AI 助理浮窗（对话型入口）
 

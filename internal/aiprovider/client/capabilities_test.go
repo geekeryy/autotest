@@ -13,16 +13,11 @@ func TestModelCapabilitiesFromMetadata_OpenAIStyle(t *testing.T) {
 	}
 }
 
-func TestInferModelCapabilities_KeywordHints(t *testing.T) {
-	got := InferModelCapabilities("vendor-vision-large", nil)
-	if !ModelHasCapability(got, ModalityImage) {
-		t.Fatalf("expected image from id hint, got %v", got)
+func TestModelHasCapability_EmptyTagsTextOnly(t *testing.T) {
+	if !ModelHasCapability(nil, ModalityText) {
+		t.Fatal("empty capabilities should allow text")
 	}
-}
-
-func TestInferModelCapabilities_WhisperAudio(t *testing.T) {
-	got := InferModelCapabilities("whisper-1", nil)
-	if !ModelHasCapability(got, ModalityAudio) {
-		t.Fatalf("expected audio, got %v", got)
+	if ModelHasCapability(nil, ModalityImage) {
+		t.Fatal("empty capabilities should not imply image")
 	}
 }

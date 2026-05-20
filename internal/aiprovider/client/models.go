@@ -96,7 +96,7 @@ func parseOpenAIModelsPayload(raw []byte) ([]ModelInfo, error) {
 		if id == "" {
 			continue
 		}
-		caps := InferModelCapabilities(id, ModelCapabilitiesFromMetadata(rowRaw))
+		caps := ModelCapabilitiesFromMetadata(rowRaw)
 		out = append(out, ModelInfo{
 			ID:           id,
 			OwnedBy:      strings.TrimSpace(item.OwnedBy),
@@ -293,9 +293,6 @@ func filterAndSortModels(models []ModelInfo) []ModelInfo {
 		}
 		seen[id] = struct{}{}
 		m.ID = id
-		if len(m.Capabilities) == 0 {
-			m.Capabilities = InferModelCapabilities(id, nil)
-		}
 		out = append(out, m)
 	}
 	sort.Slice(out, func(i, j int) bool {

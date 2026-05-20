@@ -3,11 +3,13 @@ package spec
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"autotest/internal/store"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 )
 
 type Repository struct {
@@ -113,13 +115,16 @@ func (r *Repository) SyncEndpoints(ctx context.Context, projectID, serviceID, sp
 				fingerprint = excluded.fingerprint,
 				deleted_at = null,
 				updated_at = now()
+			where api_endpoints.fingerprint is distinct from excluded.fingerprint
+			   or api_endpoints.deleted_at is not null
 			returning id, service_id, spec_id, method, path, operation_id, summary, tags,
 				request_schema, response_schema, fingerprint, created_at, updated_at,
-				(xmax = 0) AS inserted
+				(xmax = 0) AS inserted,
+				(xmax <> 0) AS row_modified
 		`, projectID, serviceID, specID, endpoint.Method, endpoint.Path, endpoint.OperationID, endpoint.Summary, endpoint.Tags, endpoint.RequestSchema, endpoint.ResponseSchema, endpoint.Fingerprint)
 
 		var saved Endpoint
-		var inserted bool
+		var inserted, rowModified bool
 		if err := row.Scan(
 			&saved.ID,
 			&saved.ServiceID,
@@ -135,12 +140,21 @@ func (r *Repository) SyncEndpoints(ctx context.Context, projectID, serviceID, sp
 			&saved.CreatedAt,
 			&saved.UpdatedAt,
 			&inserted,
+			&rowModified,
 		); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				existing, fetchErr := r.getActiveEndpointByServiceMethodPath(ctx, serviceID, endpoint.Method, endpoint.Path)
+				if fetchErr != nil {
+					return nil, 0, 0, fmt.Errorf("sync endpoint %s %s: %w", endpoint.Method, endpoint.Path, fetchErr)
+				}
+				synced = append(synced, *existing)
+				continue
+			}
 			return nil, 0, 0, fmt.Errorf("sync endpoint %s %s: %w", endpoint.Method, endpoint.Path, err)
 		}
 		if inserted {
 			created++
-		} else {
+		} else if rowModified {
 			updated++
 		}
 		synced = append(synced, saved)
@@ -162,6 +176,39 @@ func (r *Repository) GetEndpointRequestSchema(ctx context.Context, endpointID uu
 		return nil, fmt.Errorf("get endpoint request schema: %w", err)
 	}
 	return schema, nil
+}
+
+func (r *Repository) getActiveEndpointByServiceMethodPath(ctx context.Context, serviceID uuid.UUID, method, path string) (*Endpoint, error) {
+	if r.DB == nil {
+		return nil, fmt.Errorf("database unavailable")
+	}
+
+	row := r.DB.QueryRow(ctx, `
+		select id, service_id, spec_id, method, path, operation_id, summary, tags,
+			request_schema, response_schema, fingerprint, created_at, updated_at
+		from api_endpoints
+		where service_id = $1 and method = upper($2) and path = $3 and deleted_at is null
+	`, serviceID, method, path)
+
+	var endpoint Endpoint
+	if err := row.Scan(
+		&endpoint.ID,
+		&endpoint.ServiceID,
+		&endpoint.SpecID,
+		&endpoint.Method,
+		&endpoint.Path,
+		&endpoint.OperationID,
+		&endpoint.Summary,
+		&endpoint.Tags,
+		&endpoint.RequestSchema,
+		&endpoint.ResponseSchema,
+		&endpoint.Fingerprint,
+		&endpoint.CreatedAt,
+		&endpoint.UpdatedAt,
+	); err != nil {
+		return nil, fmt.Errorf("get endpoint by service method path: %w", err)
+	}
+	return &endpoint, nil
 }
 
 func (r *Repository) GetEndpointByID(ctx context.Context, endpointID uuid.UUID) (*Endpoint, error) {

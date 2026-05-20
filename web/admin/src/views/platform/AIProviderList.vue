@@ -146,13 +146,13 @@
             :loading="modelsLoading"
           >
             <el-option
-              v-for="m in imageModelOptions"
+              v-for="m in modelSelectOptions"
               :key="'img-' + m.id"
               :label="modelOptionLabel(m)"
               :value="m.id"
             />
           </el-select>
-          <p class="meta-notes">从上游列表选择带「图片」能力标签的模型；AI 助理上传图片前须配置此项。</p>
+          <p class="meta-notes">从上游列表自行选择用于含图消息的模型；AI 助理上传图片前须配置此项。</p>
         </el-form-item>
         <el-form-item label="音频模型">
           <el-select
@@ -166,7 +166,7 @@
             :loading="modelsLoading"
           >
             <el-option
-              v-for="m in audioModelOptions"
+              v-for="m in modelSelectOptions"
               :key="'aud-' + m.id"
               :label="modelOptionLabel(m)"
               :value="m.id"
@@ -185,7 +185,7 @@
             :loading="modelsLoading"
           >
             <el-option
-              v-for="m in videoModelOptions"
+              v-for="m in modelSelectOptions"
               :key="'vid-' + m.id"
               :label="modelOptionLabel(m)"
               :value="m.id"
@@ -232,13 +232,7 @@ import {
 import ListLoadError from '../../components/ListLoadError.vue'
 import { loadGlobalProjects, projectState } from '../../utils/currentProject'
 import { getListLoadErrorMessage } from '../../utils/listPageLoad'
-import {
-  MODALITY_AUDIO,
-  MODALITY_IMAGE,
-  MODALITY_VIDEO,
-  filterModelsByCapability,
-  formatModelCapabilities,
-} from '../../utils/modelCapabilities'
+import { formatModelCapabilities } from '../../utils/modelCapabilities'
 
 function pad2(n) {
   return String(n).padStart(2, '0')
@@ -329,18 +323,6 @@ export default {
       addId(this.currentTypeMeta?.defaultModel)
       return Array.from(byId.values()).sort((a, b) => a.id.localeCompare(b.id))
     },
-    imageModelOptions() {
-      const filtered = filterModelsByCapability(this.remoteModelEntries, MODALITY_IMAGE)
-      return filtered.length ? filtered : this.modelSelectOptions
-    },
-    audioModelOptions() {
-      const filtered = filterModelsByCapability(this.remoteModelEntries, MODALITY_AUDIO)
-      return filtered.length ? filtered : this.modelSelectOptions
-    },
-    videoModelOptions() {
-      const filtered = filterModelsByCapability(this.remoteModelEntries, MODALITY_VIDEO)
-      return filtered.length ? filtered : this.modelSelectOptions
-    }
   },
   watch: {
     projectId: {

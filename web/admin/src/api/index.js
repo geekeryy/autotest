@@ -254,3 +254,8 @@ export const regenerateTestDataCells = (projectId, tableId, rowId, data) =>
     columnKeys: Array.isArray(data?.columnKeys) ? data.columnKeys.slice() : [],
   }, { timeout: 120000 })
 export const listMockHelpers = () => request.get('/test-data/mock-helpers').then(asList)
+
+export const listNotifications = (params = {}) => request.get('/notifications', { params })
+export const markNotificationRead = (id) => request.patch(`/notifications/${id}/read`)
+export const markAllNotificationsRead = () => request.post('/notifications/read-all')
+export const clearAllNotifications = () => request.post('/notifications/clear-all')

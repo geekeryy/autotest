@@ -40,67 +40,51 @@
           @delete="onDeleteSession"
         />
       </div>
-
-      <div class="ds-sidebar__footer">
-        <div class="ds-split-control">
-          <span class="ds-split-control__label">分屏对话</span>
-          <el-switch
-            :model-value="splitMode"
-            inline-prompt
-            active-text="开"
-            inactive-text="关"
-            :disabled="!currentProjectId"
-            @change="onSplitModeChange"
-          />
-        </div>
-        <ModelSettingsPopover :disabled="!currentProjectId" :busy="workspaceBusy">
-          <template #reference>
-            <button type="button" class="ds-settings-btn" :disabled="!currentProjectId">
-              <el-icon><Setting /></el-icon>
-              <span>模型设置</span>
-            </button>
-          </template>
-        </ModelSettingsPopover>
-      </div>
     </aside>
     </template>
 
     <template v-if="currentProjectId">
-        <el-tabs
-          v-if="showSplitTabs"
-          v-model="narrowPaneTab"
-          class="ds-split-tabs"
-          @tab-change="onNarrowPaneTabChange"
-        >
-          <el-tab-pane label="对话 A" name="left" />
-          <el-tab-pane label="对话 B" name="right" />
-        </el-tabs>
-        <div class="ds-split" :class="{ 'ds-split--dual': splitMode && !showSplitTabs }">
-          <section
-            v-show="!showSplitTabs || narrowPaneTab === 'left'"
-            class="ds-pane"
-            :class="{ 'ds-pane--focused': focusedPaneId === 'left' }"
-            @mousedown="focusPane('left')"
+        <div class="ds-workspace">
+          <el-tabs
+            v-if="showSplitTabs"
+            v-model="narrowPaneTab"
+            class="ds-split-tabs"
+            @tab-change="onNarrowPaneTabChange"
           >
-            <GlobalAIAssistant
-              layout="page"
-              pane-id="left"
-              :pane-focused="focusedPaneId === 'left'"
+            <el-tab-pane
+              v-for="paneId in workspacePaneIds"
+              :key="paneId"
+              :label="workspacePaneLabel(paneId)"
+              :name="paneId"
             />
-          </section>
-          <div v-if="splitMode && !showSplitTabs" class="ds-split-divider" aria-hidden="true" />
-          <section
-            v-show="splitMode && (!showSplitTabs || narrowPaneTab === 'right')"
-            class="ds-pane"
-            :class="{ 'ds-pane--focused': focusedPaneId === 'right' }"
-            @mousedown="focusPane('right')"
+          </el-tabs>
+          <div
+            class="ds-split"
+            :class="splitContainerClasses"
           >
-            <GlobalAIAssistant
-              layout="page"
-              pane-id="right"
-              :pane-focused="focusedPaneId === 'right'"
+          <template v-for="(paneId, index) in workspacePaneIds" :key="paneId">
+            <section
+              v-show="!showSplitTabs || narrowPaneTab === paneId"
+              class="ds-pane"
+              :class="{ 'ds-pane--focused': focusedPaneId === paneId }"
+              @mousedown="focusPane(paneId)"
+            >
+              <GlobalAIAssistant
+                layout="page"
+                :pane-id="paneId"
+                :pane-focused="focusedPaneId === paneId"
+                :show-add-pane="paneId === lastWorkspacePaneId"
+                :can-add-pane="canAddPane"
+                @add-pane="onAddPane"
+              />
+            </section>
+            <div
+              v-if="splitMode && !showSplitTabs && index < workspacePaneIds.length - 1"
+              class="ds-split-divider"
+              aria-hidden="true"
             />
-          </section>
+          </template>
+          </div>
         </div>
     </template>
     <div v-else class="ds-main-empty">
@@ -120,24 +104,26 @@
 
 <script>
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ChatLineRound, Plus, Setting } from '@element-plus/icons-vue'
+import { ChatLineRound, Plus } from '@element-plus/icons-vue'
 import GlobalAIAssistant from '../components/GlobalAIAssistant.vue'
-import ModelSettingsPopover from '../components/ModelSettingsPopover.vue'
 import AISessionDetailDrawer from '../components/AISessionDetailDrawer.vue'
 import SessionListItem from '../components/SessionListItem.vue'
 import WorkspaceLayout from '../components/WorkspaceLayout.vue'
 import {
+  MAX_WORKSPACE_PANES,
+  addWorkspacePane,
   anyPaneStreaming,
   assistantState,
   bindProject,
+  isSessionOpenInOtherPane,
   isSessionOpenInPane,
   newSession,
   removeSession,
   renameSession,
   selectSession,
   setFocusedPane,
-  setSplitMode,
-  WORKSPACE_PANE_IDS,
+  workspacePaneLabel,
+  workspacePaneTag,
 } from '../stores/aiAssistant'
 import { projectState } from '../utils/currentProject'
 
@@ -145,13 +131,11 @@ export default {
   name: 'AIAssistantPage',
   components: {
     GlobalAIAssistant,
-    ModelSettingsPopover,
     AISessionDetailDrawer,
     SessionListItem,
     WorkspaceLayout,
     ChatLineRound,
     Plus,
-    Setting,
   },
   data() {
     return {
@@ -159,7 +143,7 @@ export default {
       sessionDetailVisible: false,
       sessionDetailId: '',
       viewportWidth: typeof window !== 'undefined' ? window.innerWidth : 1200,
-      narrowPaneTab: 'left',
+      narrowPaneTab: 'w0',
     }
   },
   computed: {
@@ -168,6 +152,9 @@ export default {
     },
     currentProjectId() {
       return projectState.currentProjectId
+    },
+    workspacePaneIds() {
+      return assistantState.workspacePaneIds
     },
     isNarrowViewport() {
       return this.viewportWidth < 900
@@ -182,10 +169,23 @@ export default {
       return assistantState.focusedPaneId
     },
     focusedPaneLabel() {
-      return this.focusedPaneId === 'right' ? '对话 B' : '对话 A'
+      return workspacePaneLabel(this.focusedPaneId) || workspacePaneLabel('w0')
     },
     workspaceBusy() {
-      return anyPaneStreaming(WORKSPACE_PANE_IDS)
+      return anyPaneStreaming(this.workspacePaneIds)
+    },
+    canAddPane() {
+      return !!this.currentProjectId && this.workspacePaneIds.length < MAX_WORKSPACE_PANES
+    },
+    lastWorkspacePaneId() {
+      const ids = this.workspacePaneIds
+      return ids.length ? ids[ids.length - 1] : ''
+    },
+    splitContainerClasses() {
+      return {
+        'ds-split--multi': this.splitMode && !this.showSplitTabs,
+        'ds-split--row': true,
+      }
     },
   },
   watch: {
@@ -196,7 +196,17 @@ export default {
       },
     },
     focusedPaneId(value) {
-      if (value === 'left' || value === 'right') this.narrowPaneTab = value
+      if (this.workspacePaneIds.includes(value)) this.narrowPaneTab = value
+    },
+    workspacePaneIds: {
+      immediate: true,
+      handler(ids) {
+        if (ids.includes(this.focusedPaneId)) {
+          this.narrowPaneTab = this.focusedPaneId
+        } else if (ids.length) {
+          this.narrowPaneTab = ids[0]
+        }
+      },
     },
   },
   mounted() {
@@ -210,8 +220,9 @@ export default {
     window.removeEventListener('resize', this.onViewportResize)
   },
   methods: {
+    workspacePaneLabel,
     onNarrowPaneTabChange(name) {
-      if (name === 'left' || name === 'right') setFocusedPane(name)
+      if (this.workspacePaneIds.includes(name)) setFocusedPane(name)
     },
     async bindCurrentProject(projectId) {
       if (!projectId) return
@@ -222,8 +233,11 @@ export default {
         this.sessionsLoading = false
       }
     },
-    onSplitModeChange(value) {
-      setSplitMode(!!value)
+    onAddPane() {
+      if (addWorkspacePane()) {
+        const lastId = this.workspacePaneIds[this.workspacePaneIds.length - 1]
+        setFocusedPane(lastId)
+      }
     },
     onSessionDetail(session) {
       if (!session?.id) return
@@ -253,29 +267,27 @@ export default {
     },
     isSessionActive(sessionId) {
       if (!sessionId) return false
-      if (this.splitMode) {
-        return isSessionOpenInPane(sessionId, 'left') || isSessionOpenInPane(sessionId, 'right')
-      }
-      return isSessionOpenInPane(sessionId, 'left')
+      return this.workspacePaneIds.some((id) => isSessionOpenInPane(sessionId, id))
     },
     isSessionInFocusedPane(sessionId) {
       return isSessionOpenInPane(sessionId, this.focusedPaneId)
     },
     sessionPaneTags(sessionId) {
       const tags = []
-      if (this.splitMode) {
-        if (isSessionOpenInPane(sessionId, 'left')) tags.push('A')
-        if (isSessionOpenInPane(sessionId, 'right')) tags.push('B')
-      }
+      this.workspacePaneIds.forEach((paneId) => {
+        if (isSessionOpenInPane(sessionId, paneId)) {
+          const tag = workspacePaneTag(paneId)
+          if (tag) tags.push(tag)
+        }
+      })
       return tags
     },
     async onNewSession() {
       await newSession('', this.focusedPaneId)
     },
     async onSelectSession(id) {
-      const otherPane = this.focusedPaneId === 'left' ? 'right' : 'left'
-      if (this.splitMode && isSessionOpenInPane(id, otherPane)) {
-        ElMessage.warning('该会话已在另一分屏中打开，请先切换或关闭另一侧')
+      if (isSessionOpenInOtherPane(id, this.focusedPaneId)) {
+        ElMessage.warning('该会话已在其他分屏中打开，请先切换或关闭对应分屏')
         return
       }
       await selectSession(id, this.focusedPaneId)
@@ -378,162 +390,12 @@ export default {
   line-height: 1.5;
 }
 
-.ds-session-item {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  width: 100%;
-  margin-bottom: 2px;
-  padding: 10px 36px 10px 12px;
-  border: none;
-  border-radius: 10px;
-  background: transparent;
-  cursor: pointer;
-  text-align: left;
-  transition: background 0.15s ease;
-}
-
-.ds-session-item:hover {
-  background: var(--app-surface-subtle);
-}
-
-.ds-session-item.active {
-  background: var(--app-focus-ring);
-}
-
-.ds-session-item__title {
-  width: 100%;
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--app-text-color);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ds-session-item__meta {
-  font-size: 12px;
-  color: var(--app-text-muted);
-}
-
-.ds-session-item__delete {
-  position: absolute;
-  right: 6px;
-  top: 50%;
-  transform: translateY(-50%);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--app-text-muted);
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
-}
-
-.ds-session-item:hover .ds-session-item__delete,
-.ds-session-item.active .ds-session-item__delete {
-  opacity: 1;
-}
-
-.ds-session-item__delete:hover {
-  background: #fee;
-  color: var(--el-color-danger);
-}
-
-.ds-sidebar__footer {
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 10px 12px 14px;
-  border-top: 1px solid #eef0f3;
-}
-
-.ds-split-control {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  background: var(--app-surface-subtle);
-  border: 1px solid #eef0f3;
-}
-
-.ds-split-control__label {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--app-text-color);
-}
-
-.ds-settings-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 8px 10px;
-  border: none;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--app-text-muted);
-  font-size: 13px;
-  cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
-}
-
-.ds-settings-btn:hover:not(:disabled) {
-  background: var(--app-surface-subtle);
-  color: var(--app-text-color);
-}
-
-.ds-settings-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.ds-model-settings {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.ds-model-settings-row {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.ds-model-settings-label {
-  font-size: 12px;
-  color: var(--app-text-muted);
-}
-
-.ds-model-settings-model {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.ds-model-settings-model :deep(.el-select) {
-  flex: 1;
-}
-
-.ds-main {
+.ds-workspace {
   flex: 1 1 auto;
-  min-width: 0;
   min-height: 0;
-  height: 100%;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: var(--app-surface-subtle);
 }
 
 .ds-split {
@@ -544,7 +406,12 @@ export default {
   overflow: hidden;
 }
 
-.ds-split--dual {
+.ds-split--row {
+  flex-direction: row;
+  align-items: stretch;
+}
+
+.ds-split--multi {
   flex-direction: row;
 }
 
@@ -578,43 +445,15 @@ export default {
   border-bottom: 1px solid var(--app-border-color);
 }
 
-.ds-split--dual .ds-pane {
+.ds-split--multi .ds-pane {
   flex: 1 1 0;
-  width: 50%;
+  width: 0;
 }
 
 .ds-main :deep(.ai-panel-host--page) {
   flex: 1 1 auto;
   min-height: 0;
   height: 100%;
-}
-
-.ds-session-item__title-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: 100%;
-  min-width: 0;
-}
-
-.ds-session-item__tags {
-  display: inline-flex;
-  flex-shrink: 0;
-  gap: 4px;
-}
-
-.ds-session-item__tag {
-  padding: 1px 5px;
-  border-radius: 4px;
-  font-size: 10px;
-  font-weight: 600;
-  line-height: 1.2;
-  color: var(--el-color-primary);
-  background: var(--app-focus-ring);
-}
-
-.ds-session-item--focused.active {
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--el-color-primary) 35%, transparent);
 }
 
 .ds-main-empty {

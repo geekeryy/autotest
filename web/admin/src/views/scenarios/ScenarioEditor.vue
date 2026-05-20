@@ -12,9 +12,27 @@
           v-model="runEnvId"
           placeholder="选择运行环境"
           class="run-env-select"
+          popper-class="environment-select-dropdown"
           filterable
         >
-          <el-option v-for="env in environments" :key="env.id" :label="env.name" :value="env.id" />
+          <el-option v-for="env in environments" :key="env.id" :label="env.name" :value="env.id">
+            <div class="env-option-row">
+              <span class="env-option-label">{{ env.name }}</span>
+              <el-tooltip content="编辑环境" placement="right">
+                <el-button
+                  class="env-option-edit-btn"
+                  type="primary"
+                  link
+                  @mousedown.stop
+                  @click.stop="editEnvironmentFromList(env)"
+                >
+                  <el-icon>
+                    <EditPen />
+                  </el-icon>
+                </el-button>
+              </el-tooltip>
+            </div>
+          </el-option>
         </el-select>
         <el-button type="success" :loading="running" :disabled="!runEnvId" @click="runScenario">
           运行场景
@@ -1014,6 +1032,99 @@
       :info="aiAnalysisInfo"
       @retry="runAIScenarioFailureAnalysis"
     />
+
+    <el-dialog v-model="envDialog" class="env-config-dialog" title="编辑环境" width="860px" align-center>
+      <el-form :model="envForm" label-width="90px">
+        <el-form-item label="名称"><el-input v-model="envForm.name" /></el-form-item>
+        <el-form-item label="Base URL"><el-input v-model="envForm.baseUrl" /></el-form-item>
+        <el-form-item class="json-form-item" label-width="0">
+          <div class="json-field">
+            <div class="json-field-label-row">
+              <div class="json-field-label">
+                <span>变量 JSON</span>
+                <el-tooltip placement="top-start" effect="dark" popper-class="json-help-tooltip">
+                  <template #content>
+                    <div v-pre class="json-help-content">
+                      <p class="json-help-lead">填写环境级键值变量。</p>
+                      <p class="json-help-caption">示例</p>
+                      <pre class="json-help-code">{
+  "token": "env-token",
+  "page": 1
+}</pre>
+                      <p class="json-help-hint">可在请求 URL、路径、请求头和查询参数中用 {{变量名}} 引用。</p>
+                      <p class="json-help-hint">无需变量时填 <code>{}</code>。</p>
+                    </div>
+                  </template>
+                  <span class="field-help-icon" aria-label="变量 JSON 填写说明">?</span>
+                </el-tooltip>
+              </div>
+            </div>
+            <el-input
+              v-model="envForm.variables"
+              class="json-editor"
+              type="textarea"
+              :autosize="{ minRows: 6, maxRows: 28 }"
+              placeholder='{"token":"env-token","page":1}'
+              @blur="formatEnvironmentVariablesJson"
+            />
+          </div>
+        </el-form-item>
+        <el-form-item class="json-form-item" label-width="0">
+          <div class="json-field">
+            <div class="json-field-label-row">
+              <div class="json-field-label">
+                <span>认证 JSON</span>
+                <el-tooltip placement="top-start" effect="dark" popper-class="json-help-tooltip">
+                  <template #content>
+                    <div v-pre class="json-help-content">
+                      <p class="json-help-lead">填写环境认证配置，可按 OpenAPI/Swagger security 选择不同参数或 token。</p>
+                      <p class="json-help-hint">无需认证时填 <code>{}</code>。单一认证示例：</p>
+                      <pre class="json-help-code">{
+  "type": "bearer",
+  "token": "{{token}}"
+}</pre>
+                      <p class="json-help-caption">多 security 示例</p>
+                      <pre class="json-help-code json-help-code--scroll">{
+  "defaultProfile": "user",
+  "profiles": {
+    "user": {
+      "type": "bearer",
+      "token": "{{userToken}}"
+    },
+    "admin": {
+      "type": "api_key",
+      "in": "query",
+      "name": "admin_token",
+      "value": "{{adminToken}}"
+    }
+  },
+  "securitySchemes": {
+    "UserAuth": "user",
+    "AdminAuth": "admin"
+  }
+}</pre>
+                    </div>
+                  </template>
+                  <span class="field-help-icon" aria-label="认证 JSON 填写说明">?</span>
+                </el-tooltip>
+              </div>
+            </div>
+            <el-input
+              v-model="envForm.auth"
+              class="json-editor"
+              type="textarea"
+              :autosize="{ minRows: 6, maxRows: 28 }"
+              placeholder='{"defaultProfile":"user","profiles":{"user":{"type":"bearer","token":"{{userToken}}"},"admin":{"type":"api_key","in":"query","name":"admin_token","value":"{{adminToken}}"}},"securitySchemes":{"UserAuth":"user","AdminAuth":"admin"}}'
+              @blur="formatEnvironmentAuthJson"
+            />
+          </div>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="envDialog = false">取消</el-button>
+        <el-button type="primary" :loading="savingEnvironment" @click="submitEnvironment">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -1036,9 +1147,11 @@ import {
   generateCaseParams,
   getDataSourceSchema,
   listScenarioSteps,
+  listServiceEnvironments,
   reorderScenarioSteps,
   runCase,
   runScenario,
+  updateServiceEnvironment,
   upsertScenarioStep
 } from '../../api'
 import { buildCurlFromRequestSnapshot } from '../../utils/curl'
@@ -1150,6 +1263,7 @@ const HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
 
 export default {
   name: 'ScenarioEditor',
+  emits: ['environments-updated'],
   components: {
     CircleCheck,
     CircleClose,
@@ -1186,6 +1300,9 @@ export default {
       steps: [],
       schemaTables: [],
       runEnvId: '',
+      envDialog: false,
+      envForm: { name: '', baseUrl: '', variables: '{}', auth: '{}' },
+      savingEnvironment: false,
       running: false,
       runningStep: false,
       savingStep: false,
@@ -1279,6 +1396,9 @@ export default {
   },
 
   computed: {
+    currentRunEnvironment() {
+      return this.environments.find((env) => String(env.id) === String(this.runEnvId)) || null
+    },
     panelSteps() {
       return [...this.steps].sort((a, b) => a.stepOrder - b.stepOrder)
     },
@@ -1628,6 +1748,86 @@ export default {
   },
 
   methods: {
+    emptyEnvironmentForm() {
+      return { name: '', baseUrl: '', variables: '{}', auth: '{}' }
+    },
+    formatEditableJSON(value) {
+      if (!value) return '{}'
+      if (typeof value === 'string') {
+        try {
+          return JSON.stringify(JSON.parse(value), null, 2)
+        } catch {
+          return value
+        }
+      }
+      return JSON.stringify(value, null, 2)
+    },
+    openEditEnvironment() {
+      if (!this.currentRunEnvironment) return
+      this.envForm = {
+        name: this.currentRunEnvironment.name,
+        baseUrl: this.currentRunEnvironment.baseUrl,
+        variables: this.formatEditableJSON(this.currentRunEnvironment.variables),
+        auth: this.formatEditableJSON(this.currentRunEnvironment.auth)
+      }
+      this.envDialog = true
+    },
+    editEnvironmentFromList(env) {
+      if (!env) return
+      this.runEnvId = env.id
+      this.openEditEnvironment()
+    },
+    formatEnvironmentVariablesJson() {
+      try {
+        const parsed = JSON.parse(this.envForm.variables || '{}')
+        this.envForm.variables = JSON.stringify(parsed, null, 2)
+      } catch (error) {
+        this.$message.error(`变量 JSON 不是合法 JSON：${error.message}`)
+      }
+    },
+    formatEnvironmentAuthJson() {
+      try {
+        const parsed = JSON.parse(this.envForm.auth || '{}')
+        this.envForm.auth = JSON.stringify(parsed, null, 2)
+      } catch (error) {
+        this.$message.error(`认证 JSON 不是合法 JSON：${error.message}`)
+      }
+    },
+    async submitEnvironment() {
+      if (!this.currentRunEnvironment || !this.projectId || !this.serviceId) return
+      let variables
+      let auth
+      try {
+        variables = JSON.parse(this.envForm.variables || '{}')
+        auth = JSON.parse(this.envForm.auth || '{}')
+      } catch (error) {
+        this.$message.error(`环境 JSON 不合法：${error.message}`)
+        return
+      }
+      this.savingEnvironment = true
+      try {
+        await updateServiceEnvironment(
+          this.projectId,
+          this.serviceId,
+          this.currentRunEnvironment.id,
+          {
+            name: this.envForm.name,
+            baseUrl: this.envForm.baseUrl,
+            variables,
+            auth
+          }
+        )
+        const selectedId = this.runEnvId
+        const envs = await listServiceEnvironments(this.projectId, this.serviceId)
+        this.runEnvId = envs.some((env) => env.id === selectedId) ? selectedId : envs[0]?.id || ''
+        this.envDialog = false
+        this.envForm = this.emptyEnvironmentForm()
+        this.$emit('environments-updated', envs)
+        this.$message.success('环境已保存')
+      } finally {
+        this.savingEnvironment = false
+      }
+    },
     tabIdForStep(stepId) {
       return stepId ? `step:${stepId}` : ''
     },
@@ -4536,6 +4736,118 @@ export default {
 .run-env-select {
   width: 200px;
   margin-right: 10px;
+}
+
+.json-form-item {
+  margin-bottom: 18px;
+}
+
+.json-form-item :deep(.el-form-item__content) {
+  margin-left: 0 !important;
+}
+
+.env-config-dialog :deep(.el-dialog__body) {
+  max-height: min(78vh, 920px);
+  overflow-y: auto;
+  padding-top: 8px;
+}
+
+.json-field {
+  width: 100%;
+}
+
+.json-field-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.json-field-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 0;
+  color: var(--el-text-color-regular);
+  font-weight: 500;
+  line-height: 1;
+}
+
+.json-editor :deep(textarea) {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: var(--app-font-size-small);
+  line-height: 1.45;
+}
+
+.field-help-icon {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--el-border-color);
+  border-radius: 50%;
+  color: var(--el-text-color-secondary);
+  cursor: help;
+  font-size: var(--app-font-size-small);
+  line-height: 1;
+}
+
+:global(.json-help-tooltip) {
+  max-width: min(520px, 92vw);
+}
+
+:global(.json-help-content) {
+  line-height: 1.55;
+  font-size: var(--app-font-size-small);
+}
+
+:global(.json-help-content p) {
+  margin: 0;
+}
+
+:global(.json-help-lead) {
+  margin-bottom: 8px !important;
+  color: rgba(255, 255, 255, 0.95);
+}
+
+:global(.json-help-caption) {
+  margin: 10px 0 6px !important;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+:global(.json-help-hint) {
+  margin-top: 8px !important;
+  color: rgba(255, 255, 255, 0.88);
+}
+
+:global(.json-help-hint code) {
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.14);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: var(--app-font-size-small);
+}
+
+:global(.json-help-code) {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.28);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: var(--app-font-size-small);
+  line-height: 1.45;
+  white-space: pre;
+  overflow-x: auto;
+  max-width: 100%;
+  color: #e8f0ff;
+}
+
+:global(.json-help-code--scroll) {
+  max-height: 220px;
+  overflow-y: auto;
 }
 
 /* Run result */

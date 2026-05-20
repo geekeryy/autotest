@@ -19,34 +19,48 @@
         令牌（与重置弹窗分离，便于先保存令牌再对照示例）。
       </p>
       <div class="example-selectors">
-        <el-select
-          v-model="exampleProjectId"
-          placeholder="选择项目"
-          filterable
-          style="flex: 1"
-          @change="onExampleProjectChange"
-        >
-          <el-option v-for="p in exampleProjects" :key="p.id" :label="p.name" :value="p.id" />
-        </el-select>
-        <el-select
-          v-model="exampleServiceId"
-          placeholder="选择服务"
-          filterable
-          style="flex: 1"
-          :disabled="!exampleProjectId"
-        >
-          <el-option v-for="s in exampleServices" :key="s.id" :label="s.name" :value="s.id" />
-        </el-select>
+        <div class="example-field">
+          <span class="example-field-label">项目</span>
+          <el-select
+            v-model="exampleProjectId"
+            placeholder="选择项目"
+            filterable
+            @change="onExampleProjectChange"
+          >
+            <el-option v-for="p in exampleProjects" :key="p.id" :label="p.name" :value="p.id" />
+          </el-select>
+        </div>
+        <div class="example-field">
+          <span class="example-field-label">服务</span>
+          <el-select
+            v-model="exampleServiceId"
+            placeholder="选择服务"
+            filterable
+            :disabled="!exampleProjectId"
+          >
+            <el-option v-for="s in exampleServices" :key="s.id" :label="s.name" :value="s.id" />
+          </el-select>
+        </div>
       </div>
-      <div class="curl-header">
-        <span class="token-tip" style="margin: 0">示例命令：</span>
-        <el-radio-group v-model="exampleFormat" size="small">
-          <el-radio-button value="json">JSON</el-radio-button>
-          <el-radio-button value="yaml">YAML</el-radio-button>
-        </el-radio-group>
-        <el-button v-if="importCurlExample" type="primary" size="small" link @click="copyImportCurl">复制命令</el-button>
+      <div class="curl-example">
+        <div class="curl-toolbar">
+          <div class="curl-toolbar-left">
+            <span class="curl-toolbar-label">文档格式</span>
+            <el-radio-group v-model="exampleFormat" size="small">
+              <el-radio-button value="json">JSON</el-radio-button>
+              <el-radio-button value="yaml">YAML</el-radio-button>
+            </el-radio-group>
+          </div>
+          <el-button size="small" :disabled="!importCurlExample" @click="copyImportCurl">
+            <el-icon v-if="importCurlExample"><CopyDocument /></el-icon>
+            复制命令
+          </el-button>
+        </div>
+        <div class="curl-block" :class="{ 'curl-block--empty': !importCurlExample }">
+          <pre v-if="importCurlExample" class="curl-code">{{ importCurlExample }}</pre>
+          <p v-else class="curl-placeholder">请先选择项目和服务，将在此生成可复制的 curl 命令</p>
+        </div>
       </div>
-      <pre class="token-curl"><code>{{ importCurlExample || '请先选择项目和服务' }}</code></pre>
     </el-card>
 
     <ListLoadError v-if="loadError" :message="loadError" @retry="load" />
@@ -156,6 +170,7 @@
 </template>
 
 <script>
+import { CopyDocument } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 import { createApiKey, deleteApiKey, listApiKeys, listProjects, listServices, rotateApiKey, updateApiKey } from '../../api'
@@ -165,7 +180,7 @@ import { getListLoadErrorMessage } from '../../utils/listPageLoad'
 
 export default {
   name: 'ApiKeyList',
-  components: { ListLoadError },
+  components: { CopyDocument, ListLoadError },
   data() {
     return {
       loading: false,
@@ -331,26 +346,7 @@ export default {
       await this.load()
     },
     async copyToken() {
-      const text = this.createdToken
-      if (!text) {
-        return
-      }
-      // 优先走 Clipboard API；非安全上下文（非 HTTPS 且非 localhost）或权限被拒时
-      // 回退到临时 textarea + execCommand('copy')，最大限度兼容内网部署
-      try {
-        if (navigator.clipboard && window.isSecureContext) {
-          await navigator.clipboard.writeText(text)
-          ElMessage.success('已复制到剪贴板')
-          return
-        }
-      } catch {
-        // 落入下面的兜底
-      }
-      if (this.legacyCopy(text)) {
-        ElMessage.success('已复制到剪贴板')
-      } else {
-        ElMessage.error('复制失败，请手动选中复制')
-      }
+      await this.copyToClipboard(this.createdToken)
     },
     legacyCopy(text) {
       try {
@@ -399,8 +395,14 @@ export default {
       await this.loadExampleServices(projectId)
     },
     async copyImportCurl() {
-      const text = this.importCurlExample
-      if (!text) return
+      await this.copyToClipboard(this.importCurlExample)
+    },
+    async copyToClipboard(text) {
+      if (!text) {
+        return
+      }
+      // 优先走 Clipboard API；非安全上下文（非 HTTPS 且非 localhost）或权限被拒时
+      // 回退到临时 textarea + execCommand('copy')，最大限度兼容内网部署
       try {
         if (navigator.clipboard && window.isSecureContext) {
           await navigator.clipboard.writeText(text)
@@ -408,7 +410,7 @@ export default {
           return
         }
       } catch {
-        // 落入兜底
+        // 落入下面的兜底
       }
       if (this.legacyCopy(text)) {
         ElMessage.success('已复制到剪贴板')
@@ -514,29 +516,88 @@ export default {
   font-size: var(--app-font-size-small);
 }
 
-.token-curl {
-  margin: 0;
-  padding: 10px 12px;
-  background: var(--el-fill-color-light);
-  border-radius: 4px;
-  font-size: 12px;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  word-break: break-all;
-}
-
 .example-selectors {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 12px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
 }
 
-.curl-header {
+.example-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.example-field-label {
+  color: var(--app-secondary-text);
+  font-size: var(--app-font-size-small);
+}
+
+.example-field .el-select {
+  width: 100%;
+}
+
+.curl-example {
+  margin-top: 4px;
+}
+
+.curl-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 6px;
+  gap: 12px;
+  margin-bottom: 8px;
   flex-wrap: wrap;
-  gap: 8px;
+}
+
+.curl-toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.curl-toolbar-label {
+  color: var(--app-secondary-text);
+  font-size: var(--app-font-size-small);
+}
+
+.curl-block {
+  border: 1px solid var(--app-border-color);
+  border-radius: 8px;
+  background: var(--app-code-bg, var(--el-fill-color-light));
+  overflow: auto;
+}
+
+.curl-block--empty {
+  min-height: 88px;
+  display: flex;
+  align-items: center;
+  padding: 12px 14px;
+}
+
+.curl-code {
+  margin: 0;
+  padding: 12px 14px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  font-size: var(--app-font-size-small);
+  line-height: 1.6;
+  color: var(--el-text-color-primary);
+  white-space: pre;
+}
+
+.curl-placeholder {
+  margin: 0;
+  color: var(--el-text-color-placeholder);
+  font-size: var(--app-font-size-small);
+  line-height: 1.5;
+}
+
+@media (max-width: 720px) {
+  .example-selectors {
+    grid-template-columns: 1fr;
+  }
 }
 </style>
