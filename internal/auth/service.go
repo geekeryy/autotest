@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"errors"
+	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -20,10 +21,12 @@ type APIKeyAuthenticator interface {
 }
 
 type Service struct {
-	repo   *Repository
-	secret []byte
-	ttl    time.Duration
-	apiKey APIKeyAuthenticator
+	repo                repositoryBackend
+	secret              []byte
+	ttl                 time.Duration
+	apiKey              APIKeyAuthenticator
+	httpClient          *http.Client
+	pendingUserNotifier PendingUserNotifier
 }
 
 func NewService(repo *Repository) *Service {
@@ -64,6 +67,9 @@ func (s *Service) Login(ctx context.Context, input LoginInput) (*LoginResponse, 
 	if !user.Active {
 		return nil, ErrUnauthorized
 	}
+	if user.PasswordHash == "" {
+		return nil, ErrUnauthorized
+	}
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(input.Password)); err != nil {
 		return nil, ErrUnauthorized
 	}
@@ -96,9 +102,6 @@ func (s *Service) ValidateToken(ctx context.Context, token string) (*Principal, 
 	if err != nil {
 		return nil, err
 	}
-	if !user.Active {
-		return nil, errors.New("user disabled")
-	}
 
 	permissions := make(map[string]struct{}, len(user.Permissions))
 	for _, permission := range user.Permissions {
@@ -107,6 +110,7 @@ func (s *Service) ValidateToken(ctx context.Context, token string) (*Principal, 
 	return &Principal{
 		UserID:      user.ID,
 		Username:    user.Username,
+		Active:      user.Active,
 		Permissions: permissions,
 		Source:      SourceJWT,
 	}, nil

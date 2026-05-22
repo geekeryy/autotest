@@ -18,11 +18,11 @@ const (
 )
 
 // ListModels loads model ids from the upstream provider for a saved configuration.
-func (s *Service) ListModels(ctx context.Context, projectID, providerID uuid.UUID) (*ListModelsResult, error) {
-	if projectID == uuid.Nil || providerID == uuid.Nil {
-		return nil, errors.New("projectId and providerId are required")
+func (s *Service) ListModels(ctx context.Context, providerID uuid.UUID) (*ListModelsResult, error) {
+	if providerID == uuid.Nil {
+		return nil, errors.New("providerId is required")
 	}
-	row, err := s.repo.Get(ctx, projectID, providerID)
+	row, err := s.repo.Get(ctx, providerID)
 	if err != nil {
 		return nil, err
 	}
@@ -31,10 +31,7 @@ func (s *Service) ListModels(ctx context.Context, projectID, providerID uuid.UUI
 
 // DiscoverModels lists models using transient credentials (create form) or merges
 // a stored API key when providerId is set and apiKey is empty (edit form).
-func (s *Service) DiscoverModels(ctx context.Context, projectID uuid.UUID, input DiscoverModelsInput) (*ListModelsResult, error) {
-	if projectID == uuid.Nil {
-		return nil, errors.New("projectId is required")
-	}
+func (s *Service) DiscoverModels(ctx context.Context, input DiscoverModelsInput) (*ListModelsResult, error) {
 	input.ProviderType = strings.ToLower(strings.TrimSpace(input.ProviderType))
 	input.BaseURL = strings.TrimSpace(input.BaseURL)
 	input.APIKey = strings.TrimSpace(input.APIKey)
@@ -49,7 +46,7 @@ func (s *Service) DiscoverModels(ctx context.Context, projectID uuid.UUID, input
 	apiKey := input.APIKey
 	var extra []byte
 	if input.ProviderID != nil && *input.ProviderID != uuid.Nil {
-		row, err := s.repo.Get(ctx, projectID, *input.ProviderID)
+		row, err := s.repo.Get(ctx, *input.ProviderID)
 		if err != nil {
 			return nil, err
 		}

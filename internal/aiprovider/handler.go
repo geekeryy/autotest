@@ -8,6 +8,7 @@ import (
 
 	"autotest/internal/aiprovider/client"
 	"autotest/internal/aitools"
+	"autotest/internal/auth"
 	"autotest/internal/httpx"
 	"autotest/internal/project"
 	"autotest/internal/projectprompt"
@@ -18,7 +19,7 @@ import (
 
 // promptService is a minimal interface to decouple the aiprovider handler from the projectprompt package.
 type promptService interface {
-	GetByAction(ctx context.Context, projectID uuid.UUID, action string) (*projectprompt.ProjectPrompt, error)
+	GetByAction(ctx context.Context, action string) (*projectprompt.ProjectPrompt, error)
 }
 
 // Handler exposes the AI provider management API and the AI chat invocation endpoint.
@@ -26,6 +27,7 @@ type Handler struct {
 	service        *Service
 	projectHandler *project.Handler
 	promptSvc      promptService
+	authSvc        *auth.Service
 	// Conversational assistant plumbing. Both fields are optional — when
 	// nil the streaming routes refuse with 503.
 	sessionStore   SessionStore
@@ -33,23 +35,22 @@ type Handler struct {
 }
 
 // NewHandler constructs a Handler.
-func NewHandler(service *Service, projectHandler *project.Handler, promptSvc promptService) *Handler {
-	return &Handler{service: service, projectHandler: projectHandler, promptSvc: promptSvc}
+func NewHandler(service *Service, projectHandler *project.Handler, promptSvc promptService, authSvc *auth.Service) *Handler {
+	return &Handler{service: service, projectHandler: projectHandler, promptSvc: promptSvc, authSvc: authSvc}
 }
 
-// Register mounts the routes under /projects/{projectID}/...
+// Register mounts platform AI provider routes and project-scoped chat routes.
 func (h *Handler) Register(r chi.Router) {
 	r.Get("/ai-provider-types", h.listTypes)
 
-	r.Route("/projects/{projectID}/ai-providers", func(r chi.Router) {
-		r.Use(h.projectHandler.RequireProjectRole(project.ProjectRoleViewer))
-
+	r.Route("/ai-providers", func(r chi.Router) {
+		r.Use(h.authSvc.RequirePermission(auth.PermissionProjectsRead))
 		r.Get("/", h.list)
 		r.Get("/{providerID}/models", h.listModels)
-		r.Post("/models/discover", h.discoverModels)
 
 		r.Group(func(r chi.Router) {
-			r.Use(requireProjectRole(project.ProjectRoleDeveloper))
+			r.Use(h.authSvc.RequirePermission(auth.PermissionProjectsWrite))
+			r.Post("/models/discover", h.discoverModels)
 			r.Post("/", h.create)
 			r.Put("/{providerID}", h.update)
 			r.Delete("/{providerID}", h.delete)
@@ -70,11 +71,7 @@ func (h *Handler) listTypes(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
-	projectID, ok := parseProjectID(w, r)
-	if !ok {
-		return
-	}
-	items, err := h.service.List(r.Context(), projectID)
+	items, err := h.service.List(r.Context())
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, err)
 		return
@@ -83,16 +80,12 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
-	projectID, ok := parseProjectID(w, r)
-	if !ok {
-		return
-	}
 	var input CreateInput
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		httpx.Error(w, http.StatusBadRequest, err)
 		return
 	}
-	created, err := h.service.Create(r.Context(), projectID, input)
+	created, err := h.service.Create(r.Context(), input)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -101,7 +94,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
-	projectID, providerID, ok := parseProviderIDs(w, r)
+	providerID, ok := parseProviderID(w, r)
 	if !ok {
 		return
 	}
@@ -110,7 +103,7 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, err)
 		return
 	}
-	updated, err := h.service.Update(r.Context(), projectID, providerID, input)
+	updated, err := h.service.Update(r.Context(), providerID, input)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -119,11 +112,11 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
-	projectID, providerID, ok := parseProviderIDs(w, r)
+	providerID, ok := parseProviderID(w, r)
 	if !ok {
 		return
 	}
-	if err := h.service.Delete(r.Context(), projectID, providerID); err != nil {
+	if err := h.service.Delete(r.Context(), providerID); err != nil {
 		writeServiceError(w, err)
 		return
 	}
@@ -131,11 +124,11 @@ func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) listModels(w http.ResponseWriter, r *http.Request) {
-	projectID, providerID, ok := parseProviderIDs(w, r)
+	providerID, ok := parseProviderID(w, r)
 	if !ok {
 		return
 	}
-	result, err := h.service.ListModels(r.Context(), projectID, providerID)
+	result, err := h.service.ListModels(r.Context(), providerID)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -144,16 +137,12 @@ func (h *Handler) listModels(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) discoverModels(w http.ResponseWriter, r *http.Request) {
-	projectID, ok := parseProjectID(w, r)
-	if !ok {
-		return
-	}
 	var input DiscoverModelsInput
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		httpx.Error(w, http.StatusBadRequest, err)
 		return
 	}
-	result, err := h.service.DiscoverModels(r.Context(), projectID, input)
+	result, err := h.service.DiscoverModels(r.Context(), input)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -162,11 +151,11 @@ func (h *Handler) discoverModels(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) test(w http.ResponseWriter, r *http.Request) {
-	projectID, providerID, ok := parseProviderIDs(w, r)
+	providerID, ok := parseProviderID(w, r)
 	if !ok {
 		return
 	}
-	resp, err := h.service.TestConnection(r.Context(), projectID, providerID)
+	resp, err := h.service.TestConnection(r.Context(), providerID)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -185,7 +174,7 @@ func (h *Handler) chat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.promptSvc != nil {
-		if cfg, err := h.promptSvc.GetByAction(r.Context(), projectID, req.Action); err == nil && cfg != nil {
+		if cfg, err := h.promptSvc.GetByAction(r.Context(), req.Action); err == nil && cfg != nil {
 			if cfg.Enabled && cfg.SystemPrompt != "" {
 				req.SystemPromptOverride = cfg.SystemPrompt
 			}
@@ -199,19 +188,6 @@ func (h *Handler) chat(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, resp)
 }
 
-func requireProjectRole(minRole project.ProjectRole) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			role, ok := project.ProjectRoleFromContext(r.Context())
-			if !ok || !project.ProjectRoleAtLeast(role, minRole) {
-				httpx.Error(w, http.StatusForbidden, errors.New("insufficient project role"))
-				return
-			}
-			next.ServeHTTP(w, r)
-		})
-	}
-}
-
 func parseProjectID(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
 	projectID, err := uuid.Parse(chi.URLParam(r, "projectID"))
 	if err != nil {
@@ -221,17 +197,13 @@ func parseProjectID(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
 	return projectID, true
 }
 
-func parseProviderIDs(w http.ResponseWriter, r *http.Request) (uuid.UUID, uuid.UUID, bool) {
-	projectID, ok := parseProjectID(w, r)
-	if !ok {
-		return uuid.Nil, uuid.Nil, false
-	}
+func parseProviderID(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
 	providerID, err := uuid.Parse(chi.URLParam(r, "providerID"))
 	if err != nil {
 		httpx.Error(w, http.StatusBadRequest, err)
-		return uuid.Nil, uuid.Nil, false
+		return uuid.Nil, false
 	}
-	return projectID, providerID, true
+	return providerID, true
 }
 
 func writeServiceError(w http.ResponseWriter, err error) {

@@ -130,6 +130,40 @@ func (s *Service) CreateSpecImportNotification(
 	})
 }
 
+// CreateUserPendingNotifications 在 GitHub 首次登录创建待审核用户后通知管理员。
+func (s *Service) CreateUserPendingNotifications(ctx context.Context, adminIDs []uuid.UUID, userID uuid.UUID, username, displayName, email string) error {
+	if userID == uuid.Nil || len(adminIDs) == 0 {
+		return nil
+	}
+
+	body := fmt.Sprintf(
+		"GitHub 用户「%s」（%s，%s）已注册，待审核启用并分配角色。",
+		displayName, username, email,
+	)
+	payload, err := json.Marshal(UserPendingPayload{
+		UserID:      userID,
+		Username:    username,
+		DisplayName: displayName,
+		Email:       email,
+	})
+	if err != nil {
+		return fmt.Errorf("marshal user pending payload: %w", err)
+	}
+
+	for _, adminID := range adminIDs {
+		if err := s.createAndPublish(ctx, createInput{
+			UserID:  adminID,
+			Type:    TypeUserPending,
+			Title:   userPendingTitle,
+			Body:    body,
+			Payload: payload,
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *Service) createAndPublish(ctx context.Context, input createInput) error {
 	n, err := s.repo.Create(ctx, input)
 	if err != nil {

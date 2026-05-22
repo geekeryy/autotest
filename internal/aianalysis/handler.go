@@ -51,13 +51,13 @@ import (
 type AIChatService interface {
 	Chat(ctx context.Context, projectID uuid.UUID, req aiprovider.ChatRequest) (*aiprovider.ChatResponse, error)
 	ChatWithTools(ctx context.Context, projectID uuid.UUID, req aiprovider.ChatRequest, tools []aitools.Tool) (*aiprovider.ChatResponse, error)
-	List(ctx context.Context, projectID uuid.UUID) ([]aiprovider.Provider, error)
+	List(ctx context.Context) ([]aiprovider.Provider, error)
 }
 
 // PromptService matches `internal/projectprompt.Service` for the GetByAction
-// lookup used to resolve project-level overrides.
+// lookup used to resolve platform-level overrides.
 type PromptService interface {
-	GetByAction(ctx context.Context, projectID uuid.UUID, action string) (*projectprompt.ProjectPrompt, error)
+	GetByAction(ctx context.Context, action string) (*projectprompt.ProjectPrompt, error)
 }
 
 // ReportService is the slice of `internal/report.Repository` needed by the
@@ -584,7 +584,7 @@ func parseSpecRouteIDs(w http.ResponseWriter, r *http.Request) (uuid.UUID, uuid.
 func resolveAIConfig(ctx context.Context, prompts PromptService, ai AIChatService, projectID uuid.UUID, action string) (uuid.UUID, string, string, error) {
 	var cfg *projectprompt.ProjectPrompt
 	if prompts != nil {
-		got, err := prompts.GetByAction(ctx, projectID, action)
+		got, err := prompts.GetByAction(ctx, action)
 		if err == nil && got != nil {
 			cfg = got
 		}
@@ -604,25 +604,25 @@ func resolveAIConfig(ctx context.Context, prompts PromptService, ai AIChatServic
 	}
 
 	if providerID == uuid.Nil {
-		fallback, err := lookupDefaultProvider(ctx, ai, projectID)
+		fallback, err := lookupDefaultProvider(ctx, ai)
 		if err != nil {
 			return uuid.Nil, "", "", err
 		}
 		providerID = fallback
 	}
 	if providerID == uuid.Nil {
-		return uuid.Nil, "", "", fmt.Errorf("请先在「项目管理 / Prompt 管理」或 AI 提供商中配置 %s 的提供商", action)
+		return uuid.Nil, "", "", fmt.Errorf("请先在「平台资源 / Prompt 管理」或 AI 提供商中配置 %s 的提供商", action)
 	}
 	return providerID, model, systemPrompt, nil
 }
 
-func lookupDefaultProvider(ctx context.Context, ai AIChatService, projectID uuid.UUID) (uuid.UUID, error) {
+func lookupDefaultProvider(ctx context.Context, ai AIChatService) (uuid.UUID, error) {
 	if ai == nil {
 		return uuid.Nil, errors.New("AI provider 服务不可用")
 	}
-	providers, err := ai.List(ctx, projectID)
+	providers, err := ai.List(ctx)
 	if err != nil {
-		return uuid.Nil, fmt.Errorf("查询项目默认 AI 提供商失败: %w", err)
+		return uuid.Nil, fmt.Errorf("查询平台默认 AI 提供商失败: %w", err)
 	}
 	var firstEnabled uuid.UUID
 	for _, p := range providers {

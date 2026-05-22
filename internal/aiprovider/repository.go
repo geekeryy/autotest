@@ -11,7 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Repository persists AI provider configurations per project.
+// Repository persists platform-wide AI provider configurations.
 type Repository struct {
 	store.Repository
 }
@@ -21,8 +21,8 @@ func NewRepository(repo store.Repository) *Repository {
 	return &Repository{Repository: repo}
 }
 
-// Create inserts a new provider record. When IsDefault is true, all other defaults in the project are cleared first.
-func (r *Repository) Create(ctx context.Context, projectID uuid.UUID, input CreateInput) (*providerRow, error) {
+// Create inserts a new provider record. When IsDefault is true, all other defaults are cleared first.
+func (r *Repository) Create(ctx context.Context, input CreateInput) (*providerRow, error) {
 	if r.DB == nil {
 		return nil, fmt.Errorf("database unavailable")
 	}
@@ -36,8 +36,8 @@ func (r *Repository) Create(ctx context.Context, projectID uuid.UUID, input Crea
 		if _, err := tx.Exec(ctx, `
 			update ai_providers
 			set is_default = false, updated_at = now()
-			where project_id = $1 and is_default = true and deleted_at is null
-		`, projectID); err != nil {
+			where is_default = true and deleted_at is null
+		`); err != nil {
 			return nil, fmt.Errorf("clear previous default ai provider: %w", err)
 		}
 	}
@@ -53,22 +53,17 @@ func (r *Repository) Create(ctx context.Context, projectID uuid.UUID, input Crea
 
 	row := tx.QueryRow(ctx, `
 		insert into ai_providers (
-			project_id, name, provider_type, base_url, api_key, default_model,
+			name, provider_type, base_url, api_key, default_model,
 			extra_config, enabled, is_default
 		)
-		select p.id, $2, $3, $4, $5, $6, $7::jsonb, $8, $9
-		from projects p
-		where p.id = $1 and p.deleted_at is null
-		returning id, project_id, name, provider_type, base_url, api_key, default_model,
+		values ($1, $2, $3, $4, $5, $6::jsonb, $7, $8)
+		returning id, name, provider_type, base_url, api_key, default_model,
 		          extra_config, enabled, is_default, created_at, updated_at
-	`, projectID, input.Name, input.ProviderType, input.BaseURL, input.APIKey, input.DefaultModel,
+	`, input.Name, input.ProviderType, input.BaseURL, input.APIKey, input.DefaultModel,
 		extra, enabled, input.IsDefault)
 
 	out, err := scanProvider(row)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, errors.New("project not found or inaccessible")
-		}
 		return nil, err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -78,7 +73,7 @@ func (r *Repository) Create(ctx context.Context, projectID uuid.UUID, input Crea
 }
 
 // Update mutates an existing provider record. If apiKey is nil the previous key is preserved.
-func (r *Repository) Update(ctx context.Context, projectID, providerID uuid.UUID, input UpdateInput) (*providerRow, error) {
+func (r *Repository) Update(ctx context.Context, providerID uuid.UUID, input UpdateInput) (*providerRow, error) {
 	if r.DB == nil {
 		return nil, fmt.Errorf("database unavailable")
 	}
@@ -92,8 +87,8 @@ func (r *Repository) Update(ctx context.Context, projectID, providerID uuid.UUID
 		if _, err := tx.Exec(ctx, `
 			update ai_providers
 			set is_default = false, updated_at = now()
-			where project_id = $1 and is_default = true and id <> $2 and deleted_at is null
-		`, projectID, providerID); err != nil {
+			where is_default = true and id <> $1 and deleted_at is null
+		`, providerID); err != nil {
 			return nil, fmt.Errorf("clear previous default ai provider: %w", err)
 		}
 	}
@@ -115,25 +110,21 @@ func (r *Repository) Update(ctx context.Context, projectID, providerID uuid.UUID
 
 	row := tx.QueryRow(ctx, `
 		update ai_providers ap
-		set name = $3,
-		    provider_type = $4,
-		    base_url = $5,
-		    api_key = case when $11::boolean then ap.api_key else coalesce($6::text, '') end,
-		    default_model = $7,
-		    extra_config = $8::jsonb,
-		    enabled = $9,
-		    is_default = $10,
+		set name = $2,
+		    provider_type = $3,
+		    base_url = $4,
+		    api_key = case when $10::boolean then ap.api_key else coalesce($5::text, '') end,
+		    default_model = $6,
+		    extra_config = $7::jsonb,
+		    enabled = $8,
+		    is_default = $9,
 		    updated_at = now()
-		from projects p
-		where ap.project_id = $1
-		  and ap.id = $2
-		  and p.id = ap.project_id
-		  and p.deleted_at is null
+		where ap.id = $1
 		  and ap.deleted_at is null
-		returning ap.id, ap.project_id, ap.name, ap.provider_type, ap.base_url, ap.api_key,
+		returning ap.id, ap.name, ap.provider_type, ap.base_url, ap.api_key,
 		          ap.default_model, ap.extra_config, ap.enabled, ap.is_default,
 		          ap.created_at, ap.updated_at
-	`, projectID, providerID, input.Name, input.ProviderType, input.BaseURL, apiKeyArg,
+	`, providerID, input.Name, input.ProviderType, input.BaseURL, apiKeyArg,
 		input.DefaultModel, extra, enabled, input.IsDefault, keepAPIKey)
 
 	out, err := scanProvider(row)
@@ -150,15 +141,15 @@ func (r *Repository) Update(ctx context.Context, projectID, providerID uuid.UUID
 }
 
 // Delete soft-deletes a provider record.
-func (r *Repository) Delete(ctx context.Context, projectID, providerID uuid.UUID) error {
+func (r *Repository) Delete(ctx context.Context, providerID uuid.UUID) error {
 	if r.DB == nil {
 		return fmt.Errorf("database unavailable")
 	}
 	tag, err := r.DB.Exec(ctx, `
 		update ai_providers
 		set deleted_at = now(), is_default = false, updated_at = now()
-		where project_id = $1 and id = $2 and deleted_at is null
-	`, projectID, providerID)
+		where id = $1 and deleted_at is null
+	`, providerID)
 	if err != nil {
 		return fmt.Errorf("delete ai provider: %w", err)
 	}
@@ -169,18 +160,17 @@ func (r *Repository) Delete(ctx context.Context, projectID, providerID uuid.UUID
 }
 
 // Get fetches a provider record (including its plaintext key for client construction).
-func (r *Repository) Get(ctx context.Context, projectID, providerID uuid.UUID) (*providerRow, error) {
+func (r *Repository) Get(ctx context.Context, providerID uuid.UUID) (*providerRow, error) {
 	if r.DB == nil {
 		return nil, fmt.Errorf("database unavailable")
 	}
 	row := r.DB.QueryRow(ctx, `
-		select ap.id, ap.project_id, ap.name, ap.provider_type, ap.base_url, ap.api_key,
+		select ap.id, ap.name, ap.provider_type, ap.base_url, ap.api_key,
 		       ap.default_model, ap.extra_config, ap.enabled, ap.is_default,
 		       ap.created_at, ap.updated_at
 		from ai_providers ap
-		join projects p on p.id = ap.project_id and p.deleted_at is null
-		where ap.project_id = $1 and ap.id = $2 and ap.deleted_at is null
-	`, projectID, providerID)
+		where ap.id = $1 and ap.deleted_at is null
+	`, providerID)
 	out, err := scanProvider(row)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -191,23 +181,21 @@ func (r *Repository) Get(ctx context.Context, projectID, providerID uuid.UUID) (
 	return out, nil
 }
 
-// GetDefaultProvider returns the provider flagged as is_default for the
-// project. When no provider is explicitly defaulted we fall back to the
-// oldest enabled provider so single-provider installs work out of the box.
-func (r *Repository) GetDefaultProvider(ctx context.Context, projectID uuid.UUID) (*providerRow, error) {
+// GetDefaultProvider returns the provider flagged as is_default. When none is
+// explicitly defaulted we fall back to the oldest enabled provider.
+func (r *Repository) GetDefaultProvider(ctx context.Context) (*providerRow, error) {
 	if r.DB == nil {
 		return nil, fmt.Errorf("database unavailable")
 	}
 	row := r.DB.QueryRow(ctx, `
-		select ap.id, ap.project_id, ap.name, ap.provider_type, ap.base_url, ap.api_key,
+		select ap.id, ap.name, ap.provider_type, ap.base_url, ap.api_key,
 		       ap.default_model, ap.extra_config, ap.enabled, ap.is_default,
 		       ap.created_at, ap.updated_at
 		from ai_providers ap
-		join projects p on p.id = ap.project_id and p.deleted_at is null
-		where ap.project_id = $1 and ap.deleted_at is null and ap.enabled = true
+		where ap.deleted_at is null and ap.enabled = true
 		order by ap.is_default desc, ap.created_at asc
 		limit 1
-	`, projectID)
+	`)
 	out, err := scanProvider(row)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -218,20 +206,19 @@ func (r *Repository) GetDefaultProvider(ctx context.Context, projectID uuid.UUID
 	return out, nil
 }
 
-// ListByProject returns all active providers for a project.
-func (r *Repository) ListByProject(ctx context.Context, projectID uuid.UUID) ([]providerRow, error) {
+// List returns all active platform providers.
+func (r *Repository) List(ctx context.Context) ([]providerRow, error) {
 	if r.DB == nil {
 		return nil, fmt.Errorf("database unavailable")
 	}
 	rows, err := r.DB.Query(ctx, `
-		select ap.id, ap.project_id, ap.name, ap.provider_type, ap.base_url, ap.api_key,
+		select ap.id, ap.name, ap.provider_type, ap.base_url, ap.api_key,
 		       ap.default_model, ap.extra_config, ap.enabled, ap.is_default,
 		       ap.created_at, ap.updated_at
 		from ai_providers ap
-		join projects p on p.id = ap.project_id and p.deleted_at is null
-		where ap.project_id = $1 and ap.deleted_at is null
+		where ap.deleted_at is null
 		order by ap.is_default desc, ap.created_at asc
-	`, projectID)
+	`)
 	if err != nil {
 		return nil, fmt.Errorf("list ai providers: %w", err)
 	}
@@ -261,7 +248,7 @@ type rowScanner interface {
 func scanProvider(row rowScanner) (*providerRow, error) {
 	var p providerRow
 	if err := row.Scan(
-		&p.ID, &p.ProjectID, &p.Name, &p.ProviderType, &p.BaseURL, &p.APIKey,
+		&p.ID, &p.Name, &p.ProviderType, &p.BaseURL, &p.APIKey,
 		&p.DefaultModel, &p.ExtraConfig, &p.Enabled, &p.IsDefault,
 		&p.CreatedAt, &p.UpdatedAt,
 	); err != nil {

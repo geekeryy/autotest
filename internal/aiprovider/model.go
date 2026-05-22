@@ -46,7 +46,6 @@ const (
 // API keys are returned in masked form only; the plaintext never leaves the server.
 type Provider struct {
 	ID            uuid.UUID       `json:"id"`
-	ProjectID     uuid.UUID       `json:"projectId"`
 	Name          string          `json:"name"`
 	ProviderType  string          `json:"providerType"`
 	BaseURL       string          `json:"baseUrl"`
@@ -61,7 +60,7 @@ type Provider struct {
 	UpdatedAt     time.Time       `json:"updatedAt"`
 }
 
-// CreateInput is the payload for POST /projects/{projectID}/ai-providers.
+// CreateInput is the payload for POST /ai-providers.
 type CreateInput struct {
 	Name         string          `json:"name"`
 	ProviderType string          `json:"providerType"`
@@ -74,7 +73,7 @@ type CreateInput struct {
 	IsDefault      bool                     `json:"isDefault"`
 }
 
-// UpdateInput is the payload for PUT /projects/{projectID}/ai-providers/{providerID}.
+// UpdateInput is the payload for PUT /ai-providers/{providerID}.
 // APIKey is optional: empty string means "keep previous"; sentinel "__clear__" wipes it.
 type UpdateInput struct {
 	Name         string          `json:"name"`
@@ -142,7 +141,6 @@ type DiscoverModelsInput struct {
 // providerRow is the internal struct used while scanning rows; it carries the plaintext key.
 type providerRow struct {
 	ID           uuid.UUID
-	ProjectID    uuid.UUID
 	Name         string
 	ProviderType string
 	BaseURL      string
@@ -158,7 +156,6 @@ type providerRow struct {
 func (p providerRow) toAPI() *Provider {
 	out := &Provider{
 		ID:            p.ID,
-		ProjectID:     p.ProjectID,
 		Name:          p.Name,
 		ProviderType:  p.ProviderType,
 		BaseURL:       p.BaseURL,

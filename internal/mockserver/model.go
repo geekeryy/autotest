@@ -26,6 +26,11 @@ const (
 	ResponseBodyTypeText = "text"
 	// ResponseBodyTypeRaw marks a response body as raw bytes.
 	ResponseBodyTypeRaw = "raw"
+
+	// ResponseModeBody returns a normal response with an optional body.
+	ResponseModeBody = "body"
+	// ResponseModeRedirect issues an HTTP redirect (Location header).
+	ResponseModeRedirect = "redirect"
 )
 
 // MockServer stores a project-owned mock HTTP server configuration.
@@ -59,11 +64,13 @@ type MockRoute struct {
 	Priority         int             `json:"priority"`
 	Enabled          bool            `json:"enabled"`
 	RequestMatch     json.RawMessage `json:"requestMatch,omitempty"`
-	ResponseStatus   int             `json:"responseStatus"`
-	ResponseHeaders  json.RawMessage `json:"responseHeaders,omitempty"`
-	ResponseBody     string          `json:"responseBody"`
-	ResponseBodyType string          `json:"responseBodyType"`
-	DelayMillis      int             `json:"delayMillis"`
+	ResponseMode      string          `json:"responseMode"`
+	ResponseStatus    int             `json:"responseStatus"`
+	ResponseHeaders   json.RawMessage `json:"responseHeaders,omitempty"`
+	RedirectLocation  string          `json:"redirectLocation,omitempty"`
+	ResponseBody      string          `json:"responseBody"`
+	ResponseBodyType  string          `json:"responseBodyType"`
+	DelayMillis       int             `json:"delayMillis"`
 	CreatedAt        time.Time       `json:"createdAt"`
 	UpdatedAt        time.Time       `json:"updatedAt"`
 }
@@ -75,11 +82,13 @@ type MockRouteInput struct {
 	Priority         int             `json:"priority"`
 	Enabled          *bool           `json:"enabled"`
 	RequestMatch     json.RawMessage `json:"requestMatch"`
-	ResponseStatus   int             `json:"responseStatus"`
-	ResponseHeaders  json.RawMessage `json:"responseHeaders"`
-	ResponseBody     string          `json:"responseBody"`
-	ResponseBodyType string          `json:"responseBodyType"`
-	DelayMillis      int             `json:"delayMillis"`
+	ResponseMode      string          `json:"responseMode"`
+	ResponseStatus    int             `json:"responseStatus"`
+	ResponseHeaders   json.RawMessage `json:"responseHeaders"`
+	RedirectLocation  string          `json:"redirectLocation"`
+	ResponseBody      string          `json:"responseBody"`
+	ResponseBodyType  string          `json:"responseBodyType"`
+	DelayMillis       int             `json:"delayMillis"`
 }
 
 // RequestMatch describes supported request matching conditions.
@@ -103,4 +112,49 @@ type ServerStatus struct {
 type ServerWithStatus struct {
 	MockServer
 	Status ServerStatus `json:"status"`
+}
+
+const maxAccessLogBodyBytes = 4096
+
+// MockAccessLog stores one HTTP access record for a mock server runtime request.
+type MockAccessLog struct {
+	ID              uuid.UUID       `json:"id"`
+	ProjectID       uuid.UUID       `json:"projectId"`
+	MockServerID    uuid.UUID       `json:"mockServerId"`
+	MockRouteID     *uuid.UUID      `json:"mockRouteId,omitempty"`
+	RouteMethod     string          `json:"routeMethod,omitempty"`
+	RoutePath       string          `json:"routePath,omitempty"`
+	Method          string          `json:"method"`
+	Path            string          `json:"path"`
+	Query           string          `json:"query,omitempty"`
+	ClientIP        string          `json:"clientIp,omitempty"`
+	Matched         bool            `json:"matched"`
+	ResponseStatus  int             `json:"responseStatus"`
+	DurationMs      int             `json:"durationMs"`
+	ErrorMessage    string          `json:"errorMessage,omitempty"`
+	RequestHeaders  json.RawMessage `json:"requestHeaders,omitempty"`
+	RequestBody     string          `json:"requestBody,omitempty"`
+	ResponseHeaders json.RawMessage `json:"responseHeaders,omitempty"`
+	ResponseBody    string          `json:"responseBody,omitempty"`
+	CreatedAt       time.Time       `json:"createdAt"`
+}
+
+// ListAccessLogsFilter filters paginated mock access logs for one server.
+type ListAccessLogsFilter struct {
+	StatusFrom *int
+	StatusTo   *int
+	Matched    *bool
+	RouteID    *uuid.UUID
+	From       *time.Time
+	To         *time.Time
+	Limit      int
+	Offset     int
+}
+
+// ListAccessLogsPage is a paginated list of mock access logs.
+type ListAccessLogsPage struct {
+	Items  []MockAccessLog `json:"items"`
+	Total  int             `json:"total"`
+	Limit  int             `json:"limit"`
+	Offset int             `json:"offset"`
 }

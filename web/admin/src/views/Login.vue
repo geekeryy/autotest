@@ -15,15 +15,30 @@
         </el-form-item>
         <el-button type="primary" :loading="loading" class="submit" @click="submit">登录</el-button>
       </el-form>
+      <template v-if="githubOAuthConfigured">
+        <div class="oauth-divider">或</div>
+        <el-button class="github-btn" :loading="githubLoading" @click="loginWithGitHub">
+          使用 GitHub 登录
+        </el-button>
+      </template>
     </el-card>
   </div>
 </template>
 
 <script>
-import { login } from '../api'
+import { getGitHubOAuthStatus, login } from '../api'
 import { setToken } from '../utils/storage'
-import { loadCurrentUser } from '../auth'
+import { loadCurrentUser, authState } from '../auth'
 import BrandLogo from '../components/BrandLogo.vue'
+
+const OAUTH_ERROR_MESSAGES = {
+  oauth_disabled: 'GitHub 登录尚未配置',
+  invalid_state: '登录已过期或无效，请重新尝试',
+  missing_code: '未收到授权码，请重试',
+  exchange_failed: 'GitHub 授权失败，请稍后重试',
+  profile_failed: '无法获取 GitHub 用户信息，请重试',
+  oauth_failed: 'GitHub 登录失败，请重试',
+}
 
 export default {
   name: 'Login',
@@ -33,6 +48,8 @@ export default {
   data() {
     return {
       loading: false,
+      githubLoading: false,
+      githubOAuthConfigured: false,
       form: {
         username: '',
         password: ''
@@ -43,7 +60,24 @@ export default {
       }
     }
   },
+  async created() {
+    const error = this.$route.query.error
+    if (error) {
+      const key = String(error)
+      this.$message.error(OAUTH_ERROR_MESSAGES[key] || OAUTH_ERROR_MESSAGES.oauth_failed)
+    }
+    try {
+      const status = await getGitHubOAuthStatus()
+      this.githubOAuthConfigured = Boolean(status?.configured)
+    } catch {
+      this.githubOAuthConfigured = false
+    }
+  },
   methods: {
+    loginWithGitHub() {
+      this.githubLoading = true
+      window.location.href = `${import.meta.env.VITE_API_BASE_URL || '/api/v1'}/auth/github/login`
+    },
     submit() {
       this.$refs.form.validate(async (valid) => {
         if (!valid) return
@@ -52,6 +86,10 @@ export default {
           const response = await login(this.form)
           setToken(response.token)
           await loadCurrentUser()
+          if (!authState.user?.active) {
+            this.$router.replace('/pending-approval')
+            return
+          }
           const redirect = this.$route.query.redirect || '/dashboard'
           this.$router.replace(redirect)
         } catch {
@@ -102,6 +140,16 @@ p {
 }
 
 .submit {
+  width: 100%;
+}
+
+.oauth-divider {
+  margin: 16px 0;
+  text-align: center;
+  color: var(--app-secondary-text);
+}
+
+.github-btn {
   width: 100%;
 }
 </style>

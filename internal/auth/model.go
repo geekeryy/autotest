@@ -27,10 +27,17 @@ const (
 	SourceAPIKey = "apikey"
 )
 
+const (
+	AuthProviderLocal  = "local"
+	AuthProviderGithub = "github"
+)
+
 type User struct {
 	ID           uuid.UUID    `json:"id"`
 	Username     string       `json:"username"`
 	PasswordHash string       `json:"-"`
+	AuthProvider string       `json:"authProvider"`
+	GithubID     *int64       `json:"githubId,omitempty"`
 	DisplayName  string       `json:"displayName"`
 	Email        string       `json:"email"`
 	Active       bool         `json:"active"`
@@ -41,6 +48,15 @@ type User struct {
 	UpdatedAt    time.Time    `json:"updatedAt"`
 	// avatarJPEG 仅包内使用，由 repository 扫描并生成 AvatarURL（data URL，便于 Bearer 鉴权下展示）。
 	avatarJPEG []byte `json:"-"`
+}
+
+type GithubUserInput struct {
+	Username    string
+	DisplayName string
+	Email       string
+	GithubID    int64
+	Active      bool
+	AvatarJPEG  []byte
 }
 
 type Role struct {
@@ -118,6 +134,7 @@ type SetRolePermissionsInput struct {
 type Principal struct {
 	UserID      uuid.UUID
 	Username    string
+	Active      bool
 	Permissions map[string]struct{}
 	// Source 区分调用来源：SourceJWT 或 SourceAPIKey；默认空值视为 SourceJWT。
 	Source string

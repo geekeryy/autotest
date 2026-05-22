@@ -4,27 +4,28 @@
 
 ## AI 提供商
 
-- 平台支持项目级 AI 提供商配置。
+- 平台支持**全局** AI 提供商配置（不按项目隔离），在「平台资源 → AI 提供商」维护。
 - 提供商类型包括 deepseek、xiaomi、openai、anthropic、kimi、ollama。
-- 每个项目可维护多份 AI 提供商配置。
+- 全平台可维护多份 AI 提供商配置。
 - 配置包含名称、Base URL、API Key 脱敏、**文本默认模型**、按能力配置的默认模型（`modalityModels.image` / `audio` / `video`，存于 `extra_config`）、extraConfig、启用状态与是否默认。
 - `GET .../models` 与 discover 返回的每条模型可含 `capabilities` 标签（`text` / `image` / `audio` / `video`），**仅**解析上游响应中的元数据字段，不按模型 id 推断；多模态路由完全依赖用户在 `modalityModels` 中配置的型号。
-- 同一项目最多一个默认提供商。
+- 全平台最多一个默认提供商。
 - DeepSeek 与 Xiaomi 走 OpenAI 兼容协议时默认启用 thinking/reasoning：DeepSeek 请求携带 `thinking.type=enabled` 与 `reasoning_effort`，Xiaomi 请求携带 `reasoning.effort`。默认 effort 为 `high`；可通过 `extraConfig.thinking=false` 或 `extraConfig.thinking.enabled=false` 关闭，也可通过 `extraConfig.reasoning_effort` / `extraConfig.reasoningEffort` 或 `extraConfig.thinking.effort` 覆盖强度。
-- 模型下拉不再依赖 `/ai-provider-types` 的静态列表：已保存配置走 `GET /projects/{projectId}/ai-providers/{providerId}/models`；创建/编辑表单在填写 Base URL 与 API Key 后走 `POST .../ai-providers/models/discover`（编辑时 apiKey 留空则复用库内密钥）。OpenAI 兼容类型调用上游 `GET {baseUrl}/models`，Anthropic 调用 `GET {baseUrl}/models`，Ollama 在 `/v1/models` 不可用时回退 `GET /api/tags`；上游失败时返回内置 fallback 列表与 `warning`。
+- 模型下拉不再依赖 `/ai-provider-types` 的静态列表：已保存配置走 `GET /ai-providers/{providerId}/models`；创建/编辑表单在填写 Base URL 与 API Key 后走 `POST /ai-providers/models/discover`（编辑时 apiKey 留空则复用库内密钥）。OpenAI 兼容类型调用上游 `GET {baseUrl}/models`，Anthropic 调用 `GET {baseUrl}/models`，Ollama 在 `/v1/models` 不可用时回退 `GET /api/tags`；上游失败时返回内置 fallback 列表与 `warning`。
+- 管理 API 使用全局 RBAC：`projects:read` 可读，`projects:write` 可写（与项目管理权限一致）。
 
-## 项目级 Prompt
+## 平台 Prompt
 
-- 项目级 Prompt（`project_ai_prompts`）可按动作维护 System Prompt / 默认模型。
-- 项目级 Prompt 可选绑定 providerId。
-- providerId 留空时跟随项目默认 AI 提供商。
+- 平台 Prompt（`project_ai_prompts` 表，历史表名保留）按 **action** 全局唯一，维护 System Prompt / 默认模型。
+- 可选绑定 `providerId`；留空时跟随平台默认 AI 提供商。
+- 管理 API：`GET/POST /ai-prompts`、`PUT/DELETE /ai-prompts/{promptID}`，权限同 AI 提供商。
 
 ## 统一 AI 入口
 
 - `/projects/{projectID}/ai/chat` 统一 AI 入口支持 `generate_params`、`generate_assertion`、`generate_case_data`、`analyze_failure`、`analyze_spec_changes` 等 action。
 - 运行控制台的「一键生成参数」还存在非 LLM 采样接口 `GET /cases/{caseID}/generate-params`；它与 LLM `generate_params` 是两条路径，文档和实现变更时需要区分。
 - `generate_assertion` 必须在弹窗中填写非空测试意图，后端拒绝空意图。
-- `generate_case_data` 使用项目级 Prompt 配置。
+- `generate_case_data` 使用平台 Prompt 配置。
 - `generate_case_data` 未配置 provider 或 prompt 时返回明确中文错误。
 
 ## 生成请求参数

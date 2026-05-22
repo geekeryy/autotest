@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"autotest/internal/logx"
 
@@ -197,6 +200,122 @@ func (s *Service) DeleteRoute(ctx context.Context, projectID, serverID, routeID 
 	return s.repo.DeleteRoute(ctx, projectID, serverID, routeID)
 }
 
+// ListAccessLogs returns paginated access logs for a mock server.
+func (s *Service) ListAccessLogs(ctx context.Context, projectID, serverID uuid.UUID, filter ListAccessLogsFilter) (*ListAccessLogsPage, error) {
+	if projectID == uuid.Nil {
+		return nil, errors.New("projectId is required")
+	}
+	if serverID == uuid.Nil {
+		return nil, errors.New("mock server id is required")
+	}
+	if _, err := s.repo.GetServer(ctx, projectID, serverID); err != nil {
+		return nil, err
+	}
+	if filter.Limit <= 0 {
+		filter.Limit = 20
+	}
+	if filter.Limit > 100 {
+		filter.Limit = 100
+	}
+	if filter.Offset < 0 {
+		filter.Offset = 0
+	}
+	total, err := s.repo.CountAccessLogs(ctx, projectID, serverID, filter)
+	if err != nil {
+		return nil, err
+	}
+	items, err := s.repo.ListAccessLogs(ctx, projectID, serverID, filter)
+	if err != nil {
+		return nil, err
+	}
+	return &ListAccessLogsPage{
+		Items:  items,
+		Total:  total,
+		Limit:  filter.Limit,
+		Offset: filter.Offset,
+	}, nil
+}
+
+// ClearAccessLogs deletes all access logs for a mock server.
+func (s *Service) ClearAccessLogs(ctx context.Context, projectID, serverID uuid.UUID) error {
+	if projectID == uuid.Nil {
+		return errors.New("projectId is required")
+	}
+	if serverID == uuid.Nil {
+		return errors.New("mock server id is required")
+	}
+	return s.repo.ClearAccessLogs(ctx, projectID, serverID)
+}
+
+func parseAccessLogsFilter(values func(string) string) (ListAccessLogsFilter, error) {
+	filter := ListAccessLogsFilter{Limit: 20, Offset: 0}
+	if raw := strings.TrimSpace(values("limit")); raw != "" {
+		limit, err := strconv.Atoi(raw)
+		if err != nil || limit <= 0 {
+			return filter, errors.New("limit must be a positive integer")
+		}
+		filter.Limit = limit
+	}
+	if raw := strings.TrimSpace(values("offset")); raw != "" {
+		offset, err := strconv.Atoi(raw)
+		if err != nil || offset < 0 {
+			return filter, errors.New("offset must be a non-negative integer")
+		}
+		filter.Offset = offset
+	}
+	if raw := strings.TrimSpace(values("status")); raw != "" {
+		status, err := strconv.Atoi(raw)
+		if err != nil || status < 100 || status > 599 {
+			return filter, errors.New("status must be between 100 and 599")
+		}
+		filter.StatusFrom = &status
+		filter.StatusTo = &status
+	}
+	if raw := strings.TrimSpace(values("statusFrom")); raw != "" {
+		status, err := strconv.Atoi(raw)
+		if err != nil || status < 100 || status > 599 {
+			return filter, errors.New("statusFrom must be between 100 and 599")
+		}
+		filter.StatusFrom = &status
+	}
+	if raw := strings.TrimSpace(values("statusTo")); raw != "" {
+		status, err := strconv.Atoi(raw)
+		if err != nil || status < 100 || status > 599 {
+			return filter, errors.New("statusTo must be between 100 and 599")
+		}
+		filter.StatusTo = &status
+	}
+	if raw := strings.TrimSpace(values("matched")); raw != "" {
+		matched, err := strconv.ParseBool(raw)
+		if err != nil {
+			return filter, errors.New("matched must be true or false")
+		}
+		filter.Matched = &matched
+	}
+	if raw := strings.TrimSpace(values("routeId")); raw != "" {
+		routeID, err := uuid.Parse(raw)
+		if err != nil {
+			return filter, errors.New("routeId must be a valid uuid")
+		}
+		filter.RouteID = &routeID
+	}
+	if raw := strings.TrimSpace(values("from")); raw != "" {
+		from, err := time.Parse(time.RFC3339, raw)
+		if err != nil {
+			return filter, errors.New("from must be RFC3339 timestamp")
+		}
+		filter.From = &from
+	}
+	if raw := strings.TrimSpace(values("to")); raw != "" {
+		to, err := time.Parse(time.RFC3339, raw)
+		if err != nil {
+			return filter, errors.New("to must be RFC3339 timestamp")
+		}
+		filter.To = &to
+	}
+	return filter, nil
+}
+
 func (s *Service) withStatus(server MockServer) *ServerWithStatus {
 	status := ServerStatus{ServerID: server.ID, Port: server.Port}
 	if s.runtime != nil {
@@ -225,11 +344,29 @@ func normalizeRouteInput(input *MockRouteInput) error {
 	if input.Path == "" || !strings.HasPrefix(input.Path, "/") {
 		return errors.New("mock route path must start with /")
 	}
+	input.ResponseMode = strings.TrimSpace(strings.ToLower(input.ResponseMode))
+	if input.ResponseMode == "" {
+		input.ResponseMode = ResponseModeBody
+	}
+	if input.ResponseMode != ResponseModeBody && input.ResponseMode != ResponseModeRedirect {
+		return errors.New("mock route responseMode must be body or redirect")
+	}
+	input.RedirectLocation = strings.TrimSpace(input.RedirectLocation)
+	if input.ResponseMode == ResponseModeRedirect && input.RedirectLocation == "" {
+		return errors.New("mock route redirectLocation is required for redirect response")
+	}
 	if input.ResponseStatus == 0 {
-		input.ResponseStatus = 200
+		if input.ResponseMode == ResponseModeRedirect {
+			input.ResponseStatus = http.StatusFound
+		} else {
+			input.ResponseStatus = 200
+		}
 	}
 	if input.ResponseStatus < 100 || input.ResponseStatus > 599 {
 		return errors.New("mock route response status must be between 100 and 599")
+	}
+	if input.ResponseMode == ResponseModeRedirect && (input.ResponseStatus < 300 || input.ResponseStatus > 399) {
+		return errors.New("mock route redirect response status must be between 300 and 399")
 	}
 	input.ResponseBodyType = strings.TrimSpace(input.ResponseBodyType)
 	if input.ResponseBodyType == "" {

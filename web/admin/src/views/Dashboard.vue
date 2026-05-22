@@ -303,7 +303,7 @@ export default {
         const [cases, scenarios, dataSources] = await Promise.all([
           listCases(projectParams),
           listScenarios(projectParams),
-          pid ? listDataSources({ projectId: pid }) : Promise.resolve([])
+          listDataSources()
         ])
 
         this.counts.cases = Array.isArray(cases) ? cases.length : 0

@@ -13,7 +13,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// ImportNotifier 在 API Key 成功导入 Swagger 后写入站内通知；由 internal/notification 实现。
+// ImportNotifier 在 API Key 成功导入 OpenAPI/Swagger 后写入站内通知；由 internal/notification 实现。
 type ImportNotifier interface {
 	CreateSpecImportNotification(ctx context.Context, userID, projectID, serviceID uuid.UUID, summary *ImportSummary) error
 }

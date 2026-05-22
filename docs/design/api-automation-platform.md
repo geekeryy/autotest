@@ -8,7 +8,7 @@
 - [API 导入与运行控制台](api-management-and-runner.md)：OpenAPI/Swagger 导入、API 管理、运行控制台、请求编辑、响应展示、环境认证继承。
 - [场景编排](scenario-orchestration.md)：场景步骤、变量传递、脚本步骤、控制流、克隆、步骤 Tab、运行结果。
 - [Mock、模板变量与测试数据](mock-template-and-test-data.md)：Mock Server、Mock Value Sets、运行时模拟标签、模板变量、SQL 参数源、测试数据表。
-- [AI 能力](ai-capabilities.md)：AI 提供商、项目级 Prompt、AI 生成、失败分析、spec 变更影响分析。
+- [AI 能力](ai-capabilities.md)：AI 提供商、平台 Prompt、AI 生成、失败分析、spec 变更影响分析。
 - [管理后台与访问控制](admin-and-access.md)：后台布局、全局项目上下文、服务环境管理、菜单、视觉品牌、脚本库、API Key。
 
 ## 待用户决策

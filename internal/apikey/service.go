@@ -212,6 +212,7 @@ func (s *Service) Authenticate(ctx context.Context, token string) (*auth.Princip
 	return &auth.Principal{
 		UserID:      user.ID,
 		Username:    user.Username,
+		Active:      user.Active,
 		Permissions: permissions,
 		Source:      auth.SourceAPIKey,
 		Scopes:      scopes,

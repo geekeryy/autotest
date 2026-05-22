@@ -67,12 +67,9 @@ func (s *Service) SupportedTypes() []ProviderTypeMeta {
 	return out
 }
 
-// List returns all providers visible to the project (with masked API keys).
-func (s *Service) List(ctx context.Context, projectID uuid.UUID) ([]Provider, error) {
-	if projectID == uuid.Nil {
-		return nil, errors.New("projectId is required")
-	}
-	rows, err := s.repo.ListByProject(ctx, projectID)
+// List returns all platform providers (with masked API keys).
+func (s *Service) List(ctx context.Context) ([]Provider, error) {
+	rows, err := s.repo.List(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -84,14 +81,11 @@ func (s *Service) List(ctx context.Context, projectID uuid.UUID) ([]Provider, er
 }
 
 // Create validates and inserts a new provider record.
-func (s *Service) Create(ctx context.Context, projectID uuid.UUID, input CreateInput) (*Provider, error) {
-	if projectID == uuid.Nil {
-		return nil, errors.New("projectId is required")
-	}
+func (s *Service) Create(ctx context.Context, input CreateInput) (*Provider, error) {
 	if err := normalizeCreate(&input); err != nil {
 		return nil, err
 	}
-	row, err := s.repo.Create(ctx, projectID, input)
+	row, err := s.repo.Create(ctx, input)
 	if err != nil {
 		return nil, err
 	}
@@ -99,21 +93,18 @@ func (s *Service) Create(ctx context.Context, projectID uuid.UUID, input CreateI
 }
 
 // Update mutates an existing provider record.
-func (s *Service) Update(ctx context.Context, projectID, providerID uuid.UUID, input UpdateInput) (*Provider, error) {
-	if projectID == uuid.Nil {
-		return nil, errors.New("projectId is required")
-	}
+func (s *Service) Update(ctx context.Context, providerID uuid.UUID, input UpdateInput) (*Provider, error) {
 	if providerID == uuid.Nil {
 		return nil, errors.New("providerId is required")
 	}
-	existing, err := s.repo.Get(ctx, projectID, providerID)
+	existing, err := s.repo.Get(ctx, providerID)
 	if err != nil {
 		return nil, err
 	}
 	if err := normalizeUpdate(&input, existing); err != nil {
 		return nil, err
 	}
-	row, err := s.repo.Update(ctx, projectID, providerID, input)
+	row, err := s.repo.Update(ctx, providerID, input)
 	if err != nil {
 		return nil, err
 	}
@@ -121,16 +112,16 @@ func (s *Service) Update(ctx context.Context, projectID, providerID uuid.UUID, i
 }
 
 // Delete soft-deletes a provider.
-func (s *Service) Delete(ctx context.Context, projectID, providerID uuid.UUID) error {
-	if projectID == uuid.Nil || providerID == uuid.Nil {
-		return errors.New("projectId and providerId are required")
+func (s *Service) Delete(ctx context.Context, providerID uuid.UUID) error {
+	if providerID == uuid.Nil {
+		return errors.New("providerId is required")
 	}
-	return s.repo.Delete(ctx, projectID, providerID)
+	return s.repo.Delete(ctx, providerID)
 }
 
 // TestConnection sends a minimal probe message and returns a short snippet of the model reply.
-func (s *Service) TestConnection(ctx context.Context, projectID, providerID uuid.UUID) (*ChatResponse, error) {
-	row, err := s.repo.Get(ctx, projectID, providerID)
+func (s *Service) TestConnection(ctx context.Context, providerID uuid.UUID) (*ChatResponse, error) {
+	row, err := s.repo.Get(ctx, providerID)
 	if err != nil {
 		return nil, err
 	}
@@ -181,7 +172,7 @@ func (s *Service) Chat(ctx context.Context, projectID uuid.UUID, req ChatRequest
 		return nil, ErrAssertionIntentRequired
 	}
 
-	row, err := s.repo.Get(ctx, projectID, req.ProviderID)
+	row, err := s.repo.Get(ctx, req.ProviderID)
 	if err != nil {
 		return nil, err
 	}
@@ -265,7 +256,7 @@ func (s *Service) ChatWithTools(ctx context.Context, projectID uuid.UUID, req Ch
 		return nil, ErrProviderActionInvalid
 	}
 
-	row, err := s.repo.Get(ctx, projectID, req.ProviderID)
+	row, err := s.repo.Get(ctx, req.ProviderID)
 	if err != nil {
 		return nil, err
 	}

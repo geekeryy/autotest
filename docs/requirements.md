@@ -40,19 +40,19 @@
 
 ### Mock、模板变量与测试数据
 
-- [Mock Server](design/mock-template-and-test-data.md)：涉及 Mock 服务启动/停止、端口、规则匹配、动态响应模板、CORS、规则测试弹窗或 Mock 权限的请求，先判断变更是管理 API、运行时匹配还是浏览器测试体验；运行中请求应读取最新数据库规则。
+- [Mock Server](design/mock-template-and-test-data.md)：涉及 Mock 服务启动/停止、端口、规则匹配、动态响应模板、HTTP 重定向（SSO 模拟）、CORS、访问日志、规则测试弹窗或 Mock 权限的请求，先判断变更是管理 API、运行时匹配还是浏览器测试体验；运行中请求应读取最新数据库规则。
 - [Mock Value Sets](design/mock-template-and-test-data.md)：涉及命名值集合、权重、索引取值、顺序遍历、项目隔离或内置业务 helper 的请求，先判断取值是随机、固定索引还是 run/request 维度顺序游标；`set` 不支持过滤语法。
 - [运行时模拟标签](design/mock-template-and-test-data.md)：涉及 `{{$mock.*}}` helper、参数解析、实时生成、类型保持或未知 helper 错误的请求，先判断标签是否应在运行时渲染而不是写入快照；同一请求中多次出现应独立生成。
 - [模板变量规范](design/mock-template-and-test-data.md)：涉及 `$mock`、`$steps`、`$ds`、`$sql`、`$req`、普通变量、deprecated 旧语法或渲染顺序的请求，优先检查是否应统一走 `internal/templating`，避免在调用方新增正则。
-- [SQL 参数源](design/mock-template-and-test-data.md)：涉及业务数据源、SQL 参数源、`{{$sql.*}}` 内联引用、过滤表达式、预览或执行快照的请求，先判断数据源是否按项目维护、SQL 是否只读、找不到来源/行/列时是否返回明确错误；当前 SQL 参数源 HTTP 层主要依赖登录态和 `projectId` 参数，未像 Mock/TestData 一样统一挂项目角色中间件。
+- [SQL 参数源](design/mock-template-and-test-data.md)：涉及业务数据源、SQL 参数源、`{{$sql.*}}` 内联引用、过滤表达式、预览或执行快照的请求，先判断**业务数据源为全局平台资源**（HTTP API 使用 `projects:read` / `projects:write`）、SQL 参数源仍按项目+服务维护、SQL 是否只读、找不到来源/行/列时是否返回明确错误；SQL 参数源 HTTP 层主要仍依赖登录态和 `projectId` 参数，未像 Mock/TestData 一样统一挂项目角色中间件。
 - [测试数据表](design/mock-template-and-test-data.md)：涉及项目级测试数据表、列生成方式、`{{$ds.*}}` 引用、AI 生成测试数据或权限的请求，先判断数据应来自表行快照还是运行时解析；权限与 SQL 参数源、Mock Server 保持 viewer/developer 分层。
 
 ### AI 能力
 
-- [AI 提供商](design/ai-capabilities.md)：涉及 provider 类型、Base URL、API Key 脱敏、文本/多模态默认模型（`modalityModels`）、模型能力标签、extraConfig、thinking/reasoning、启用状态或默认提供商的请求，先判断配置是项目级还是全局；API 不应返回明文 Key。模型列表应通过上游 list-models 动态获取；`capabilities` 仅来自上游元数据（无则空），多模态路由依赖用户配置的 `modalityModels`，不按模型 id 推断能力。`/ai-provider-types` 仅保留类型元数据与离线 fallback。
-- [项目级 Prompt](design/ai-capabilities.md)：涉及 action 级 System Prompt、默认模型、provider 绑定或回退逻辑的请求，先判断 providerId 为空是否应跟随项目默认提供商；绑定 provider 必须属于同项目且未删除。
+- [AI 提供商](design/ai-capabilities.md)：涉及 provider 类型、Base URL、API Key 脱敏、文本/多模态默认模型（`modalityModels`）、模型能力标签、extraConfig、thinking/reasoning、启用状态或默认提供商的请求，先判断配置为**全局平台资源**（`/ai-providers`，不按项目隔离）；API 不应返回明文 Key。模型列表应通过上游 list-models 动态获取；`capabilities` 仅来自上游元数据（无则空），多模态路由依赖用户配置的 `modalityModels`，不按模型 id 推断能力。`/ai-provider-types` 仅保留类型元数据与离线 fallback。
+- [平台 Prompt](design/ai-capabilities.md)：涉及 action 级 System Prompt、默认模型、provider 绑定或回退逻辑的请求，先判断 providerId 为空是否应跟随**平台**默认提供商；绑定 provider 须为未删除的全局提供商；每个 action 全局至多一条有效配置。
 - [AI 生成请求参数](design/ai-capabilities.md)：涉及 `generate_params`、上下文构造、pathVarNames、currentRequest 保留、Mock Value Sets 注入或模型输出格式的请求，先区分非 LLM 的 `GET /cases/{id}/generate-params` 采样接口与 LLM `/ai/chat` action，并注意下方覆盖范围冲突仍待决策。
-- [AI 生成断言与测试数据](design/ai-capabilities.md)：涉及 `generate_assertion` 或 `generate_case_data` 的请求，先判断是否需要非空测试意图、项目 Prompt/provider 配置和明确中文错误；生成结果应由用户预览或追加，不应静默覆盖已有内容。
+- [AI 生成断言与测试数据](design/ai-capabilities.md)：涉及 `generate_assertion` 或 `generate_case_data` 的请求，先判断是否需要非空测试意图、平台 Prompt/provider 配置和明确中文错误；生成结果应由用户预览或追加，不应静默覆盖已有内容。
 - [AI 智能分析](design/ai-capabilities.md)：涉及失败原因分析或 spec 变更影响分析的请求，先判断输入应来自本次运行快照、断言失败明细或 spec diff 摘要；分析结果当前不写库，且分析输出统一为中文 Markdown 由前端 `MarkdownView` 渲染。
 - [AI Tool Calling 框架](design/ai-capabilities.md)：涉及让 AI 通过内置工具拉系统状态、扩展工具集、改变工具权限边界或 mutating 工具确认机制的请求，先判断目标是否落在 `internal/aitools` Registry；分析类 action 仅允许只读工具，mutating 工具（如 `update_case_assertions`、场景编排相关写工具）只能通过浮窗对话流程并经过用户 confirm 才会执行。
 - [全局 AI 助理浮窗](design/ai-capabilities.md)：涉及登录后管理后台 AI 助理浮窗、provider/model 选择、深度思考/联网搜索开关、Token 用量持久化与汇总（仪表盘/会话详情）、Debug 开关下浮窗每轮 token/缓存详情展示、会话列表查看会话详情（对话统计与 Token 汇总）、Xiaomi 图片上传与多模态消息、SSE 对话流、会话/消息持久化、空会话时「新对话」静默复用（不重复创建）、跨用户隔离或 mutating 工具人在回路确认的请求，先判断需求是否会改变 `ai_sessions`/`ai_messages` 表结构、SSE 事件 schema 或会话隔离边界；浮窗会话按 `(project_id, user_id)` 严格隔离，分析类 action 不暴露写工具。
@@ -63,13 +63,13 @@
 
 ### 管理后台与访问控制
 
-- [登录与后台基础](design/admin-and-access.md)：涉及登录、路由守卫、默认管理员账号密码对齐或后台技术栈的请求，先判断是认证流程、权限导航还是启动初始化；生产环境凭据应通过环境变量覆盖。
-- [全局项目上下文](design/admin-and-access.md)：涉及顶部项目选择、页面间项目复用、上次项目/环境恢复或未选择项目提示的请求，先判断是否应依赖全局项目，避免在页面内重复选择项目；项目管理页实际承载服务环境、业务数据源、AI 提供商和 Prompt 管理。
+- [登录与后台基础](design/admin-and-access.md)：涉及登录、路由守卫、默认管理员账号密码对齐或后台技术栈的请求，先判断是认证流程、权限导航还是启动初始化；生产环境凭据应通过环境变量覆盖。支持 GitHub OAuth 登录（任意 GitHub 账号可发起，首次自动建档待审核）与本地用户名密码登录并存。
+- [全局项目上下文](design/admin-and-access.md)：涉及顶部项目选择、页面间项目复用、上次项目/环境恢复或未选择项目提示的请求，先判断是否应依赖全局项目，避免在页面内重复选择项目；项目管理页承载服务与环境管理；业务数据源、AI 提供商、Prompt 管理已归入「平台资源」菜单。
 - [服务与环境管理](design/admin-and-access.md)：涉及服务/环境树、环境变量 JSON、认证 JSON、编辑弹窗、提示图标或失焦格式化的请求，先判断变更是否影响运行控制台的环境编辑复用。
 - [菜单、布局与视觉品牌](design/admin-and-access.md)：涉及侧边栏菜单、收起、滚动区域、字体、配色、头像、退出登录或 logo 的请求，先判断是全局布局约束还是单页样式调整；左侧导航不应单独滚动。
 - [脚本库](design/admin-and-access.md)：涉及断言编辑器、场景脚本步骤、内置模板、项目自定义模板或 AI 生成脚本入口的请求，先判断模板作用域是全平台共享还是当前项目。
-- [用户权限与 API Key](design/admin-and-access.md)：涉及 RBAC 菜单、项目权限、API Key 列表/创建/重置/禁用/过期/审计或 CI/CD 调用的请求，先区分前端路由权限、全局后端权限和项目角色中间件；API Key 当前仅允许 `specs:import`，管理操作只作用于当前登录用户的 Key。用户管理支持上传头像：浏览器端先压成 JPEG，服务端再缩放编码后存入 `users.avatar_jpeg`，列表与 `/auth/me` 等接口在 JSON 中返回 `avatarUrl`（`data:image/jpeg;base64,...`），便于 Bearer 鉴权下直接用于 `<img>` / `el-avatar`。
-- [站内通知](design/admin-and-access.md)：涉及管理后台顶栏通知铃铛、未读角标、通知列表、已读状态、一键清空或 API Key 导入触发的通知写入的请求，先判断是否仅按登录用户隔离（不新增 RBAC 权限）；当前仅 API Key 成功导入 Swagger 时写入 `spec_import` 通知，JWT 页面内手动导入不触发；正文与统计展示**本次实际变动**的接口数（`createdEndpoints + updatedEndpoints`），不含文档内未改动的端点；前端登录后通过 `GET /notifications/stream`（JWT、RejectAPIKey）SSE 实时推送，断线自动重连，页面重新可见时仅做一次 REST 同步；`POST /notifications/clear-all` 硬删除当前用户全部通知并通过 SSE 推送空 `snapshot`。
+- [用户权限与 API Key](design/admin-and-access.md)：涉及 RBAC 菜单、项目权限、API Key 列表/创建/重置/禁用/过期/审计或 CI/CD 调用的请求，先区分前端路由权限、全局后端权限和项目角色中间件；API Key 当前仅允许 `specs:import`，管理操作只作用于当前登录用户的 Key。用户管理支持上传头像：浏览器端先压成 JPEG，服务端再缩放编码后存入 `users.avatar_jpeg`，列表与 `/auth/me` 等接口在 JSON 中返回 `avatarUrl`（`data:image/jpeg;base64,...`），便于 Bearer 鉴权下直接用于 `<img>` / `el-avatar`。GitHub OAuth 首次登录创建的用户默认 `active=false`、无角色，管理员在用户管理中启用并分配角色后生效。
+- [站内通知](design/admin-and-access.md)：涉及管理后台顶栏通知铃铛、未读角标、通知列表、已读状态、一键清空或 API Key 导入触发的通知写入的请求，先判断是否仅按登录用户隔离（不新增 RBAC 权限）；当前 API Key 成功导入 Swagger 时写入 `spec_import` 通知，GitHub 首次待审核用户注册时向拥有 `users:manage` 权限的用户写入 `user_pending` 通知；JWT 页面内手动导入不触发 spec 通知；正文与统计展示**本次实际变动**的接口数（`createdEndpoints + updatedEndpoints`），不含文档内未改动的端点；前端登录后通过 `GET /notifications/stream`（JWT、RejectAPIKey）SSE 实时推送，断线自动重连，页面重新可见时仅做一次 REST 同步；`POST /notifications/clear-all` 硬删除当前用户全部通知并通过 SSE 推送空 `snapshot`。
 
 ## 待用户决策
 

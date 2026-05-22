@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 
+	"autotest/internal/auth"
 	"autotest/internal/httpx"
 
 	"github.com/go-chi/chi/v5"
@@ -13,19 +14,27 @@ import (
 
 type Handler struct {
 	service *Service
+	authSvc *auth.Service
 }
 
-func NewHandler(service *Service) *Handler {
-	return &Handler{service: service}
+func NewHandler(service *Service, authSvc *auth.Service) *Handler {
+	return &Handler{service: service, authSvc: authSvc}
 }
 
 func (h *Handler) Register(r chi.Router) {
-	r.Get("/data-sources", h.listDataSources)
-	r.Post("/data-sources", h.createDataSource)
-	r.Put("/data-sources/{id}", h.updateDataSource)
-	r.Delete("/data-sources/{id}", h.deleteDataSource)
-	r.Post("/data-sources/{id}/test", h.testDataSource)
-	r.Get("/data-sources/{id}/schema", h.getDataSourceSchema)
+	r.Route("/data-sources", func(r chi.Router) {
+		r.Use(h.authSvc.RequirePermission(auth.PermissionProjectsRead))
+		r.Get("/", h.listDataSources)
+		r.Get("/{id}/schema", h.getDataSourceSchema)
+
+		r.Group(func(r chi.Router) {
+			r.Use(h.authSvc.RequirePermission(auth.PermissionProjectsWrite))
+			r.Post("/", h.createDataSource)
+			r.Put("/{id}", h.updateDataSource)
+			r.Delete("/{id}", h.deleteDataSource)
+			r.Post("/{id}/test", h.testDataSource)
+		})
+	})
 	r.Get("/sql-parameter-sources", h.listSQLParameterSources)
 	r.Post("/sql-parameter-sources/preview", h.previewSQLParameterSourceDraft)
 	r.Post("/sql-parameter-sources", h.createSQLParameterSource)
@@ -35,11 +44,7 @@ func (h *Handler) Register(r chi.Router) {
 }
 
 func (h *Handler) listDataSources(w http.ResponseWriter, r *http.Request) {
-	projectID, ok := parseQueryUUID(w, r, "projectId")
-	if !ok {
-		return
-	}
-	sources, err := h.service.ListDataSources(r.Context(), projectID)
+	sources, err := h.service.ListDataSources(r.Context())
 	if err != nil {
 		httpx.Error(w, http.StatusBadRequest, err)
 		return

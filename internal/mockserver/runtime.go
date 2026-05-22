@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -26,9 +27,15 @@ type MockSetService interface {
 	Lookup(ctx context.Context, projectID uuid.UUID, key string) (values []json.RawMessage, weights []float64, ok bool)
 }
 
+type runtimeRepository interface {
+	GetServerByID(ctx context.Context, serverID uuid.UUID) (*MockServer, error)
+	ListEnabledRoutesForServer(ctx context.Context, serverID uuid.UUID) ([]MockRoute, error)
+	InsertAccessLog(ctx context.Context, log MockAccessLog) error
+}
+
 // Runtime manages in-process HTTP servers for mock server configurations.
 type Runtime struct {
-	repo     *Repository
+	repo     runtimeRepository
 	mockSets MockSetService
 	mu       sync.Mutex
 	running  map[uuid.UUID]*runningServer
@@ -45,7 +52,7 @@ type runningServer struct {
 // mockSets 可选；非 nil 时启用 `{{$mock.set.<key>}}` 在 Mock 响应体里的解析。
 // 每个 HTTP 请求获得独立的游标 map，意味着同一个请求内多次出现
 // `{{$mock.set.<key>[*]}}` 会按顺序循环；不同请求互不影响。
-func NewRuntime(repo *Repository, mockSets MockSetService) *Runtime {
+func NewRuntime(repo runtimeRepository, mockSets MockSetService) *Runtime {
 	return &Runtime{
 		repo:     repo,
 		mockSets: mockSets,
@@ -157,33 +164,114 @@ func (rt *Runtime) mockHandler(serverID uuid.UUID) http.Handler {
 			return
 		}
 
-		body, err := io.ReadAll(r.Body)
+		start := time.Now()
+		rec := newResponseRecorder(w)
+		var (
+			projectID uuid.UUID
+			route     *MockRoute
+			matched   bool
+			errMsg    string
+			reqBody   []byte
+		)
+
+		defer func() {
+			rt.recordAccessLog(serverID, projectID, route, matched, errMsg, start, r, reqBody, rec)
+		}()
+
+		var err error
+		reqBody, err = io.ReadAll(r.Body)
 		if err != nil {
-			writeRuntimeError(w, http.StatusBadRequest, "读取请求体失败")
+			errMsg = "读取请求体失败"
+			writeRuntimeError(rec, http.StatusBadRequest, errMsg)
 			return
 		}
 		server, err := rt.repo.GetServerByID(r.Context(), serverID)
 		if err != nil {
-			writeRuntimeError(w, http.StatusInternalServerError, "读取 Mock Server 失败")
+			errMsg = "读取 Mock Server 失败"
+			writeRuntimeError(rec, http.StatusInternalServerError, errMsg)
 			return
 		}
+		projectID = server.ProjectID
 		routes, err := rt.repo.ListEnabledRoutesForServer(r.Context(), serverID)
 		if err != nil {
-			writeRuntimeError(w, http.StatusInternalServerError, "读取 Mock 规则失败")
+			errMsg = "读取 Mock 规则失败"
+			writeRuntimeError(rec, http.StatusInternalServerError, errMsg)
 			return
 		}
-		route, err := MatchRules(routes, r, body)
+		route, err = MatchRules(routes, r, reqBody)
 		if err != nil {
-			writeRuntimeError(w, http.StatusBadRequest, err.Error())
+			errMsg = err.Error()
+			writeRuntimeError(rec, http.StatusBadRequest, errMsg)
 			return
 		}
 		if route == nil {
-			writeRuntimeError(w, http.StatusNotFound, "mock route not found")
+			errMsg = "mock route not found"
+			writeRuntimeError(rec, http.StatusNotFound, errMsg)
 			return
 		}
+		matched = true
 		mockCfg := rt.buildRequestMockConfig(server.ProjectID)
-		writeMockResponse(w, r, *route, body, mockCfg)
+		writeMockResponse(rec, r, *route, reqBody, mockCfg)
 	})
+}
+
+func (rt *Runtime) recordAccessLog(
+	serverID, projectID uuid.UUID,
+	route *MockRoute,
+	matched bool,
+	errMsg string,
+	start time.Time,
+	r *http.Request,
+	reqBody []byte,
+	rec *responseRecorder,
+) {
+	if rt.repo == nil {
+		return
+	}
+	if projectID == uuid.Nil {
+		projectID = rt.projectIDForServer(serverID)
+	}
+	if projectID == uuid.Nil {
+		return
+	}
+
+	var routeID *uuid.UUID
+	if route != nil {
+		routeID = &route.ID
+	}
+
+	log := MockAccessLog{
+		ProjectID:       projectID,
+		MockServerID:    serverID,
+		MockRouteID:     routeID,
+		Method:          r.Method,
+		Path:            r.URL.Path,
+		Query:           r.URL.RawQuery,
+		ClientIP:        clientIPFromRequest(r),
+		Matched:         matched,
+		ResponseStatus:  rec.Status(),
+		DurationMs:      int(time.Since(start).Milliseconds()),
+		ErrorMessage:    errMsg,
+		RequestHeaders:  captureRequestHeaders(r.Header),
+		RequestBody:     truncateAccessLogBody(string(reqBody)),
+		ResponseHeaders: captureResponseHeaders(rec.Header()),
+		ResponseBody:    truncateAccessLogBody(rec.body.String()),
+	}
+
+	go func(entry MockAccessLog) {
+		if err := rt.repo.InsertAccessLog(context.Background(), entry); err != nil {
+			logx.Warn("insert mock access log failed", "serverId", serverID, "err", err)
+		}
+	}(log)
+}
+
+func (rt *Runtime) projectIDForServer(serverID uuid.UUID) uuid.UUID {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	if state, ok := rt.running[serverID]; ok {
+		return state.server.ProjectID
+	}
+	return uuid.Nil
 }
 
 // buildRequestMockConfig returns a per-request MockExpanderConfig wiring the
@@ -214,6 +302,11 @@ func writeMockResponse(w http.ResponseWriter, r *http.Request, route MockRoute, 
 		}
 	}
 
+	if route.ResponseMode == ResponseModeRedirect {
+		writeMockRedirectResponse(w, r, route, body, mockCfg)
+		return
+	}
+
 	responseBody, err := renderMockResponseBody(route.ResponseBody, route, r, body, mockCfg)
 	if err != nil {
 		writeRuntimeError(w, http.StatusInternalServerError, fmt.Sprintf("渲染 Mock 响应失败: %v", err))
@@ -237,6 +330,50 @@ func writeMockResponse(w http.ResponseWriter, r *http.Request, route MockRoute, 
 		if _, err := w.Write([]byte(responseBody)); err != nil {
 			return
 		}
+	}
+}
+
+func writeMockRedirectResponse(w http.ResponseWriter, r *http.Request, route MockRoute, body []byte, mockCfg *templating.MockExpanderConfig) {
+	location, err := renderMockResponseBody(route.RedirectLocation, route, r, body, mockCfg)
+	if err != nil {
+		writeRuntimeError(w, http.StatusInternalServerError, fmt.Sprintf("渲染 Mock 重定向地址失败: %v", err))
+		return
+	}
+	if strings.TrimSpace(location) == "" {
+		writeRuntimeError(w, http.StatusInternalServerError, "Mock 重定向地址为空")
+		return
+	}
+
+	var responseBody string
+	if route.ResponseBody != "" {
+		responseBody, err = renderMockResponseBody(route.ResponseBody, route, r, body, mockCfg)
+		if err != nil {
+			writeRuntimeError(w, http.StatusInternalServerError, fmt.Sprintf("渲染 Mock 响应失败: %v", err))
+			return
+		}
+	}
+
+	writeHeaders(w, route.ResponseHeaders)
+	applyMockCORS(w, r)
+	w.Header().Set("Location", location)
+	if responseBody != "" && w.Header().Get("Content-Type") == "" {
+		switch route.ResponseBodyType {
+		case ResponseBodyTypeText:
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		case ResponseBodyTypeRaw:
+			w.Header().Set("Content-Type", "application/octet-stream")
+		default:
+			w.Header().Set("Content-Type", "application/json")
+		}
+	}
+
+	status := route.ResponseStatus
+	if status < 300 || status > 399 {
+		status = http.StatusFound
+	}
+	w.WriteHeader(status)
+	if responseBody != "" {
+		_, _ = w.Write([]byte(responseBody))
 	}
 }
 

@@ -24,7 +24,6 @@ const (
 
 type DataSource struct {
 	ID        uuid.UUID       `json:"id"`
-	ProjectID uuid.UUID       `json:"projectId"`
 	Name      string          `json:"name"`
 	Description   string          `json:"description,omitempty"`
 	Driver        string          `json:"driver"`
@@ -41,7 +40,6 @@ type DataSource struct {
 }
 
 type DataSourceInput struct {
-	ProjectID uuid.UUID       `json:"projectId"`
 	Name      string          `json:"name"`
 	Description   string          `json:"description"`
 	Driver        string          `json:"driver"`

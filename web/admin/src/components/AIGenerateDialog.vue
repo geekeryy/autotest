@@ -25,7 +25,7 @@
     >
       <template #default>
         请前往
-        <router-link to="/ai-providers" class="ai-link" @click="visible = false">「平台资源 / AI 提供商」</router-link>
+        <router-link to="/platform/ai-providers" class="ai-link" @click="visible = false">「平台资源 / AI 提供商」</router-link>
         新增并启用至少一个提供商。
       </template>
     </el-alert>
@@ -190,7 +190,7 @@ export default {
       }
       this.loading = true
       try {
-        this.providers = await listAIProviders(this.projectId)
+        this.providers = await listAIProviders()
       } catch (_) {
         this.providers = []
       } finally {
@@ -205,7 +205,7 @@ export default {
       let providerId = def ? def.id : (this.providers[0]?.id || '')
 
       try {
-        const promptConfigs = await listProjectAIPrompts(this.projectId)
+        const promptConfigs = await listProjectAIPrompts()
         const matched = promptConfigs.find((c) => c.action === this.action && c.enabled)
         if (matched?.providerId) {
           const pinned = this.providers.find((p) => p.id === matched.providerId && p.enabled)

@@ -8,8 +8,10 @@ import (
 )
 
 const TypeSpecImport = "spec_import"
+const TypeUserPending = "user_pending"
 
-const specImportTitle = "Swagger 导入完成"
+const specImportTitle = "OpenAPI/Swagger 导入完成"
+const userPendingTitle = "新用户待审核"
 
 // Notification 是用户站内通知的 API 视图。
 type Notification struct {
@@ -33,6 +35,14 @@ type SpecImportPayload struct {
 	CreatedEndpoints int       `json:"createdEndpoints"`
 	UpdatedEndpoints int       `json:"updatedEndpoints"`
 	GeneratedCases   int       `json:"generatedCases"`
+}
+
+// UserPendingPayload 供前端点击通知后跳转用户管理页。
+type UserPendingPayload struct {
+	UserID      uuid.UUID `json:"userId"`
+	Username    string    `json:"username"`
+	DisplayName string    `json:"displayName"`
+	Email       string    `json:"email"`
 }
 
 // ListResponse 为 GET /notifications 的响应体。

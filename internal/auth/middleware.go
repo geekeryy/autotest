@@ -53,6 +53,25 @@ func (s *Service) Authenticate(next http.Handler) http.Handler {
 	})
 }
 
+var ErrAccountPendingApproval = errors.New("account pending approval")
+
+func (s *Service) RequireActiveUser() func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			principal := PrincipalFromContext(r.Context())
+			if principal == nil {
+				httpx.Error(w, http.StatusUnauthorized, errors.New("missing principal"))
+				return
+			}
+			if !principal.Active {
+				httpx.Error(w, http.StatusForbidden, ErrAccountPendingApproval)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 func (s *Service) RequirePermission(code string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

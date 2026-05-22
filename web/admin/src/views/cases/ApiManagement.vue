@@ -5,40 +5,6 @@
         <h2 class="page-title">API管理</h2>
         <p class="page-subtitle">统一导入 OpenAPI/Swagger 文档并维护当前服务下的接口请求模板。</p>
       </div>
-      <el-button type="primary" :disabled="!canCreateCase" @click="openCreateDialog">新增接口</el-button>
-    </div>
-
-    <div class="page-card api-service-card">
-      <div class="toolbar api-toolbar">
-        <el-select
-          v-model="serviceId"
-          class="api-service-select"
-          :placeholder="projectId ? '选择服务' : '请先在顶部选择项目'"
-          :title="projectId ? '选择当前项目下的服务' : '请先在顶部选择项目后再选择服务'"
-          :disabled="!projectId"
-          :no-data-text="projectId ? '当前项目暂无服务' : '请先在顶部选择项目'"
-          filterable
-          @change="handleServiceChange"
-        >
-          <el-option v-for="service in services" :key="service.id" :label="service.name" :value="service.id" />
-        </el-select>
-        <span class="api-service-hint">{{ serviceHint }}</span>
-      </div>
-
-      <el-alert
-        v-if="!projectId"
-        type="info"
-        show-icon
-        :closable="false"
-        title="请先在顶部选择项目后再管理 API。"
-      />
-      <el-alert
-        v-else-if="!services.length"
-        type="info"
-        show-icon
-        :closable="false"
-        title="当前项目暂无服务，请先到项目管理中新增服务。"
-      />
     </div>
 
     <div class="api-layout">
@@ -51,7 +17,36 @@
           <el-tag v-if="!canImportSpec" type="warning" effect="plain">无导入权限</el-tag>
         </div>
 
+        <el-alert
+          v-if="!projectId"
+          type="info"
+          show-icon
+          :closable="false"
+          class="import-alert"
+          title="请先在顶部选择项目后再管理 API。"
+        />
+        <el-alert
+          v-else-if="!services.length"
+          type="info"
+          show-icon
+          :closable="false"
+          class="import-alert"
+          title="当前项目暂无服务，请先到项目管理中新增服务。"
+        />
+
         <div class="toolbar import-toolbar">
+          <el-select
+            v-model="serviceId"
+            class="api-service-select"
+            :placeholder="projectId ? '选择服务' : '请先在顶部选择项目'"
+            :title="projectId ? '选择当前项目下的服务' : '请先在顶部选择项目后再选择服务'"
+            :disabled="!projectId"
+            :no-data-text="projectId ? '当前项目暂无服务' : '请先在顶部选择项目'"
+            filterable
+            @change="handleServiceChange"
+          >
+            <el-option v-for="service in services" :key="service.id" :label="service.name" :value="service.id" />
+          </el-select>
           <div class="spec-file-input">
             <el-button :disabled="!canImportSpec" @click="$refs.fileInput.click()">
               <el-icon><Upload /></el-icon>
@@ -60,6 +55,7 @@
             <span class="spec-file-name">{{ fileName || '支持 .json、.yaml、.yml 格式' }}</span>
             <input ref="fileInput" type="file" hidden accept=".json,.yaml,.yml" @change="readFile" />
           </div>
+          <span class="api-service-hint">{{ serviceHint }}</span>
         </div>
 
         <el-input
@@ -448,18 +444,18 @@ export default {
   line-height: 1.5;
 }
 
-.api-service-card {
-  padding-bottom: 2px;
+.import-alert {
+  margin-bottom: 16px;
 }
 
-.api-toolbar {
+.import-toolbar {
   align-items: stretch;
 }
 
 .api-service-select {
-  flex: 1 1 260px;
-  max-width: 420px;
-  min-width: 200px;
+  flex: 1 1 220px;
+  max-width: 360px;
+  min-width: 180px;
 }
 
 .api-service-hint {
@@ -495,14 +491,11 @@ export default {
   font-weight: 600;
 }
 
-.import-toolbar {
-  align-items: stretch;
-}
-
 .spec-file-input {
   display: inline-flex;
   align-items: center;
   gap: 10px;
+  align-self: center;
   flex: 1 1 240px;
   min-width: 220px;
 }

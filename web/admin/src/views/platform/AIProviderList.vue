@@ -4,32 +4,23 @@
       <div>
         <h2 class="page-title">AI 提供商</h2>
         <p class="page-subtitle">
-          按项目维护 AI 大模型提供商配置，供运行控制台、断言编辑器与场景脚本的「AI 生成」入口使用。
-          支持 DeepSeek、Xiaomi、OpenAI、Anthropic、Kimi、Ollama；developer+ 可写、viewer 可读。
+          平台级 AI 大模型提供商配置，供运行控制台、断言编辑器与场景脚本的「AI 生成」入口使用。
+          支持 DeepSeek、Xiaomi、OpenAI、Anthropic、Kimi、Ollama。
         </p>
       </div>
-      <el-button type="primary" :disabled="!projectId" @click="openCreate">新增提供商</el-button>
+      <el-button v-if="canWrite" type="primary" @click="openCreate">新增提供商</el-button>
     </div>
     <div v-else class="ai-provider-embedded-toolbar">
       <p class="page-subtitle">
-        按当前全局项目维护 AI 大模型提供商配置，供运行控制台、断言编辑器与场景脚本的「AI 生成」入口使用。
-        支持 DeepSeek、Xiaomi、OpenAI、Anthropic、Kimi、Ollama；developer+ 可写、viewer 可读。
+        平台级 AI 大模型提供商配置，供运行控制台、断言编辑器与场景脚本的「AI 生成」入口使用。
+        拥有「管理项目」权限的用户可新增与编辑。
       </p>
-      <el-button type="primary" :disabled="!projectId" @click="openCreate">新增提供商</el-button>
+      <el-button v-if="canWrite" type="primary" @click="openCreate">新增提供商</el-button>
     </div>
 
-    <el-alert
-      v-if="!projectId"
-      class="project-hint"
-      type="info"
-      show-icon
-      :closable="false"
-      title="请先在左侧列表或顶部选择项目后再管理 AI 提供商。"
-    />
+    <ListLoadError v-if="loadError" :message="loadError" @retry="loadList" />
 
-    <ListLoadError v-if="projectId && loadError" :message="loadError" @retry="loadList" />
-
-    <el-table v-if="projectId" :data="providers" border row-key="id" v-loading="loading">
+    <el-table :data="providers" border row-key="id" v-loading="loading">
       <el-table-column prop="name" label="名称" min-width="160" />
       <el-table-column label="类型" width="140">
         <template #default="{ row }">
@@ -59,15 +50,18 @@
       </el-table-column>
       <el-table-column label="操作" width="260" fixed="right">
         <template #default="{ row }">
-          <el-button type="primary" link @click="openEdit(row)">编辑</el-button>
-          <el-button type="primary" link :loading="testingId === row.id" @click="test(row)">测试</el-button>
-          <el-button v-if="!row.isDefault" type="primary" link @click="setDefault(row)">设为默认</el-button>
-          <el-button type="danger" link :loading="deletingId === row.id" @click="remove(row)">删除</el-button>
+          <template v-if="canWrite">
+            <el-button type="primary" link @click="openEdit(row)">编辑</el-button>
+            <el-button type="primary" link :loading="testingId === row.id" @click="test(row)">测试</el-button>
+            <el-button v-if="!row.isDefault" type="primary" link @click="setDefault(row)">设为默认</el-button>
+            <el-button type="danger" link :loading="deletingId === row.id" @click="remove(row)">删除</el-button>
+          </template>
+          <span v-else class="text-secondary">只读</span>
         </template>
       </el-table-column>
     </el-table>
     <el-empty
-      v-if="projectId && !loading && !loadError && !providers.length"
+      v-if="!loading && !loadError && !providers.length"
       description="暂无 AI 提供商，点击右上角「新增提供商」创建"
     />
 
@@ -207,7 +201,7 @@
         </el-form-item>
         <el-form-item label="设为默认">
           <el-switch v-model="form.isDefault" />
-          <span class="meta-hint">同一项目最多一个默认提供商；运行控制台等入口默认选中。</span>
+          <span class="meta-hint">全平台最多一个默认提供商；运行控制台等入口默认选中。</span>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -229,8 +223,8 @@ import {
   testAIProvider,
   updateAIProvider
 } from '../../api'
+import { hasPermission } from '../../auth'
 import ListLoadError from '../../components/ListLoadError.vue'
-import { loadGlobalProjects, projectState } from '../../utils/currentProject'
 import { getListLoadErrorMessage } from '../../utils/listPageLoad'
 import { formatModelCapabilities } from '../../utils/modelCapabilities'
 
@@ -263,7 +257,6 @@ export default {
   },
   data() {
     return {
-      projectState,
       loading: false,
       loadError: '',
       providers: [],
@@ -284,8 +277,8 @@ export default {
     }
   },
   computed: {
-    projectId() {
-      return projectState.currentProjectId || ''
+    canWrite() {
+      return hasPermission('projects:write')
     },
     dialogTitle() {
       return this.editingId ? '编辑 AI 提供商' : '新增 AI 提供商'
@@ -301,7 +294,7 @@ export default {
       return this.apiKeyRequired ? 'API Key' : 'API Key（可选）'
     },
     canFetchModels() {
-      if (!this.projectId || !this.form.providerType || !this.form.baseUrl) return false
+      if (!this.form.providerType || !this.form.baseUrl) return false
       if (this.apiKeyRequired) {
         if (this.form.apiKey) return true
         return !!this.editingId
@@ -325,13 +318,6 @@ export default {
     },
   },
   watch: {
-    projectId: {
-      immediate: true,
-      handler(val) {
-        if (val) this.loadList()
-        else this.providers = []
-      }
-    },
     dialogVisible(val) {
       if (!val) {
         this.clearModelsFetchTimer()
@@ -353,12 +339,12 @@ export default {
     }
   },
   async created() {
-    if (!this.embedded) loadGlobalProjects()
     try {
       this.providerTypes = await listAIProviderTypes()
     } catch (_) {
       this.providerTypes = []
     }
+    await this.loadList()
   },
   methods: {
     modelOptionLabel(m) {
@@ -413,9 +399,9 @@ export default {
         if (this.editingId) payload.providerId = this.editingId
         let res
         if (this.editingId && !payload.apiKey) {
-          res = await listAIProviderModels(this.projectId, this.editingId)
+          res = await listAIProviderModels(this.editingId)
         } else {
-          res = await discoverAIProviderModels(this.projectId, payload)
+          res = await discoverAIProviderModels(payload)
         }
         const entries = Array.isArray(res?.models)
           ? res.models
@@ -455,11 +441,10 @@ export default {
       }
     },
     async loadList() {
-      if (!this.projectId) return
       this.loading = true
       this.loadError = ''
       try {
-        this.providers = await listAIProviders(this.projectId)
+        this.providers = await listAIProviders()
       } catch (err) {
         this.loadError = getListLoadErrorMessage(err)
       } finally {
@@ -574,11 +559,11 @@ export default {
           if (this.form.apiKey) {
             payload.apiKey = this.form.apiKey
           }
-          await updateAIProvider(this.projectId, this.editingId, payload)
+          await updateAIProvider(this.editingId, payload)
           this.$message.success('已保存')
         } else {
           payload.apiKey = this.form.apiKey || ''
-          await createAIProvider(this.projectId, payload)
+          await createAIProvider(payload)
           this.$message.success('已创建')
         }
         this.dialogVisible = false
@@ -590,7 +575,7 @@ export default {
     async test(row) {
       this.testingId = row.id
       try {
-        const res = await testAIProvider(this.projectId, row.id)
+        const res = await testAIProvider(row.id)
         const snippet = (res?.text || '').slice(0, 200)
         this.$message.success(`连接成功（${res?.elapsedMillis || 0}ms）：${snippet}`)
       } finally {
@@ -599,7 +584,7 @@ export default {
     },
     async setDefault(row) {
       try {
-        await updateAIProvider(this.projectId, row.id, {
+        await updateAIProvider(row.id, {
           name: row.name,
           providerType: row.providerType,
           baseUrl: row.baseUrl,
@@ -622,7 +607,7 @@ export default {
       }
       this.deletingId = row.id
       try {
-        await deleteAIProvider(this.projectId, row.id)
+        await deleteAIProvider(row.id)
         this.$message.success('已删除')
         await this.loadList()
       } finally {

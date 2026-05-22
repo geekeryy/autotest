@@ -432,7 +432,7 @@ export async function refreshAssistantProviders() {
   if (!assistantState.projectId) return
   try {
     const [providers, providerTypes] = await Promise.all([
-      listAIProviders(assistantState.projectId),
+      listAIProviders(),
       listAIProviderTypes(),
     ])
     assistantState.providers = Array.isArray(providers) ? providers : []
@@ -471,7 +471,7 @@ export async function refreshPaneProviderModels(paneId, providerId) {
   pane.modelsWarning = ''
   if (!pid || !assistantState.projectId) return
   try {
-    const res = await listAIProviderModels(assistantState.projectId, pid)
+    const res = await listAIProviderModels(pid)
     const ids = Array.isArray(res?.models) ? res.models.map((m) => String(m?.id || '').trim()).filter(Boolean) : []
     pane.remoteModelList = ids
     pane.modelsWarning = res?.warning ? String(res.warning) : ''

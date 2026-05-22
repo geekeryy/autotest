@@ -31,6 +31,7 @@ func (h *Handler) Register(r chi.Router) {
 		r.Get("/", h.listServers)
 		r.Get("/{serverID}/status", h.getStatus)
 		r.Get("/{serverID}/routes", h.listRoutes)
+		r.Get("/{serverID}/access-logs", h.listAccessLogs)
 
 		r.Group(func(r chi.Router) {
 			r.Use(requireProjectRole(project.ProjectRoleDeveloper))
@@ -42,6 +43,7 @@ func (h *Handler) Register(r chi.Router) {
 			r.Post("/{serverID}/routes", h.createRoute)
 			r.Put("/{serverID}/routes/{routeID}", h.updateRoute)
 			r.Delete("/{serverID}/routes/{routeID}", h.deleteRoute)
+			r.Delete("/{serverID}/access-logs", h.clearAccessLogs)
 		})
 	})
 }
@@ -157,6 +159,36 @@ func (h *Handler) listRoutes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, routes)
+}
+
+func (h *Handler) listAccessLogs(w http.ResponseWriter, r *http.Request) {
+	projectID, serverID, ok := parseServerIDs(w, r)
+	if !ok {
+		return
+	}
+	filter, err := parseAccessLogsFilter(r.URL.Query().Get)
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, err)
+		return
+	}
+	page, err := h.service.ListAccessLogs(r.Context(), projectID, serverID, filter)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, page)
+}
+
+func (h *Handler) clearAccessLogs(w http.ResponseWriter, r *http.Request) {
+	projectID, serverID, ok := parseServerIDs(w, r)
+	if !ok {
+		return
+	}
+	if err := h.service.ClearAccessLogs(r.Context(), projectID, serverID); err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *Handler) createRoute(w http.ResponseWriter, r *http.Request) {

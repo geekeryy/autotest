@@ -15,7 +15,7 @@ POSTGRES_PORT ?= 5432
 DATABASE_URL ?= postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=disable
 ADDR ?= :8080
 
-export DB_MANAGED POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD POSTGRES_HOST POSTGRES_PORT DATABASE_URL ADDR ADMIN_USERNAME ADMIN_PASSWORD JWT_SECRET LOG_LEVEL LOG_FORMAT
+export DB_MANAGED POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD POSTGRES_HOST POSTGRES_PORT DATABASE_URL ADDR ADMIN_USERNAME ADMIN_PASSWORD JWT_SECRET GITHUB_CLIENT_ID GITHUB_CLIENT_SECRET GITHUB_REDIRECT_URI ADMIN_FRONTEND_URL LOG_LEVEL LOG_FORMAT
 
 # 按文件名顺序执行数据库迁移脚本。
 MIGRATIONS := $(sort $(wildcard migrations/*.sql))
@@ -57,11 +57,21 @@ migrate: wait-db ## 执行 migrations/ 目录下的 SQL 迁移。
 	@set -e; \
 	for file in $(MIGRATIONS); do \
 		echo "执行迁移 $$file"; \
-		awk '/^--[[:space:]]+\+goose[[:space:]]+Up[[:space:]]*$$/{in_up=1; next} /^--[[:space:]]+\+goose[[:space:]]+Down[[:space:]]*$$/{in_up=0} in_up {print}' "$$file" | { \
+		if grep -qE '^--[[:space:]]+\+goose[[:space:]]+Up' "$$file"; then \
+			sql=$$(awk '/^--[[:space:]]+\+goose[[:space:]]+Up[[:space:]]*$$/{in_up=1; next} /^--[[:space:]]+\+goose[[:space:]]+Down[[:space:]]*$$/{in_up=0} in_up {print}' "$$file"); \
+		else \
+			echo "警告: $$file 缺少 -- +goose Up 标记，将执行完整文件"; \
+			sql=$$(cat "$$file"); \
+		fi; \
+		if [ -z "$$(printf '%s' "$$sql" | tr -d '[:space:]')" ]; then \
+			echo "错误: $$file 未产生可执行 SQL（请检查 -- +goose Up 段）"; \
+			exit 1; \
+		fi; \
+		printf '%s\n' "$$sql" | { \
 			if [ "$(DB_MANAGED)" = "docker" ]; then \
 				docker compose exec -T -i postgres psql -v ON_ERROR_STOP=1 -U "$(POSTGRES_USER)" -d "$(POSTGRES_DB)"; \
 			else \
-				PGPASSWORD="$(POSTGRES_PASSWORD)" psql -v ON_ERROR_STOP=1 "$$DATABASE_URL"; \
+				PGPASSWORD="$(POSTGRES_PASSWORD)" psql -v ON_ERROR_STOP=1 "$(DATABASE_URL)"; \
 			fi; \
 		}; \
 	done

@@ -29,36 +29,32 @@ func (r *Repository) CreateDataSource(ctx context.Context, input DataSourceInput
 	}
 	row := r.DB.QueryRow(ctx, `
 		insert into business_data_sources (
-			project_id, name, description, driver,
+			name, description, driver,
 			host, port, database_name, username, password_secret, ssl_mode,
 			enabled, options
 		)
-		select p.id, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
-		from projects p
-		where p.id = $1 and p.deleted_at is null
-		returning id, project_id, name, description, driver,
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		returning id, name, description, driver,
 			host, port, database_name, username, password_secret, ssl_mode, enabled,
 			options, created_at, updated_at
-	`, input.ProjectID, input.Name, input.Description, input.Driver,
+	`, input.Name, input.Description, input.Driver,
 		input.Host, input.Port, input.Database, input.Username, password, input.SSLMode,
 		boolValue(input.Enabled, true), defaultJSON(input.Options, "{}"))
 	return scanDataSource(row)
 }
 
-func (r *Repository) ListDataSources(ctx context.Context, projectID uuid.UUID) ([]DataSource, error) {
+func (r *Repository) ListDataSources(ctx context.Context) ([]DataSource, error) {
 	if r.DB == nil {
 		return nil, fmt.Errorf("database unavailable")
 	}
 	rows, err := r.DB.Query(ctx, `
-		select ds.id, ds.project_id, ds.name, ds.description,
+		select ds.id, ds.name, ds.description,
 			ds.driver, ds.host, ds.port, ds.database_name, ds.username, ds.password_secret,
 			ds.ssl_mode, ds.enabled, ds.options, ds.created_at, ds.updated_at
 		from business_data_sources ds
-		join projects p on p.id = ds.project_id and p.deleted_at is null
-		where ds.project_id = $1
-		  and ds.deleted_at is null
+		where ds.deleted_at is null
 		order by ds.created_at desc
-	`, projectID)
+	`)
 	if err != nil {
 		return nil, fmt.Errorf("list data sources: %w", err)
 	}
@@ -71,11 +67,10 @@ func (r *Repository) GetDataSource(ctx context.Context, id uuid.UUID) (*DataSour
 		return nil, fmt.Errorf("database unavailable")
 	}
 	row := r.DB.QueryRow(ctx, `
-		select ds.id, ds.project_id, ds.name, ds.description,
+		select ds.id, ds.name, ds.description,
 			ds.driver, ds.host, ds.port, ds.database_name, ds.username, ds.password_secret,
 			ds.ssl_mode, ds.enabled, ds.options, ds.created_at, ds.updated_at
 		from business_data_sources ds
-		join projects p on p.id = ds.project_id and p.deleted_at is null
 		where ds.id = $1 and ds.deleted_at is null
 	`, id)
 	ds, err := scanDataSource(row)
@@ -110,18 +105,14 @@ func (r *Repository) UpdateDataSource(ctx context.Context, id uuid.UUID, input D
 			enabled = $11,
 			options = $12,
 			updated_at = now()
-		from projects p
 		where ds.id = $1
-		  and ds.project_id = $13
-		  and p.id = ds.project_id
-		  and p.deleted_at is null
 		  and ds.deleted_at is null
-		returning ds.id, ds.project_id, ds.name, ds.description,
+		returning ds.id, ds.name, ds.description,
 			ds.driver, ds.host, ds.port, ds.database_name, ds.username, ds.password_secret,
 			ds.ssl_mode, ds.enabled, ds.options, ds.created_at, ds.updated_at
 	`, id, input.Name, input.Description, input.Driver, input.Host, input.Port, input.Database,
 		input.Username, password, input.SSLMode, boolValue(input.Enabled, true),
-		defaultJSON(input.Options, "{}"), input.ProjectID)
+		defaultJSON(input.Options, "{}"))
 	ds, err := scanDataSource(row)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -166,7 +157,7 @@ func (r *Repository) CreateSQLParameterSource(ctx context.Context, input SQLPara
 		from new_source_id
 		cross join projects p
 		join services s on s.project_id = p.id and s.id = $2 and s.deleted_at is null
-		join business_data_sources ds on ds.project_id = p.id and ds.id = $3 and ds.deleted_at is null
+		join business_data_sources ds on ds.id = $3 and ds.deleted_at is null
 		where p.id = $1 and p.deleted_at is null
 		returning id, project_id, service_id, data_source_id, source_key, name, description,
 			sql_text, input_params, enabled, timeout_millis,
@@ -229,7 +220,7 @@ func (r *Repository) GetExecutableSource(ctx context.Context, id uuid.UUID) (*So
 			sps.id, sps.project_id, sps.service_id, sps.data_source_id, sps.source_key, sps.name,
 			sps.description, sps.sql_text, sps.input_params,
 			sps.enabled, sps.timeout_millis, sps.created_at, sps.updated_at,
-			ds.id, ds.project_id, ds.name, ds.description,
+			ds.id, ds.name, ds.description,
 			ds.driver, ds.host, ds.port, ds.database_name, ds.username, ds.password_secret,
 			ds.ssl_mode, ds.enabled, ds.options, ds.created_at, ds.updated_at
 		from sql_parameter_sources sps
@@ -258,7 +249,7 @@ func (r *Repository) UpdateSQLParameterSource(ctx context.Context, id uuid.UUID,
 			updated_at = now()
 		from projects p
 		join services s on s.project_id = p.id and s.id = $9 and s.deleted_at is null
-		join business_data_sources ds on ds.project_id = p.id and ds.id = $10 and ds.deleted_at is null
+		join business_data_sources ds on ds.id = $10 and ds.deleted_at is null
 		where sps.id = $1
 		  and sps.project_id = $11
 		  and sps.service_id = s.id
@@ -307,12 +298,11 @@ func (r *Repository) ListExecutableSources(ctx context.Context, projectID, servi
 			sps.id, sps.project_id, sps.service_id, sps.data_source_id, sps.source_key, sps.name,
 			sps.description, sps.sql_text, sps.input_params,
 			sps.enabled, sps.timeout_millis, sps.created_at, sps.updated_at,
-			ds.id, ds.project_id, ds.name, ds.description,
+			ds.id, ds.name, ds.description,
 			ds.driver, ds.host, ds.port, ds.database_name, ds.username, ds.password_secret,
 			ds.ssl_mode, ds.enabled, ds.options, ds.created_at, ds.updated_at
 		from sql_parameter_sources sps
 		join business_data_sources ds on ds.id = sps.data_source_id
-			and ds.project_id = sps.project_id
 			and ds.deleted_at is null
 			and ds.enabled
 		join projects p on p.id = sps.project_id and p.deleted_at is null
@@ -351,7 +341,7 @@ type rowScanner interface {
 func scanDataSource(row rowScanner) (*DataSource, error) {
 	var ds DataSource
 	if err := row.Scan(
-		&ds.ID, &ds.ProjectID, &ds.Name, &ds.Description,
+		&ds.ID, &ds.Name, &ds.Description,
 		&ds.Driver, &ds.Host, &ds.Port, &ds.Database, &ds.Username, &ds.Password,
 		&ds.SSLMode, &ds.Enabled, &ds.Options, &ds.CreatedAt, &ds.UpdatedAt,
 	); err != nil {
@@ -414,7 +404,7 @@ func scanSourceWithDataSource(row rowScanner) (*SourceWithDataSource, error) {
 		&source.Source.ID, &source.Source.ProjectID, &source.Source.ServiceID, &source.Source.DataSourceID,
 		&source.Source.Key, &source.Source.Name, &source.Source.Description, &source.Source.SQL, &source.Source.InputParams,
 		&source.Source.Enabled, &source.Source.TimeoutMillis, &source.Source.CreatedAt, &source.Source.UpdatedAt,
-		&source.DataSource.ID, &source.DataSource.ProjectID,
+		&source.DataSource.ID,
 		&source.DataSource.Name, &source.DataSource.Description, &source.DataSource.Driver, &source.DataSource.Host,
 		&source.DataSource.Port, &source.DataSource.Database, &source.DataSource.Username, &source.DataSource.Password,
 		&source.DataSource.SSLMode, &source.DataSource.Enabled, &source.DataSource.Options,

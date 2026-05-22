@@ -89,7 +89,7 @@ type ProjectService interface {
 // configs) and SQL parameter sources (parameterised queries used inline
 // in templates).
 type ParamSourceService interface {
-	ListDataSources(ctx context.Context, projectID uuid.UUID) ([]paramsource.DataSource, error)
+	ListDataSources(ctx context.Context) ([]paramsource.DataSource, error)
 	CreateDataSource(ctx context.Context, input paramsource.DataSourceInput) (*paramsource.DataSource, error)
 	UpdateDataSource(ctx context.Context, id uuid.UUID, input paramsource.DataSourceInput) (*paramsource.DataSource, error)
 	TestDataSource(ctx context.Context, id uuid.UUID) error

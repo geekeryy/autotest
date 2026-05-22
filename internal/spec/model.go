@@ -34,6 +34,14 @@ type Endpoint struct {
 	UpdatedAt      time.Time       `json:"updatedAt"`
 }
 
+// ensureTags returns an empty slice when tags is nil so PostgreSQL text[] receives '{}' not NULL.
+func ensureTags(tags []string) []string {
+	if tags == nil {
+		return []string{}
+	}
+	return tags
+}
+
 type ImportResult struct {
 	Hash      string          `json:"hash"`
 	Title     string          `json:"title,omitempty"`

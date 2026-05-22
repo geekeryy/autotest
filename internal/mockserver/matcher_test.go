@@ -124,6 +124,7 @@ func testRoute(method, path string) MockRoute {
 		Path:             path,
 		Enabled:          true,
 		RequestMatch:     []byte(`{}`),
+		ResponseMode:     ResponseModeBody,
 		ResponseStatus:   http.StatusOK,
 		ResponseHeaders:  []byte(`{}`),
 		ResponseBodyType: ResponseBodyTypeJSON,

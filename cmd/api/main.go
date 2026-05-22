@@ -34,9 +34,12 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
+	"github.com/joho/godotenv"
 )
 
 func main() {
+	loadDotEnvIfDev()
+
 	logx.Init()
 
 	ctx := context.Background()
@@ -115,21 +118,35 @@ func main() {
 	specHandler := spec.NewHandler(specSvc, notificationSvc)
 	authHandler.RegisterPublic(api)
 
+	authSvc.WithPendingUserNotifier(func(ctx context.Context, user *auth.User) error {
+		adminIDs, err := authRepo.ListUserIDsByPermission(ctx, auth.PermissionUsersManage)
+		if err != nil {
+			return err
+		}
+		return notificationSvc.CreateUserPendingNotifications(ctx, adminIDs, user.ID, user.Username, user.DisplayName, user.Email)
+	})
+
+	api.Group(func(r chi.Router) {
+		r.Use(authSvc.Authenticate)
+		authHandler.RegisterAuthenticated(r)
+	})
+
 	// 主受保护路由组：JWT 与 API Key 共用入口，但默认通过 RejectAPIKey 拒绝 API Key，
 	// 避免新增加的 API Key 来源意外触达未经审计的接口。
 	api.Group(func(r chi.Router) {
 		r.Use(authSvc.Authenticate)
+		r.Use(authSvc.RequireActiveUser())
 		r.Use(authSvc.RejectAPIKey())
 		authHandler.RegisterProtected(r)
 		projectHandler.Register(r)
 		testcase.NewHandler(caseSvc).Register(r)
 		specHandler.Register(r)
 		scenario.NewHandler(scenarioSvc).Register(r)
-		paramsource.NewHandler(paramSourceSvc).Register(r)
+		paramsource.NewHandler(paramSourceSvc, authSvc).Register(r)
 		scriptlibrary.NewHandler(scriptLibrarySvc).Register(r)
 		mockserver.NewHandler(mockServerSvc, projectHandler).Register(r)
 		mockset.NewHandler(mockSetSvc, projectHandler).Register(r)
-		projectprompt.NewHandler(projectPromptSvc, projectHandler).Register(r)
+		projectprompt.NewHandler(projectPromptSvc, authSvc).Register(r)
 
 		// 全局 AI 助理与智能分析共用一份内置工具配置：智能分析仅注入只读
 		// 工具，浮窗会话再额外挂载受控写工具。任何写工具调用都会被 SSE 流
@@ -143,7 +160,7 @@ func main() {
 		aiReadOnly := builtin.ReadOnly(toolDeps)
 		aiAllTools := builtin.All(toolDeps)
 
-		aiprovider.NewHandler(aiProviderSvc, projectHandler, projectPromptSvc).
+		aiprovider.NewHandler(aiProviderSvc, projectHandler, projectPromptSvc, authSvc).
 			WithAssistant(aisession.NewStoreAdapter(aiSessionSvc), aiAllTools).
 			Register(r)
 		aisession.NewHandler(aiSessionSvc, projectHandler).Register(r)
@@ -249,4 +266,13 @@ func devCORS(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func loadDotEnvIfDev() {
+	for _, key := range []string{"GO_ENV", "ENV", "APP_ENV"} {
+		if strings.EqualFold(os.Getenv(key), "production") {
+			return
+		}
+	}
+	_ = godotenv.Load()
 }

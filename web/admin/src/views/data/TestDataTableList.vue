@@ -531,7 +531,7 @@ export default {
     },
     async loadAIProviders() {
       try {
-        this.aiProviders = await listAIProviders(this.projectId)
+        this.aiProviders = await listAIProviders()
       } catch {
         this.aiProviders = []
       }

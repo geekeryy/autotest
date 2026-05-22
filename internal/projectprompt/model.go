@@ -8,7 +8,7 @@ import (
 )
 
 // ErrNotFound is returned when a prompt record cannot be located.
-var ErrNotFound = errors.New("project ai prompt not found")
+var ErrNotFound = errors.New("platform ai prompt not found")
 
 // Supported action values (must match the DB CHECK constraint).
 const (
@@ -30,10 +30,9 @@ var ActionLabels = map[string]string{
 	ActionRaw:                "通用对话",
 }
 
-// ProjectPrompt is the API-facing representation of a per-project prompt override.
+// ProjectPrompt is the API-facing representation of a platform prompt override.
 type ProjectPrompt struct {
 	ID           uuid.UUID  `json:"id"`
-	ProjectID    uuid.UUID  `json:"projectId"`
 	Action       string     `json:"action"`
 	Name         string     `json:"name"`
 	SystemPrompt string     `json:"systemPrompt"`
@@ -44,7 +43,7 @@ type ProjectPrompt struct {
 	UpdatedAt    time.Time  `json:"updatedAt"`
 }
 
-// CreateInput is the payload for POST /projects/{projectID}/ai-prompts.
+// CreateInput is the payload for POST /ai-prompts.
 type CreateInput struct {
 	Action       string     `json:"action"`
 	Name         string     `json:"name"`
@@ -54,7 +53,7 @@ type CreateInput struct {
 	Enabled      *bool      `json:"enabled"`
 }
 
-// UpdateInput is the payload for PUT /projects/{projectID}/ai-prompts/{promptID}.
+// UpdateInput is the payload for PUT /ai-prompts/{promptID}.
 type UpdateInput struct {
 	Name         string     `json:"name"`
 	SystemPrompt string     `json:"systemPrompt"`

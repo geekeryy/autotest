@@ -19,6 +19,18 @@ func NewImporter() *Importer {
 	return &Importer{}
 }
 
+// importValidateOptions relaxes kin-openapi document validation so imperfect
+// vendor specs (e.g. default codes vs full enum labels) can still be imported.
+func importValidateOptions() []openapi3.ValidationOption {
+	return []openapi3.ValidationOption{
+		openapi3.DisableExamplesValidation(),
+		openapi3.DisableSchemaDefaultsValidation(),
+		// Vendor specs often use JSON-Schema-style "examples" on schemas (OAS 3.0
+		// only defines "example") or misplace property blocks as schema siblings.
+		openapi3.AllowExtraSiblingFields("examples", "BDCZLXXLIST"),
+	}
+}
+
 func (i *Importer) Import(ctx context.Context, data []byte) (*ImportResult, error) {
 	doc, err := loadDocument(ctx, data)
 	if err != nil {
@@ -34,9 +46,10 @@ func (i *Importer) Import(ctx context.Context, data []byte) (*ImportResult, erro
 	})
 
 	snapshot := map[string]any{
-		"title":     doc.Info.Title,
-		"version":   doc.Info.Version,
-		"endpoints": endpoints,
+		"title":          doc.Info.Title,
+		"version":        doc.Info.Version,
+		"openapiVersion": doc.OpenAPI,
+		"endpoints":      endpoints,
 	}
 	rawSnapshot, err := json.Marshal(snapshot)
 	if err != nil {
@@ -62,7 +75,7 @@ func loadDocument(ctx context.Context, data []byte) (*openapi3.T, error) {
 
 	doc, err := loader.LoadFromData(data)
 	if err == nil {
-		if err := doc.Validate(ctx); err != nil {
+		if err := doc.Validate(ctx, importValidateOptions()...); err != nil {
 			return nil, fmt.Errorf("validate openapi document: %w", err)
 		}
 		return doc, nil
@@ -97,7 +110,7 @@ func convertSwagger2(ctx context.Context, loader *openapi3.Loader, doc2 *openapi
 	if convErr != nil {
 		return nil, fmt.Errorf("convert swagger 2.0 document: %w", convErr)
 	}
-	if err := converted.Validate(ctx); err != nil {
+	if err := converted.Validate(ctx, importValidateOptions()...); err != nil {
 		return nil, fmt.Errorf("validate converted swagger document: %w", err)
 	}
 	return converted, nil
@@ -115,14 +128,14 @@ func collectEndpoints(doc *openapi3.T) []Endpoint {
 				continue
 			}
 
-			req := requestSchema(op.operation, doc.Security)
+			req := requestSchema(op.operation, item.Parameters, doc.Security)
 			resp := responseSchema(op.operation)
 			ep := Endpoint{
 				Method:         strings.ToUpper(op.method),
 				Path:           path,
 				OperationID:    op.operation.OperationID,
 				Summary:        op.operation.Summary,
-				Tags:           append([]string(nil), op.operation.Tags...),
+				Tags:           ensureTags(op.operation.Tags),
 				RequestSchema:  req,
 				ResponseSchema: resp,
 			}
@@ -165,9 +178,9 @@ const (
 	httpMethodTrace   = "trace"
 )
 
-func requestSchema(op *openapi3.Operation, globalSecurity openapi3.SecurityRequirements) json.RawMessage {
+func requestSchema(op *openapi3.Operation, pathParams openapi3.Parameters, globalSecurity openapi3.SecurityRequirements) json.RawMessage {
 	payload := map[string]any{
-		"parameters": parameters(op.Parameters),
+		"parameters": parameters(mergeParameters(pathParams, op.Parameters)),
 	}
 	if op.RequestBody != nil && op.RequestBody.Value != nil {
 		if schema := contentSchema(op.RequestBody.Value.Content); len(schema) > 0 {
@@ -246,6 +259,37 @@ func responseSchema(op *openapi3.Operation) json.RawMessage {
 	}
 
 	return []byte(`{}`)
+}
+
+func mergeParameters(pathParams, opParams openapi3.Parameters) openapi3.Parameters {
+	if len(pathParams) == 0 {
+		return opParams
+	}
+	if len(opParams) == 0 {
+		return pathParams
+	}
+
+	merged := make(openapi3.Parameters, 0, len(pathParams)+len(opParams))
+	index := make(map[string]int, len(pathParams)+len(opParams))
+	add := func(param *openapi3.ParameterRef) {
+		if param == nil || param.Value == nil {
+			return
+		}
+		key := param.Value.In + "\x00" + param.Value.Name
+		if pos, ok := index[key]; ok {
+			merged[pos] = param
+			return
+		}
+		index[key] = len(merged)
+		merged = append(merged, param)
+	}
+	for _, param := range pathParams {
+		add(param)
+	}
+	for _, param := range opParams {
+		add(param)
+	}
+	return merged
 }
 
 func parameters(params openapi3.Parameters) []map[string]any {
@@ -455,7 +499,7 @@ type endpointFingerprintPayload struct {
 }
 
 func endpointFingerprint(ep Endpoint) string {
-	tags := append([]string(nil), ep.Tags...)
+	tags := ensureTags(ep.Tags)
 	sort.Strings(tags)
 	payload := endpointFingerprintPayload{
 		Method:         strings.ToUpper(ep.Method),

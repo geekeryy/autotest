@@ -289,7 +289,7 @@ export default {
       this.loading = true
       try {
         const [dataSources, sources] = await Promise.all([
-          listDataSources({ projectId: this.projectId }),
+          listDataSources(),
           listSQLParameterSources({ projectId: this.projectId, serviceId: this.serviceId })
         ])
         this.dataSources = dataSources

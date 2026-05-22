@@ -176,6 +176,13 @@ export default {
       }
 
       const payload = this.parsePayload(item?.payload)
+      if (item?.type === 'user_pending') {
+        this.popoverVisible = false
+        if (this.$route.path !== '/users') {
+          await this.$router.push('/users')
+        }
+        return
+      }
       if (payload?.projectId) {
         setCurrentProjectId(payload.projectId)
       }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"autotest/internal/store"
 
@@ -184,17 +185,19 @@ func (r *Repository) CreateRoute(ctx context.Context, projectID, serverID uuid.U
 	row := r.DB.QueryRow(ctx, `
 		insert into mock_routes (
 			mock_server_id, method, path, priority, enabled, request_match,
-			response_status, response_headers, response_body, response_body_type, delay_millis
+			response_mode, response_status, response_headers, redirect_location,
+			response_body, response_body_type, delay_millis
 		)
-		select ms.id, upper($3), $4, $5, $6, $7, $8, $9, $10, $11, $12
+		select ms.id, upper($3), $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
 		from mock_servers ms
 		join projects p on p.id = ms.project_id and p.deleted_at is null
 		where ms.project_id = $1 and ms.id = $2 and ms.deleted_at is null
 		returning id, mock_server_id, method, path, priority, enabled, request_match,
-			response_status, response_headers, response_body, response_body_type,
-			delay_millis, created_at, updated_at
+			response_mode, response_status, response_headers, redirect_location,
+			response_body, response_body_type, delay_millis, created_at, updated_at
 	`, projectID, serverID, input.Method, input.Path, input.Priority, boolValue(input.Enabled, true),
-		defaultJSON(input.RequestMatch, "{}"), input.ResponseStatus, defaultJSON(input.ResponseHeaders, "{}"),
+		defaultJSON(input.RequestMatch, "{}"), input.ResponseMode, input.ResponseStatus,
+		defaultJSON(input.ResponseHeaders, "{}"), input.RedirectLocation,
 		input.ResponseBody, input.ResponseBodyType, input.DelayMillis)
 	route, err := scanRoute(row)
 	if err != nil {
@@ -213,8 +216,8 @@ func (r *Repository) ListRoutes(ctx context.Context, projectID, serverID uuid.UU
 	}
 	rows, err := r.DB.Query(ctx, `
 		select mr.id, mr.mock_server_id, mr.method, mr.path, mr.priority, mr.enabled, mr.request_match,
-			mr.response_status, mr.response_headers, mr.response_body, mr.response_body_type,
-			mr.delay_millis, mr.created_at, mr.updated_at
+			mr.response_mode, mr.response_status, mr.response_headers, mr.redirect_location,
+			mr.response_body, mr.response_body_type, mr.delay_millis, mr.created_at, mr.updated_at
 		from mock_routes mr
 		join mock_servers ms on ms.id = mr.mock_server_id and ms.deleted_at is null
 		join projects p on p.id = ms.project_id and p.deleted_at is null
@@ -235,8 +238,8 @@ func (r *Repository) ListEnabledRoutesForServer(ctx context.Context, serverID uu
 	}
 	rows, err := r.DB.Query(ctx, `
 		select mr.id, mr.mock_server_id, mr.method, mr.path, mr.priority, mr.enabled, mr.request_match,
-			mr.response_status, mr.response_headers, mr.response_body, mr.response_body_type,
-			mr.delay_millis, mr.created_at, mr.updated_at
+			mr.response_mode, mr.response_status, mr.response_headers, mr.redirect_location,
+			mr.response_body, mr.response_body_type, mr.delay_millis, mr.created_at, mr.updated_at
 		from mock_routes mr
 		join mock_servers ms on ms.id = mr.mock_server_id and ms.deleted_at is null
 		join projects p on p.id = ms.project_id and p.deleted_at is null
@@ -264,11 +267,13 @@ func (r *Repository) UpdateRoute(ctx context.Context, projectID, serverID, route
 			priority = $6,
 			enabled = $7,
 			request_match = $8,
-			response_status = $9,
-			response_headers = $10,
-			response_body = $11,
-			response_body_type = $12,
-			delay_millis = $13,
+			response_mode = $9,
+			response_status = $10,
+			response_headers = $11,
+			redirect_location = $12,
+			response_body = $13,
+			response_body_type = $14,
+			delay_millis = $15,
 			updated_at = now()
 		from mock_servers ms
 		join projects p on p.id = ms.project_id and p.deleted_at is null
@@ -279,10 +284,11 @@ func (r *Repository) UpdateRoute(ctx context.Context, projectID, serverID, route
 		  and ms.deleted_at is null
 		  and mr.deleted_at is null
 		returning mr.id, mr.mock_server_id, mr.method, mr.path, mr.priority, mr.enabled, mr.request_match,
-			mr.response_status, mr.response_headers, mr.response_body, mr.response_body_type,
-			mr.delay_millis, mr.created_at, mr.updated_at
+			mr.response_mode, mr.response_status, mr.response_headers, mr.redirect_location,
+			mr.response_body, mr.response_body_type, mr.delay_millis, mr.created_at, mr.updated_at
 	`, projectID, serverID, routeID, input.Method, input.Path, input.Priority, boolValue(input.Enabled, true),
-		defaultJSON(input.RequestMatch, "{}"), input.ResponseStatus, defaultJSON(input.ResponseHeaders, "{}"),
+		defaultJSON(input.RequestMatch, "{}"), input.ResponseMode, input.ResponseStatus,
+		defaultJSON(input.ResponseHeaders, "{}"), input.RedirectLocation,
 		input.ResponseBody, input.ResponseBodyType, input.DelayMillis)
 	route, err := scanRoute(row)
 	if err != nil {
@@ -317,6 +323,163 @@ func (r *Repository) DeleteRoute(ctx context.Context, projectID, serverID, route
 		return ErrMockRouteNotFound
 	}
 	return nil
+}
+
+// InsertAccessLog persists one mock server access log entry.
+func (r *Repository) InsertAccessLog(ctx context.Context, log MockAccessLog) error {
+	if r.DB == nil {
+		return fmt.Errorf("database unavailable")
+	}
+	_, err := r.DB.Exec(ctx, `
+		insert into mock_access_logs (
+			project_id, mock_server_id, mock_route_id, method, path, query, client_ip,
+			matched, response_status, duration_ms, error_message,
+			request_headers, request_body, response_headers, response_body
+		) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+	`, log.ProjectID, log.MockServerID, log.MockRouteID, log.Method, log.Path, log.Query, log.ClientIP,
+		log.Matched, log.ResponseStatus, log.DurationMs, log.ErrorMessage,
+		defaultJSON(log.RequestHeaders, "{}"), log.RequestBody,
+		defaultJSON(log.ResponseHeaders, "{}"), log.ResponseBody)
+	if err != nil {
+		return fmt.Errorf("insert mock access log: %w", err)
+	}
+	return nil
+}
+
+// ListAccessLogs returns paginated access logs for a project-owned mock server.
+func (r *Repository) ListAccessLogs(ctx context.Context, projectID, serverID uuid.UUID, filter ListAccessLogsFilter) ([]MockAccessLog, error) {
+	if r.DB == nil {
+		return nil, fmt.Errorf("database unavailable")
+	}
+	where, args := accessLogsWhere(projectID, serverID, filter)
+	args = append(args, filter.Limit, filter.Offset)
+	query := `
+		select mal.id, mal.project_id, mal.mock_server_id, mal.mock_route_id,
+			coalesce(mr.method, ''), coalesce(mr.path, ''),
+			mal.method, mal.path, mal.query, mal.client_ip, mal.matched,
+			mal.response_status, mal.duration_ms, mal.error_message,
+			mal.request_headers, mal.request_body, mal.response_headers, mal.response_body,
+			mal.created_at
+		from mock_access_logs mal
+		join mock_servers ms on ms.id = mal.mock_server_id and ms.deleted_at is null
+		left join mock_routes mr on mr.id = mal.mock_route_id and mr.deleted_at is null
+		where ` + where + `
+		order by mal.created_at desc
+		limit $` + fmt.Sprint(len(args)-1) + ` offset $` + fmt.Sprint(len(args))
+	rows, err := r.DB.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list mock access logs: %w", err)
+	}
+	defer rows.Close()
+	return scanAccessLogs(rows)
+}
+
+// CountAccessLogs counts access logs matching the filter for a mock server.
+func (r *Repository) CountAccessLogs(ctx context.Context, projectID, serverID uuid.UUID, filter ListAccessLogsFilter) (int, error) {
+	if r.DB == nil {
+		return 0, fmt.Errorf("database unavailable")
+	}
+	where, args := accessLogsWhere(projectID, serverID, filter)
+	query := `
+		select count(*)
+		from mock_access_logs mal
+		join mock_servers ms on ms.id = mal.mock_server_id and ms.deleted_at is null
+		where ` + where
+	var total int
+	if err := r.DB.QueryRow(ctx, query, args...).Scan(&total); err != nil {
+		return 0, fmt.Errorf("count mock access logs: %w", err)
+	}
+	return total, nil
+}
+
+// ClearAccessLogs deletes all access logs for a project-owned mock server.
+func (r *Repository) ClearAccessLogs(ctx context.Context, projectID, serverID uuid.UUID) error {
+	if r.DB == nil {
+		return fmt.Errorf("database unavailable")
+	}
+	tag, err := r.DB.Exec(ctx, `
+		delete from mock_access_logs mal
+		using mock_servers ms
+		where mal.mock_server_id = ms.id
+		  and ms.project_id = $1
+		  and ms.id = $2
+		  and ms.deleted_at is null
+	`, projectID, serverID)
+	if err != nil {
+		return fmt.Errorf("clear mock access logs: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		if _, err := r.GetServer(ctx, projectID, serverID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func accessLogsWhere(projectID, serverID uuid.UUID, filter ListAccessLogsFilter) (string, []any) {
+	parts := []string{
+		"ms.project_id = $1",
+		"mal.mock_server_id = $2",
+	}
+	args := []any{projectID, serverID}
+	if filter.StatusFrom != nil {
+		args = append(args, *filter.StatusFrom)
+		parts = append(parts, fmt.Sprintf("mal.response_status >= $%d", len(args)))
+	}
+	if filter.StatusTo != nil {
+		args = append(args, *filter.StatusTo)
+		parts = append(parts, fmt.Sprintf("mal.response_status <= $%d", len(args)))
+	}
+	if filter.Matched != nil {
+		args = append(args, *filter.Matched)
+		parts = append(parts, fmt.Sprintf("mal.matched = $%d", len(args)))
+	}
+	if filter.RouteID != nil {
+		args = append(args, *filter.RouteID)
+		parts = append(parts, fmt.Sprintf("mal.mock_route_id = $%d", len(args)))
+	}
+	if filter.From != nil {
+		args = append(args, *filter.From)
+		parts = append(parts, fmt.Sprintf("mal.created_at >= $%d", len(args)))
+	}
+	if filter.To != nil {
+		args = append(args, *filter.To)
+		parts = append(parts, fmt.Sprintf("mal.created_at <= $%d", len(args)))
+	}
+	return strings.Join(parts, " and "), args
+}
+
+func scanAccessLog(row rowScanner) (*MockAccessLog, error) {
+	var log MockAccessLog
+	if err := row.Scan(
+		&log.ID, &log.ProjectID, &log.MockServerID, &log.MockRouteID,
+		&log.RouteMethod, &log.RoutePath,
+		&log.Method, &log.Path, &log.Query, &log.ClientIP, &log.Matched,
+		&log.ResponseStatus, &log.DurationMs, &log.ErrorMessage,
+		&log.RequestHeaders, &log.RequestBody, &log.ResponseHeaders, &log.ResponseBody,
+		&log.CreatedAt,
+	); err != nil {
+		return nil, err
+	}
+	return &log, nil
+}
+
+func scanAccessLogs(rows pgx.Rows) ([]MockAccessLog, error) {
+	var logs []MockAccessLog
+	for rows.Next() {
+		log, err := scanAccessLog(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan mock access log: %w", err)
+		}
+		logs = append(logs, *log)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if logs == nil {
+		return []MockAccessLog{}, nil
+	}
+	return logs, nil
 }
 
 type rowScanner interface {
@@ -356,9 +519,9 @@ func scanRoute(row rowScanner) (*MockRoute, error) {
 	var route MockRoute
 	if err := row.Scan(
 		&route.ID, &route.MockServerID, &route.Method, &route.Path, &route.Priority,
-		&route.Enabled, &route.RequestMatch, &route.ResponseStatus, &route.ResponseHeaders,
-		&route.ResponseBody, &route.ResponseBodyType, &route.DelayMillis,
-		&route.CreatedAt, &route.UpdatedAt,
+		&route.Enabled, &route.RequestMatch, &route.ResponseMode, &route.ResponseStatus,
+		&route.ResponseHeaders, &route.RedirectLocation, &route.ResponseBody,
+		&route.ResponseBodyType, &route.DelayMillis, &route.CreatedAt, &route.UpdatedAt,
 	); err != nil {
 		return nil, err
 	}

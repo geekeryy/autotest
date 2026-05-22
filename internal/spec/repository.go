@@ -93,6 +93,7 @@ func (r *Repository) SyncEndpoints(ctx context.Context, projectID, serviceID, sp
 	for _, endpoint := range endpoints {
 		endpoint.ServiceID = serviceID
 		endpoint.SpecID = specID
+		tags := ensureTags(endpoint.Tags)
 
 		row := r.DB.QueryRow(ctx, `
 			insert into api_endpoints (
@@ -121,7 +122,7 @@ func (r *Repository) SyncEndpoints(ctx context.Context, projectID, serviceID, sp
 				request_schema, response_schema, fingerprint, created_at, updated_at,
 				(xmax = 0) AS inserted,
 				(xmax <> 0) AS row_modified
-		`, projectID, serviceID, specID, endpoint.Method, endpoint.Path, endpoint.OperationID, endpoint.Summary, endpoint.Tags, endpoint.RequestSchema, endpoint.ResponseSchema, endpoint.Fingerprint)
+		`, projectID, serviceID, specID, endpoint.Method, endpoint.Path, endpoint.OperationID, endpoint.Summary, tags, endpoint.RequestSchema, endpoint.ResponseSchema, endpoint.Fingerprint)
 
 		var saved Endpoint
 		var inserted, rowModified bool

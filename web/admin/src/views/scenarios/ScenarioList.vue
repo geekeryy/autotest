@@ -286,7 +286,7 @@ export default {
         this.dataSources = []
         return
       }
-      this.dataSources = await listDataSources({ projectId: this.projectId })
+      this.dataSources = await listDataSources()
     },
 
     scenarioById(id) {

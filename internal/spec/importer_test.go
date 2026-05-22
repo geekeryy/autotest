@@ -3,6 +3,7 @@ package spec
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"testing"
 )
 
@@ -347,6 +348,215 @@ paths:
 	}
 }
 
+func TestImporterAllowsSchemaExtraSiblingFields(t *testing.T) {
+	t.Parallel()
+
+	doc := []byte(`
+openapi: 3.0.3
+info:
+  title: Extra Siblings API
+  version: 1.0.0
+components:
+  schemas:
+    order_detail:
+      type: object
+      properties:
+        TDYS:
+          type: string
+          enum: ["06 不动产租赁"]
+          examples:
+            - "06"
+          default: "06"
+      description: order detail
+      BDCZLXXLIST:
+        type: array
+        items:
+          type: string
+paths:
+  /orders:
+    post:
+      operationId: createOrder
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/order_detail"
+      responses:
+        "200":
+          description: ok
+`)
+
+	result, err := NewImporter().Import(context.Background(), doc)
+	if err != nil {
+		t.Fatalf("import openapi with extra schema siblings: %v", err)
+	}
+	if len(result.Endpoints) != 1 {
+		t.Fatalf("expected 1 endpoint, got %d", len(result.Endpoints))
+	}
+}
+
+func TestImportTMSInvoiceOpenAPI(t *testing.T) {
+	t.Parallel()
+
+	data, err := os.ReadFile("../../tms-invoice-openapi-docs-1015.yaml")
+	if err != nil {
+		t.Skip("tms fixture not present:", err)
+	}
+
+	result, err := NewImporter().Import(context.Background(), data)
+	if err != nil {
+		t.Fatalf("import tms openapi: %v", err)
+	}
+	if len(result.Endpoints) == 0 {
+		t.Fatal("expected endpoints from tms openapi")
+	}
+}
+
+func TestImporterSkipsSchemaDefaultsValidation(t *testing.T) {
+	t.Parallel()
+
+	doc := []byte(`
+openapi: 3.0.3
+info:
+  title: Defaults API
+  version: 1.0.0
+components:
+  schemas:
+    common_order_req:
+      type: object
+      properties:
+        TDYS:
+          type: string
+          enum:
+            - "01 成品油"
+            - "06 不动产租赁"
+          default: "06"
+paths:
+  /orders:
+    post:
+      operationId: createOrder
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/common_order_req"
+      responses:
+        "200":
+          description: ok
+`)
+
+	result, err := NewImporter().Import(context.Background(), doc)
+	if err != nil {
+		t.Fatalf("import openapi with mismatched default/enum: %v", err)
+	}
+	if len(result.Endpoints) != 1 {
+		t.Fatalf("expected 1 endpoint, got %d", len(result.Endpoints))
+	}
+}
+
+func TestImporterParsesOpenAPI31Endpoints(t *testing.T) {
+	t.Parallel()
+
+	doc := []byte(`
+openapi: 3.1.0
+info:
+  title: OAS31 API
+  version: 1.0.0
+paths:
+  /items/{id}:
+    get:
+      operationId: getItem
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+`)
+
+	result, err := NewImporter().Import(context.Background(), doc)
+	if err != nil {
+		t.Fatalf("import openapi 3.1: %v", err)
+	}
+	if len(result.Endpoints) != 1 {
+		t.Fatalf("expected 1 endpoint, got %d", len(result.Endpoints))
+	}
+}
+
+func TestImporterMergesPathLevelParameters(t *testing.T) {
+	t.Parallel()
+
+	doc := []byte(`
+openapi: 3.0.3
+info:
+  title: Path Params API
+  version: 1.0.0
+paths:
+  /items/{id}:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+      - in: query
+        name: tenant
+        schema:
+          type: string
+    get:
+      operationId: getItem
+      parameters:
+        - in: query
+          name: tenant
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: ok
+`)
+
+	result, err := NewImporter().Import(context.Background(), doc)
+	if err != nil {
+		t.Fatalf("import path-level parameters: %v", err)
+	}
+	if len(result.Endpoints) != 1 {
+		t.Fatalf("expected 1 endpoint, got %d", len(result.Endpoints))
+	}
+
+	var requestSchema map[string]any
+	if err := json.Unmarshal(result.Endpoints[0].RequestSchema, &requestSchema); err != nil {
+		t.Fatalf("decode request schema: %v", err)
+	}
+	parameters, _ := requestSchema["parameters"].([]any)
+	if len(parameters) != 2 {
+		t.Fatalf("expected merged path and query parameters, got %#v", parameters)
+	}
+
+	byName := map[string]map[string]any{}
+	for _, item := range parameters {
+		param, _ := item.(map[string]any)
+		name, _ := param["name"].(string)
+		byName[name] = param
+	}
+	if byName["id"]["in"] != "path" || byName["id"]["required"] != true {
+		t.Fatalf("expected path parameter id, got %#v", byName["id"])
+	}
+	if byName["tenant"]["required"] != true {
+		t.Fatalf("expected operation-level tenant override to win, got %#v", byName["tenant"])
+	}
+}
+
 func TestImporterParsesSwagger2Endpoints(t *testing.T) {
 	t.Parallel()
 
@@ -447,5 +657,39 @@ definitions:
 	password, _ := properties["password"].(map[string]any)
 	if username["example"] != "admin" || password["example"] != "admin123" {
 		t.Fatalf("expected dereferenced login examples, got %#v", body)
+	}
+}
+
+func TestImporterEndpointWithoutTagsUsesEmptySlice(t *testing.T) {
+	t.Parallel()
+
+	doc := []byte(`
+openapi: 3.0.3
+info:
+  title: No Tags API
+  version: 1.0.0
+paths:
+  /tms/invoice/v4/AllocateInvoices:
+    post:
+      operationId: allocateInvoices
+      summary: 发票开具接口
+      responses:
+        "200":
+          description: success
+`)
+
+	result, err := NewImporter().Import(context.Background(), doc)
+	if err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	if len(result.Endpoints) != 1 {
+		t.Fatalf("expected 1 endpoint, got %d", len(result.Endpoints))
+	}
+	endpoint := result.Endpoints[0]
+	if endpoint.Tags == nil {
+		t.Fatal("expected non-nil tags slice for operation without OpenAPI tags")
+	}
+	if len(endpoint.Tags) != 0 {
+		t.Fatalf("expected empty tags, got %#v", endpoint.Tags)
 	}
 }

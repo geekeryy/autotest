@@ -3,11 +3,14 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { bindPage } from '../stores/aiAssistant'
 import AdminLayout from '../layout/AdminLayout.vue'
 import Login from '../views/Login.vue'
+import GitHubCallback from '../views/GitHubCallback.vue'
+import PendingApproval from '../views/PendingApproval.vue'
 import Dashboard from '../views/Dashboard.vue'
 import AIAssistantPage from '../views/AIAssistantPage.vue'
 import ProjectManagement from '../views/projects/ProjectManagement.vue'
 import SQLParameterSourceList from '../views/data/SQLParameterSourceList.vue'
 import MockServerList from '../views/data/MockServerList.vue'
+import MockServerAccessLogs from '../views/data/MockServerAccessLogs.vue'
 import TestDataTableList from '../views/data/TestDataTableList.vue'
 import ApiManagement from '../views/cases/ApiManagement.vue'
 import CaseRunWorkspace from '../views/cases/CaseRunWorkspace.vue'
@@ -17,6 +20,9 @@ import ProjectRunHistory from '../views/reports/ProjectRunHistory.vue'
 import ScriptLibraryList from '../views/scriptlib/ScriptLibraryList.vue'
 import MockValueSetList from '../views/platform/MockValueSetList.vue'
 import TemplateReference from '../views/platform/TemplateReference.vue'
+import DataSourceList from '../views/data/DataSourceList.vue'
+import AIProviderList from '../views/platform/AIProviderList.vue'
+import ProjectPromptList from '../views/projects/ProjectPromptList.vue'
 import UserList from '../views/rbac/UserList.vue'
 import RoleList from '../views/rbac/RoleList.vue'
 import PermissionList from '../views/rbac/PermissionList.vue'
@@ -36,8 +42,13 @@ export const menuRoutes = [
     redirect: '/sql-parameter-sources',
     meta: { title: '测试数据', permission: 'projects:read' },
     children: [
-      { path: '/sql-parameter-sources', component: SQLParameterSourceList, meta: { title: 'SQL 参数源', permission: 'projects:read' } },
       { path: '/mock-servers', component: MockServerList, meta: { title: 'Mock Server', permission: 'projects:read' } },
+      { path: '/sql-parameter-sources', component: SQLParameterSourceList, meta: { title: 'SQL 参数源', permission: 'projects:read' } },
+      {
+        path: '/mock-servers/:serverId/access-logs',
+        component: MockServerAccessLogs,
+        meta: { title: 'Mock 访问日志', permission: 'projects:read', hidden: true, activeMenu: '/mock-servers' }
+      },
       { path: '/test-data-tables', component: TestDataTableList, meta: { title: '测试数据表', permission: 'projects:read' } }
     ]
   },
@@ -47,7 +58,7 @@ export const menuRoutes = [
   },
   {
     path: '/data-sources',
-    redirect: () => ({ path: '/projects', query: { tab: 'dataSources' } })
+    redirect: '/platform/data-sources'
   },
   {
     path: '/case-mgmt',
@@ -89,13 +100,16 @@ export const menuRoutes = [
     meta: { title: '平台资源' },
     children: [
       { path: '/script-library', component: ScriptLibraryList, meta: { title: '脚本库', permission: 'cases:read' } },
+      { path: '/platform/data-sources', component: DataSourceList, meta: { title: '业务数据源', permission: 'projects:read' } },
+      { path: '/platform/ai-providers', component: AIProviderList, meta: { title: 'AI 提供商', permission: 'projects:read' } },
+      { path: '/platform/ai-prompts', component: ProjectPromptList, meta: { title: 'Prompt 管理', permission: 'projects:read' } },
       { path: '/mock-value-sets', component: MockValueSetList, meta: { title: '命名值集合', permission: 'projects:read' } },
       { path: '/template-reference', component: TemplateReference, meta: { title: '模板与变量参考' } }
     ]
   },
   {
     path: '/ai-providers',
-    redirect: () => ({ path: '/projects', query: { tab: 'aiProviders' } })
+    redirect: '/platform/ai-providers'
   },
   {
     path: '/system',
@@ -114,6 +128,8 @@ const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/login', component: Login, meta: { public: true, title: '登录' } },
+    { path: '/login/github/callback', component: GitHubCallback, meta: { public: true, title: 'GitHub 登录' } },
+    { path: '/pending-approval', component: PendingApproval, meta: { title: '待审核' } },
     {
       path: '/',
       component: AdminLayout,

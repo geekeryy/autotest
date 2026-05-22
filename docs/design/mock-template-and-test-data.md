@@ -6,13 +6,15 @@
 
 - 支持项目级 Mock Server。
 - 每个项目可维护多个 Mock Server 配置，按端口在主 API 进程内动态启动/停止独立 HTTP 服务。
-- Mock Server 规则包含方法、路径、优先级、启用状态、query/header/bodyContains/bodyJson 匹配条件及响应状态码、响应头、响应体、响应类型和延迟。
+- Mock Server 规则包含方法、路径、优先级、启用状态、query/header/bodyContains/bodyJson 匹配条件及响应模式（普通响应 / HTTP 重定向）、状态码、响应头、响应体、响应类型和延迟。
+- 重定向模式用于模拟 SSO/OAuth 授权端点：返回 3xx 状态码并设置 `Location`；`redirectLocation` 支持与响应体相同的 `{{request.*}}` / `{{$req.*}}` / `{{$mock.*}}` 模板，便于把 `redirect_uri`、`state` 等请求参数拼回回调地址。
 - 规则响应体支持 Mustache 风格引用当前请求参数。
 - 运行中的 Mock 请求实时从数据库读取规则，以便编辑后立即生效。
 - Mock 服务提供基础 CORS 与 OPTIONS 预检支持。
 - 管理 API 读操作需项目 viewer 权限，新增、编辑、删除、启动和停止需 developer 权限。
 - Mock 规则列表提供复制、JSON 输入框失焦格式化、测试弹窗等能力。
 - 动态模板响应的自动响应校验应基于本次测试请求渲染后的期望响应执行。
+- 访问日志持久化到 PostgreSQL：Mock 运行时记录每次 HTTP 访问（含未匹配 404 与渲染失败），OPTIONS 预检不记录；请求/响应 Body 各截断至 4KB，`Authorization` 等敏感请求头脱敏；删除 Mock Server 时日志随 FK 级联删除。viewer 可分页查询，developer 可清空当前 Server 日志；管理页提供筛选、详情抽屉与运行中 5 秒自动刷新。
 
 ## Mock Value Sets
 
@@ -51,7 +53,7 @@
 
 ## SQL 参数源
 
-- 支持按项目维护业务数据源与 SQL 参数源。
+- 业务数据源为**全局平台资源**（不按项目隔离），在「平台资源 → 业务数据源」维护；SQL 参数源仍按项目 + 服务维护，可引用任意平台业务数据源。
 - 请求模板可通过 `{{$sql.<sourceKey>.<column>}}` 内联引用 SQL 查询结果。
 - 请求模板可通过过滤形式内联引用 SQL 查询结果。
 - 历史 `{{sql.*}}` 形式继续兼容但视为 deprecated，新文档和界面文案应使用 `{{$sql.*}}`。

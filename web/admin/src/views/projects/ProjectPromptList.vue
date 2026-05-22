@@ -4,28 +4,20 @@
       <div>
         <h2 class="page-title">Prompt 管理</h2>
         <p class="page-subtitle">
-          按项目维护 AI 生成动作的 Prompt 配置，可覆盖内置默认提示词并指定默认模型。
+          平台级 AI 生成动作的 Prompt 配置，可覆盖内置默认提示词并指定默认模型。
         </p>
       </div>
-      <el-button type="primary" :disabled="!projectId" @click="openCreate">新增 Prompt</el-button>
+      <el-button v-if="canWrite" type="primary" @click="openCreate">新增 Prompt</el-button>
     </div>
     <div v-else class="prompt-embedded-toolbar">
       <p class="page-subtitle">
-        按当前全局项目维护 AI 生成动作的 Prompt 配置，可覆盖内置默认提示词并指定默认模型。
+        平台级 AI 生成动作的 Prompt 配置，可覆盖内置默认提示词并指定默认模型。
+        拥有「管理项目」权限的用户可新增与编辑。
       </p>
-      <el-button type="primary" :disabled="!projectId" @click="openCreate">新增 Prompt</el-button>
+      <el-button v-if="canWrite" type="primary" @click="openCreate">新增 Prompt</el-button>
     </div>
 
-    <el-alert
-      v-if="!projectId"
-      class="project-hint"
-      type="info"
-      show-icon
-      :closable="false"
-      title="请先在左侧列表或顶部选择项目后再管理 Prompt 配置。"
-    />
-
-    <el-table v-if="projectId" :data="prompts" border row-key="id" v-loading="loading">
+    <el-table :data="prompts" border row-key="id" v-loading="loading">
       <el-table-column label="动作" width="180">
         <template #default="{ row }">
           <el-tag size="small" type="info">{{ actionLabel(row.action) }}</el-tag>
@@ -41,21 +33,28 @@
       <el-table-column label="启用" width="90">
         <template #default="{ row }">
           <el-switch
+            v-if="canWrite"
             :model-value="row.enabled"
             :loading="togglingId === row.id"
             @change="(val) => toggleEnabled(row, val)"
           />
+          <el-tag v-else :type="row.enabled ? 'success' : 'info'" size="small">
+            {{ row.enabled ? '启用' : '停用' }}
+          </el-tag>
         </template>
       </el-table-column>
       <el-table-column label="操作" width="140" fixed="right">
         <template #default="{ row }">
-          <el-button type="primary" link @click="openEdit(row)">编辑</el-button>
-          <el-button type="danger" link :loading="deletingId === row.id" @click="remove(row)">删除</el-button>
+          <template v-if="canWrite">
+            <el-button type="primary" link @click="openEdit(row)">编辑</el-button>
+            <el-button type="danger" link :loading="deletingId === row.id" @click="remove(row)">删除</el-button>
+          </template>
+          <span v-else class="text-secondary">只读</span>
         </template>
       </el-table-column>
     </el-table>
     <el-empty
-      v-if="projectId && !loading && !prompts.length"
+      v-if="!loading && !prompts.length"
       description="暂无 Prompt 配置，点击右上角「新增 Prompt」创建"
     />
 
@@ -106,10 +105,10 @@
             v-model="form.providerId"
             clearable
             filterable
-            placeholder="跟随项目默认"
+            placeholder="跟随平台默认"
             style="width: 100%"
           >
-            <el-option label="跟随项目默认" value="" />
+            <el-option label="跟随平台默认" value="" />
             <el-option
               v-for="p in enabledProviders"
               :key="p.id"
@@ -139,7 +138,7 @@ import {
   listAIProviders,
   listAIProviderTypes
 } from '../../api'
-import { projectState } from '../../utils/currentProject'
+import { hasPermission } from '../../auth'
 
 const ACTION_OPTIONS = [
   { value: 'generate_params', label: '生成请求参数' },
@@ -201,7 +200,6 @@ export default {
   },
   data() {
     return {
-      projectState,
       ACTION_OPTIONS,
       loading: false,
       prompts: [],
@@ -216,29 +214,18 @@ export default {
       loadingProviders: false
     }
   },
+  created() {
+    this.loadList()
+  },
   computed: {
-    projectId() {
-      return projectState.currentProjectId || ''
+    canWrite() {
+      return hasPermission('projects:write')
     },
     dialogTitle() {
       return this.editingId ? '编辑 Prompt 配置' : '新增 Prompt 配置'
     },
     enabledProviders() {
       return (this.aiProviders || []).filter((p) => p.enabled)
-    }
-  },
-  watch: {
-    projectId: {
-      immediate: true,
-      async handler(val) {
-        if (val) {
-          this.loadList()
-          this.loadAiProvidersIfNeeded(false)
-        } else {
-          this.prompts = []
-          this.aiProviders = []
-        }
-      }
     }
   },
   methods: {
@@ -253,16 +240,14 @@ export default {
       return `${p.name} · ${typeLabel} · ${dm}`
     },
     async loadList() {
-      if (!this.projectId) return
       this.loading = true
       try {
-        this.prompts = await listProjectAIPrompts(this.projectId)
+        this.prompts = await listProjectAIPrompts()
       } finally {
         this.loading = false
       }
     },
     async loadAiProvidersIfNeeded(force) {
-      if (!this.projectId) return
       if (!force && this.aiProviders.length) return
       this.loadingProviders = true
       try {
@@ -273,7 +258,7 @@ export default {
             this.providerTypes = []
           }
         }
-        this.aiProviders = await listAIProviders(this.projectId)
+        this.aiProviders = await listAIProviders()
       } catch (_) {
         this.aiProviders = []
       } finally {
@@ -307,7 +292,7 @@ export default {
     async toggleEnabled(row, val) {
       this.togglingId = row.id
       try {
-        await updateProjectAIPrompt(this.projectId, row.id, {
+        await updateProjectAIPrompt(row.id, {
           name: row.name,
           systemPrompt: row.systemPrompt,
           defaultModel: row.defaultModel || '',
@@ -346,10 +331,10 @@ export default {
       this.saving = true
       try {
         if (this.editingId) {
-          await updateProjectAIPrompt(this.projectId, this.editingId, payload)
+          await updateProjectAIPrompt(this.editingId, payload)
           this.$message.success('已保存')
         } else {
-          await createProjectAIPrompt(this.projectId, payload)
+          await createProjectAIPrompt(payload)
           this.$message.success('已创建')
         }
         this.dialogVisible = false
@@ -366,7 +351,7 @@ export default {
       }
       this.deletingId = row.id
       try {
-        await deleteProjectAIPrompt(this.projectId, row.id)
+        await deleteProjectAIPrompt(row.id)
         this.$message.success('已删除')
         await this.loadList()
       } finally {

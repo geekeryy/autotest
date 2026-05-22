@@ -46,22 +46,17 @@
               <el-tag :type="isRunning(row) ? 'success' : 'info'" size="small">{{ serverStatusLabel(row) }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="默认启动" width="140">
+          <el-table-column label="默认启动" width="90">
             <template #default="{ row }">
-              <el-button
-                :type="isAutoStart(row) ? 'warning' : 'primary'"
-                link
+              <el-switch
+                :model-value="isAutoStart(row)"
                 :loading="autoStartTogglingId === row.id"
-                @click.stop="toggleAutoStart(row)"
-              >
-                {{ isAutoStart(row) ? '取消默认启动' : '设为默认启动' }}
-              </el-button>
+                @click.stop
+                @change="(val) => toggleAutoStart(row, val)"
+              />
             </template>
           </el-table-column>
-          <el-table-column label="访问地址" min-width="190" show-overflow-tooltip>
-            <template #default="{ row }">{{ accessAddress(row) }}</template>
-          </el-table-column>
-          <el-table-column label="操作" width="250" fixed="right">
+          <el-table-column label="操作" width="220" fixed="right">
             <template #default="{ row }">
               <el-button
                 v-if="!isRunning(row)"
@@ -74,6 +69,7 @@
               </el-button>
               <el-button v-else type="warning" link :loading="togglingServerId === row.id" @click.stop="stopServer(row)">停止</el-button>
               <el-button type="primary" link @click.stop="openEditServer(row)">编辑</el-button>
+              <el-button type="primary" link @click.stop="openAccessLogs(row)">日志</el-button>
               <el-button type="danger" link :loading="deletingServerId === row.id" @click.stop="removeServer(row)">删除</el-button>
             </template>
           </el-table-column>
@@ -109,24 +105,21 @@
             <el-table-column label="URL" min-width="210" show-overflow-tooltip>
               <template #default="{ row }">{{ routePath(row) }}</template>
             </el-table-column>
-            <el-table-column label="优先级" width="90">
+            <el-table-column label="优先级" width="70">
               <template #default="{ row }">{{ routePriority(row) }}</template>
             </el-table-column>
-            <el-table-column label="启用" width="80">
+            <el-table-column label="启用" width="70">
               <template #default="{ row }">
-                <el-tag :type="routeEnabled(row) ? 'success' : 'info'" size="small">{{ routeEnabled(row) ? '启用' : '停用' }}</el-tag>
+                <el-switch
+                  :model-value="routeEnabled(row)"
+                  :loading="routeEnabledTogglingId === row.id"
+                  @click.stop
+                  @change="(val) => toggleRouteEnabled(row, val)"
+                />
               </template>
             </el-table-column>
-            <el-table-column label="响应" width="110">
-              <template #default="{ row }">{{ routeResponseStatus(row) }}</template>
-            </el-table-column>
-            <el-table-column label="类型" width="110">
-              <template #default="{ row }">{{ routeResponseBodyType(row) }}</template>
-            </el-table-column>
-            <el-table-column label="延迟" width="100">
-              <template #default="{ row }">{{ routeDelay(row) }} ms</template>
-            </el-table-column>
-            <el-table-column label="操作" width="280" fixed="right">
+
+            <el-table-column label="操作" width="240" fixed="right">
               <template #default="{ row }">
                 <el-button type="success" link title="带入测试区" @click.stop="openTestRoute(row)">
                   <el-icon><Promotion /></el-icon>
@@ -217,10 +210,21 @@
           <span>响应配置</span>
         </div>
         <div class="route-form-grid">
-          <el-form-item label="状态码">
-            <el-input-number v-model="routeForm.responseStatus" class="full-width" :min="100" :max="599" />
+          <el-form-item label="响应模式">
+            <el-select v-model="routeForm.responseMode" class="full-width" @change="onRouteResponseModeChange">
+              <el-option label="响应体" value="body" />
+              <el-option label="HTTP 重定向（SSO）" value="redirect" />
+            </el-select>
           </el-form-item>
-          <el-form-item label="响应类型">
+          <el-form-item label="状态码">
+            <el-input-number
+              v-model="routeForm.responseStatus"
+              class="full-width"
+              :min="routeForm.responseMode === 'redirect' ? 300 : 100"
+              :max="routeForm.responseMode === 'redirect' ? 399 : 599"
+            />
+          </el-form-item>
+          <el-form-item v-if="routeForm.responseMode !== 'redirect'" label="响应类型">
             <el-select v-model="routeForm.responseBodyType" class="full-width">
               <el-option label="JSON" value="json" />
               <el-option label="Text" value="text" />
@@ -234,12 +238,21 @@
         <el-form-item label="响应头 JSON">
           <div class="json-field">
             <div class="json-toolbar">
-              <span>返回响应头，需填写 JSON 对象。</span>
+              <span>返回响应头，需填写 JSON 对象。重定向模式下 `Location` 由下方重定向地址生成，无需在此填写。</span>
             </div>
             <el-input v-model="routeForm.responseHeadersJSON" class="json-editor" type="textarea" :autosize="{ minRows: 4, maxRows: 10 }" @blur="formatJSONField('responseHeadersJSON', '响应头 JSON')" />
           </div>
         </el-form-item>
-        <el-form-item label="响应体">
+        <el-form-item v-if="routeForm.responseMode === 'redirect'" label="重定向地址">
+          <div class="json-field">
+            <div class="json-toolbar json-toolbar-stack">
+              <span>模拟 SSO 授权回调：把请求中的 redirect_uri、state 等拼入 Location，例如 &#123;&#123;$req.query.redirect_uri&#125;&#125;?code=mock-code&amp;state=&#123;&#123;$req.query.state&#125;&#125;。</span>
+              <span>支持 &#123;&#123;request.*&#125;&#125; / &#123;&#123;$req.*&#125;&#125; / &#123;&#123;$mock.*&#125;&#125; 模板，每次请求实时渲染。</span>
+            </div>
+            <el-input v-model="routeForm.redirectLocation" class="body-editor" type="textarea" :autosize="{ minRows: 3, maxRows: 8 }" placeholder="https://app.example/callback?code=mock&state={{ $req.query.state }}" />
+          </div>
+        </el-form-item>
+        <el-form-item v-else label="响应体">
           <div class="json-field">
             <div class="json-toolbar json-toolbar-stack">
               <span>可引用请求参数，例如 &#123;&#123;$req.pathvar.id&#125;&#125;、&#123;&#123;$req.query.name&#125;&#125;、&#123;&#123;$req.body.user.id&#125;&#125;（兼容历史 &#123;&#123;request.*&#125;&#125; 形式）。</span>
@@ -292,6 +305,11 @@
         </div>
         <div class="test-grid test-grid--expected">
           <el-input-number v-model="testForm.expectedStatus" class="full-width" :min="100" :max="599" placeholder="期望状态码" />
+          <el-input
+            v-model="testForm.expectedLocation"
+            placeholder="期望 Location 头（重定向规则，可选）"
+            @input="testForm.expectedLocationAuto = false"
+          />
           <el-input v-model="testForm.expectedBodyContains" placeholder="期望响应体包含片段（可选）" @input="testForm.expectedBodyContainsAuto = false" />
           <el-input v-model="testForm.expectedBodyJSON" placeholder="期望响应 JSON 片段（可选）" @input="testForm.expectedBodyJSONAuto = false" />
         </div>
@@ -344,6 +362,7 @@ import {
   updateMockServer
 } from '../../api'
 import { loadGlobalProjects, projectState } from '../../utils/currentProject'
+import { formatMockServerAccessURL } from '../../utils/mockServer'
 
 export default {
   name: 'MockServerList',
@@ -356,6 +375,7 @@ export default {
       loadingRoutes: false,
       togglingServerId: '',
       autoStartTogglingId: '',
+      routeEnabledTogglingId: '',
       deletingServerId: '',
       deletingRouteId: '',
       savingServer: false,
@@ -423,6 +443,14 @@ export default {
           pass: expectedJSON.ok && actualJSON.ok && this.jsonContains(actualJSON.value, expectedJSON.value)
         })
       }
+      const expectedLocation = this.testForm.expectedLocation.trim()
+      if (expectedLocation) {
+        const actualLocation = this.lookupHeader(this.testResult.headers, 'location') || ''
+        assertions.push({
+          label: 'Location',
+          pass: actualLocation === expectedLocation
+        })
+      }
       return assertions
     }
   },
@@ -450,8 +478,10 @@ export default {
         headerJSON: '{}',
         bodyContains: '',
         bodyJSON: '',
+        responseMode: 'body',
         responseStatus: 200,
         responseHeadersJSON: '{\n  "Content-Type": "application/json"\n}',
+        redirectLocation: '',
         responseBody: '{\n  "ok": true\n}',
         responseBodyType: 'json',
         delayMillis: 0
@@ -469,8 +499,12 @@ export default {
         expectedBodyJSON: '',
         expectedBodyContainsAuto: false,
         expectedBodyJSONAuto: false,
+        expectedLocation: '',
+        expectedLocationAuto: false,
         responseBodyTemplate: '',
-        routePathTemplate: ''
+        redirectLocationTemplate: '',
+        routePathTemplate: '',
+        responseMode: 'body'
       }
     },
     serverPort(row) {
@@ -492,9 +526,7 @@ export default {
       return this.isRunning(row) ? '运行中' : '已停止'
     },
     accessAddress(row) {
-      if (row?.status?.url) return row.status.url
-      const port = this.serverPort(row)
-      return port ? `http://localhost:${port}` : '-'
+      return formatMockServerAccessURL(this.serverPort(row))
     },
     serverRowClassName({ row }) {
       return row.id === this.selectedServerId ? 'is-selected-server' : ''
@@ -510,6 +542,15 @@ export default {
     },
     routeEnabled(row) {
       return row?.enabled !== false
+    },
+    routeResponseMode(row) {
+      return row?.responseMode || row?.response_mode || 'body'
+    },
+    routeIsRedirect(row) {
+      return this.routeResponseMode(row) === 'redirect'
+    },
+    routeRedirectLocation(row) {
+      return row?.redirectLocation ?? row?.redirect_location ?? ''
     },
     routeResponseStatus(row) {
       return row?.responseStatus ?? row?.response_status ?? 200
@@ -648,6 +689,13 @@ export default {
       return JSON.stringify(value)
     },
     refreshAutoExpectedResponse(finalURL, headers) {
+      if (this.testForm.redirectLocationTemplate && this.testForm.expectedLocationAuto) {
+        this.testForm.expectedLocation = this.renderMockResponseTemplateForTest(
+          this.testForm.redirectLocationTemplate,
+          finalURL,
+          headers
+        )
+      }
       if (!this.testForm.responseBodyTemplate) return
       if (!this.testForm.expectedBodyContainsAuto && !this.testForm.expectedBodyJSONAuto) return
       const rendered = this.renderMockResponseTemplateForTest(this.testForm.responseBodyTemplate, finalURL, headers)
@@ -656,6 +704,18 @@ export default {
       }
       if (this.testForm.expectedBodyJSONAuto) {
         this.testForm.expectedBodyJSON = this.formatJSONValue(rendered)
+      }
+    },
+    onRouteResponseModeChange(mode) {
+      if (mode === 'redirect') {
+        if (this.routeForm.responseStatus < 300 || this.routeForm.responseStatus > 399) {
+          this.routeForm.responseStatus = 302
+        }
+        if (!this.routeForm.redirectLocation.trim()) {
+          this.routeForm.redirectLocation =
+            '{{$req.query.redirect_uri}}?code=mock-auth-code&state={{ $req.query.state }}'
+        }
+        this.routeForm.responseHeadersJSON = '{}'
       }
     },
     mergeQueryParams(url, query) {
@@ -716,6 +776,10 @@ export default {
       } finally {
         this.loadingRoutes = false
       }
+    },
+    openAccessLogs(row) {
+      if (!row?.id) return
+      this.$router.push(`/mock-servers/${row.id}/access-logs`)
     },
     selectServer(row) {
       if (!row || row.id === this.selectedServerId) return
@@ -817,9 +881,9 @@ export default {
     },
     // 列表中切换「默认启动」字段：复用 update 接口，仅改 autoStart 一项，
     // 其他字段保持当前 row 的值，避免清空名称、端口、描述。
-    async toggleAutoStart(row) {
+    async toggleAutoStart(row, next) {
       if (!row?.id || !this.projectId) return
-      const next = !this.isAutoStart(row)
+      if (typeof next !== 'boolean' || next === this.isAutoStart(row)) return
       this.autoStartTogglingId = row.id
       try {
         const payload = {
@@ -894,7 +958,7 @@ export default {
       if (headers == null) return
 
       const method = this.testForm.method
-      const options = { method, headers }
+      const options = { method, headers, redirect: 'manual' }
       if (!['GET', 'HEAD'].includes(method) && this.testForm.body !== '') {
         options.body = this.testForm.body
       }
@@ -928,10 +992,12 @@ export default {
       const headers = match.headers || match.header || row.headers || {}
       const bodyJson = match.bodyJson ?? match.body_json ?? row.bodyJson ?? row.body_json
       const bodyContains = match.bodyContains || match.body_contains || row.bodyContains || row.body_contains || ''
+      const isRedirect = this.routeIsRedirect(row)
       const responseBody = this.routeResponseBody(row)
+      const redirectLocation = this.routeRedirectLocation(row)
       const responseBodyType = String(this.routeResponseBodyType(row) || '').toLowerCase()
       const parsedResponseBody = this.parseJSONSilently(responseBody)
-      const shouldExpectJSON = responseBody && (responseBodyType === 'json' || parsedResponseBody.ok)
+      const shouldExpectJSON = !isRedirect && responseBody && (responseBodyType === 'json' || parsedResponseBody.ok)
 
       this.testForm = {
         ...this.emptyTestForm(),
@@ -941,12 +1007,16 @@ export default {
         headersJSON: this.formatJSONValue(headers),
         body: bodyJson == null ? String(bodyContains || '') : this.formatJSONValue(bodyJson),
         expectedStatus: this.routeResponseStatus(row),
+        expectedLocation: isRedirect ? String(redirectLocation || '') : '',
+        expectedLocationAuto: isRedirect && !!redirectLocation,
         expectedBodyContains: shouldExpectJSON ? '' : String(responseBody || ''),
         expectedBodyJSON: shouldExpectJSON ? this.formatJSONValue(responseBody) : '',
         expectedBodyContainsAuto: !shouldExpectJSON && !!responseBody,
         expectedBodyJSONAuto: !!shouldExpectJSON,
         responseBodyTemplate: String(responseBody || ''),
-        routePathTemplate: this.routePath(row)
+        redirectLocationTemplate: isRedirect ? String(redirectLocation || '') : '',
+        routePathTemplate: this.routePath(row),
+        responseMode: this.routeResponseMode(row)
       }
       this.refreshAutoExpectedResponse(this.mergeQueryParams(this.resolveTestURL(), query), headers)
       this.testResult = null
@@ -964,6 +1034,61 @@ export default {
       this.routeForm = this.emptyRouteForm()
       this.routeDialogVisible = true
     },
+    buildRoutePayloadFromRow(row, overrides = {}) {
+      const match = this.routeRequestMatch(row)
+      const bodyJson = match.bodyJson ?? match.body_json ?? row.bodyJson ?? row.body_json
+      const requestMatch = {
+        query: match.query || match.queries || row.query || {},
+        headers: match.headers || match.header || row.headers || {}
+      }
+      const bodyContains = match.bodyContains || match.body_contains || row.bodyContains || row.body_contains
+      if (bodyContains) requestMatch.bodyContains = bodyContains
+      if (bodyJson !== undefined && bodyJson !== null) requestMatch.bodyJson = bodyJson
+
+      const responseMode = this.routeResponseMode(row)
+      const base = {
+        method: this.routeMethod(row),
+        path: this.routePath(row),
+        priority: Number(this.routePriority(row)) || 0,
+        enabled: overrides.enabled !== undefined ? !!overrides.enabled : this.routeEnabled(row),
+        requestMatch,
+        responseMode,
+        responseStatus: Number(this.routeResponseStatus(row)) || (responseMode === 'redirect' ? 302 : 200),
+        responseHeaders: this.routeResponseHeaders(row),
+        delayMillis: Number(this.routeDelay(row)) || 0
+      }
+      if (responseMode === 'redirect') {
+        return {
+          ...base,
+          redirectLocation: this.routeRedirectLocation(row),
+          responseBody: '',
+          responseBodyType: 'json'
+        }
+      }
+      return {
+        ...base,
+        redirectLocation: '',
+        responseBody: this.routeResponseBody(row),
+        responseBodyType: this.routeResponseBodyType(row)
+      }
+    },
+    async toggleRouteEnabled(row, next) {
+      if (!row?.id || !this.projectId || !this.selectedServerId) return
+      if (typeof next !== 'boolean' || next === this.routeEnabled(row)) return
+      this.routeEnabledTogglingId = row.id
+      try {
+        const payload = this.buildRoutePayloadFromRow(row, { enabled: next })
+        const saved = await updateMockRoute(this.projectId, this.selectedServerId, row.id, payload)
+        const idx = this.routes.findIndex((item) => item.id === row.id)
+        if (idx !== -1 && saved) {
+          this.routes.splice(idx, 1, { ...this.routes[idx], ...saved })
+        } else {
+          row.enabled = next
+        }
+      } finally {
+        this.routeEnabledTogglingId = ''
+      }
+    },
     buildRouteFormFromRow(row) {
       const match = row.requestMatch || row.request_match || {}
       const bodyJson = match.bodyJson ?? match.body_json ?? row.bodyJson ?? row.body_json
@@ -976,8 +1101,10 @@ export default {
         headerJSON: this.formatJSONValue(match.headers || match.header || row.headers),
         bodyContains: match.bodyContains || match.body_contains || row.bodyContains || row.body_contains || '',
         bodyJSON: bodyJson == null ? '' : this.formatJSONValue(bodyJson),
+        responseMode: this.routeResponseMode(row),
         responseStatus: this.routeResponseStatus(row),
         responseHeadersJSON: this.formatJSONValue(row.responseHeaders || row.response_headers),
+        redirectLocation: this.routeRedirectLocation(row),
         responseBody: row.responseBody ?? row.response_body ?? '',
         responseBodyType: this.routeResponseBodyType(row),
         delayMillis: this.routeDelay(row)
@@ -1068,14 +1195,44 @@ export default {
       if (this.routeForm.bodyContains.trim()) requestMatch.bodyContains = this.routeForm.bodyContains
       if (bodyJson !== undefined) requestMatch.bodyJson = bodyJson
 
+      const responseMode = this.routeForm.responseMode === 'redirect' ? 'redirect' : 'body'
+      if (responseMode === 'redirect') {
+        const redirectLocation = this.routeForm.redirectLocation.trim()
+        if (!redirectLocation) {
+          this.$message.error('请填写重定向地址')
+          return null
+        }
+        const status = Number(this.routeForm.responseStatus) || 302
+        if (status < 300 || status > 399) {
+          this.$message.error('重定向状态码必须在 300–399 之间')
+          return null
+        }
+        return {
+          method: this.routeForm.method,
+          path,
+          priority: Number(this.routeForm.priority) || 0,
+          enabled: !!this.routeForm.enabled,
+          requestMatch,
+          responseMode,
+          responseStatus: status,
+          responseHeaders,
+          redirectLocation,
+          responseBody: '',
+          responseBodyType: 'json',
+          delayMillis: Number(this.routeForm.delayMillis) || 0
+        }
+      }
+
       return {
         method: this.routeForm.method,
         path,
         priority: Number(this.routeForm.priority) || 0,
         enabled: !!this.routeForm.enabled,
         requestMatch,
+        responseMode,
         responseStatus: Number(this.routeForm.responseStatus) || 200,
         responseHeaders,
+        redirectLocation: '',
         responseBody: this.routeForm.responseBody,
         responseBodyType: this.routeForm.responseBodyType,
         delayMillis: Number(this.routeForm.delayMillis) || 0

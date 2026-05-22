@@ -135,6 +135,43 @@ func TestWriteMockResponseSupportsDollarReqAlias(t *testing.T) {
 	}
 }
 
+func TestWriteMockResponseRedirectWithRequestReferences(t *testing.T) {
+	route := testRoute(http.MethodGet, "/oauth/authorize")
+	route.ResponseMode = ResponseModeRedirect
+	route.ResponseStatus = http.StatusFound
+	route.RedirectLocation = "{{request.query.redirect_uri}}?code=mock-code&state={{request.query.state}}"
+	req := httptest.NewRequest(http.MethodGet, "/oauth/authorize?redirect_uri=https%3A%2F%2Fapp.example%2Fcallback&state=abc", nil)
+	recorder := httptest.NewRecorder()
+
+	writeMockResponse(recorder, req, route, nil, nil)
+
+	if recorder.Code != http.StatusFound {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusFound)
+	}
+	wantLocation := "https://app.example/callback?code=mock-code&state=abc"
+	if got := recorder.Header().Get("Location"); got != wantLocation {
+		t.Fatalf("Location = %q, want %q", got, wantLocation)
+	}
+}
+
+func TestWriteMockResponseRedirectSupportsDollarReqAlias(t *testing.T) {
+	route := testRoute(http.MethodGet, "/sso/login")
+	route.ResponseMode = ResponseModeRedirect
+	route.ResponseStatus = http.StatusSeeOther
+	route.RedirectLocation = "{{$req.query.next}}?ticket={{$req.query.ticket}}"
+	req := httptest.NewRequest(http.MethodGet, "/sso/login?next=https%3A%2F%2Fapp%2Fhome&ticket=xyz", nil)
+	recorder := httptest.NewRecorder()
+
+	writeMockResponse(recorder, req, route, nil, nil)
+
+	if recorder.Code != http.StatusSeeOther {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusSeeOther)
+	}
+	if got := recorder.Header().Get("Location"); got != "https://app/home?ticket=xyz" {
+		t.Fatalf("Location = %q", got)
+	}
+}
+
 func TestWriteMockResponseReportsMissingRequestReference(t *testing.T) {
 	route := testRoute(http.MethodGet, "/api/users/{id}")
 	route.ResponseBody = `{"missing":"{{request.query.missing}}"}`

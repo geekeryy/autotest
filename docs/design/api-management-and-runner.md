@@ -8,7 +8,10 @@
 
 ## OpenAPI/Swagger 导入
 
-- `POST .../specs/import` 响应体仅返回导入统计信息，不返回完整端点列表或 `normalized_snapshot` 等大字段；完整数据通过既有只读接口获取。
+- 支持 **OpenAPI 3.0.x / 3.1.x** 原生导入，以及 **Swagger 2.0**（经 kin-openapi 转换为 OpenAPI 3 后解析）。导入器统一产出 OpenAPI 3 语义的 `requestSchema` / `responseSchema`。
+- 对 vendor 文档中常见的非严格校验问题（schema 上误用 `examples`、default 与 enum 标签不一致、额外 sibling 字段如 `BDCZLXXLIST`）采用宽松校验，保证 imperfect spec 仍可导入端点与约束。
+- PathItem 级 `parameters` 会合并进各 operation 的 `requestSchema.parameters`；同名同 `in` 时 operation 级覆盖 path 级。
+- `POST .../specs/import` 响应体仅返回导入统计信息，不返回完整端点列表或 `normalized_snapshot` 等大字段；完整 data 通过既有只读接口获取。
 - 当前导入响应已使用统计摘要；当前 spec 列表模型仍可能序列化 `normalizedSnapshot`，前端不应依赖列表里的大字段作为展示主数据。
 - 重复导入同一服务下内容相同的 OpenAPI/Swagger 应保持幂等，不因内容哈希唯一约束报错。
 - 幂等导入不产生重复接口定义或重复自动生成接口请求模板，并应继续刷新接口定义与模板。

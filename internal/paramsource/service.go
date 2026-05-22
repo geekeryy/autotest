@@ -31,11 +31,8 @@ func (s *Service) CreateDataSource(ctx context.Context, input DataSourceInput) (
 	return s.repo.CreateDataSource(ctx, input)
 }
 
-func (s *Service) ListDataSources(ctx context.Context, projectID uuid.UUID) ([]DataSource, error) {
-	if projectID == uuid.Nil {
-		return nil, errors.New("projectId is required")
-	}
-	return s.repo.ListDataSources(ctx, projectID)
+func (s *Service) ListDataSources(ctx context.Context) ([]DataSource, error) {
+	return s.repo.ListDataSources(ctx)
 }
 
 func (s *Service) UpdateDataSource(ctx context.Context, id uuid.UUID, input DataSourceInput) (*DataSource, error) {
@@ -107,9 +104,6 @@ func (s *Service) ExecuteSQLStep(ctx context.Context, projectID, serviceID, envi
 	ds, err := s.repo.GetDataSource(ctx, input.DataSourceID)
 	if err != nil {
 		return SQLStepResult{}, err
-	}
-	if ds.ProjectID != projectID {
-		return SQLStepResult{}, errors.New("data source does not match project")
 	}
 	return s.executor.ExecuteSQLStep(ctx, *ds, input, vars)
 }
@@ -195,9 +189,6 @@ func (s *Service) PreviewSQLParameterSourceDraft(ctx context.Context, input Prev
 	if err != nil {
 		return nil, err
 	}
-	if ds.ProjectID != in.ProjectID {
-		return nil, errors.New("data source does not match project")
-	}
 	item := SourceWithDataSource{
 		DataSource: *ds,
 		Source: SQLParameterSource{
@@ -232,9 +223,6 @@ func (s *Service) PreviewSQLParameterSourceDraft(ctx context.Context, input Prev
 }
 
 func normalizeDataSourceInput(input *DataSourceInput, creating bool) error {
-	if input.ProjectID == uuid.Nil {
-		return errors.New("projectId is required")
-	}
 	input.Name = strings.TrimSpace(input.Name)
 	if input.Name == "" {
 		return errors.New("data source name is required")

@@ -16,9 +16,36 @@ type Repository struct {
 	store.Repository
 }
 
+type repositoryBackend interface {
+	EnsureDefaults(ctx context.Context, adminUsername, adminPassword string) error
+	GetUserByUsername(ctx context.Context, username string) (*User, error)
+	GetUserByGithubID(ctx context.Context, githubID int64) (*User, error)
+	AllocateGithubUsername(ctx context.Context, base string) (string, error)
+	CreateGithubUser(ctx context.Context, input GithubUserInput) (*User, error)
+	UpdateGithubUserProfile(ctx context.Context, id uuid.UUID, displayName, email string, avatarJPEG []byte) (*User, error)
+	ListUserIDsByPermission(ctx context.Context, permissionCode string) ([]uuid.UUID, error)
+	GetUser(ctx context.Context, id uuid.UUID) (*User, error)
+	ListUsers(ctx context.Context) ([]User, error)
+	CreateUser(ctx context.Context, input CreateUserInput, avatarJPEG []byte) (*User, error)
+	UpdateUser(ctx context.Context, id uuid.UUID, input UpdateUserInput, touchAvatar, clearAvatar bool, avatarJPEG []byte) (*User, error)
+	DeleteUser(ctx context.Context, id uuid.UUID) error
+	ListRoles(ctx context.Context) ([]Role, error)
+	CreateRole(ctx context.Context, input CreateRoleInput) (*Role, error)
+	UpdateRole(ctx context.Context, id uuid.UUID, input UpdateRoleInput) (*Role, error)
+	DeleteRole(ctx context.Context, id uuid.UUID) error
+	SetRolePermissions(ctx context.Context, roleID uuid.UUID, permissionIDs []uuid.UUID) (*Role, error)
+	ListPermissions(ctx context.Context) ([]Permission, error)
+	CreatePermission(ctx context.Context, input CreatePermissionInput) (*Permission, error)
+}
+
 func NewRepository(repo store.Repository) *Repository {
 	return &Repository{Repository: repo}
 }
+
+const userSelectColumns = `
+	id, username, password_hash, auth_provider, github_id,
+	display_name, email, active, avatar_jpeg, created_at, updated_at
+`
 
 func (r *Repository) EnsureDefaults(ctx context.Context, adminUsername, adminPassword string) error {
 	if r.DB == nil {
@@ -104,16 +131,110 @@ func (r *Repository) EnsureDefaults(ctx context.Context, adminUsername, adminPas
 
 func (r *Repository) GetUserByUsername(ctx context.Context, username string) (*User, error) {
 	row := r.DB.QueryRow(ctx, `
-		select id, username, password_hash, display_name, email, active, avatar_jpeg, created_at, updated_at
+		select `+userSelectColumns+`
 		from users
 		where username = $1
 	`, username)
 	return scanUser(row)
 }
 
+func (r *Repository) GetUserByGithubID(ctx context.Context, githubID int64) (*User, error) {
+	row := r.DB.QueryRow(ctx, `
+		select `+userSelectColumns+`
+		from users
+		where github_id = $1
+	`, githubID)
+	return scanUser(row)
+}
+
+func (r *Repository) AllocateGithubUsername(ctx context.Context, base string) (string, error) {
+	candidate := base
+	for i := 0; i < 100; i++ {
+		var exists bool
+		if err := r.DB.QueryRow(ctx, `select exists(select 1 from users where username = $1)`, candidate).Scan(&exists); err != nil {
+			return "", fmt.Errorf("check github username: %w", err)
+		}
+		if !exists {
+			return candidate, nil
+		}
+		candidate = fmt.Sprintf("%s_%d", base, i+1)
+	}
+	return "", fmt.Errorf("unable to allocate github username for %s", base)
+}
+
+func (r *Repository) CreateGithubUser(ctx context.Context, input GithubUserInput) (*User, error) {
+	tx, err := r.DB.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin create github user: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	var avatarArg any
+	if len(input.AvatarJPEG) > 0 {
+		avatarArg = input.AvatarJPEG
+	}
+
+	user, err := scanUser(tx.QueryRow(ctx, `
+		insert into users (username, display_name, email, active, auth_provider, github_id, avatar_jpeg)
+		values ($1, $2, $3, $4, $5, $6, $7)
+		returning `+userSelectColumns+`
+	`, input.Username, input.DisplayName, input.Email, input.Active, AuthProviderGithub, input.GithubID, avatarArg))
+	if err != nil {
+		return nil, fmt.Errorf("create github user: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit create github user: %w", err)
+	}
+	return r.GetUser(ctx, user.ID)
+}
+
+func (r *Repository) UpdateGithubUserProfile(ctx context.Context, id uuid.UUID, displayName, email string, avatarJPEG []byte) (*User, error) {
+	if len(avatarJPEG) > 0 {
+		if _, err := r.DB.Exec(ctx, `
+			update users
+			set display_name = $2, email = $3, avatar_jpeg = $4, updated_at = now()
+			where id = $1
+		`, id, displayName, email, avatarJPEG); err != nil {
+			return nil, fmt.Errorf("update github user profile: %w", err)
+		}
+	} else if _, err := r.DB.Exec(ctx, `
+		update users
+		set display_name = $2, email = $3, updated_at = now()
+		where id = $1
+	`, id, displayName, email); err != nil {
+		return nil, fmt.Errorf("update github user profile: %w", err)
+	}
+	return r.GetUser(ctx, id)
+}
+
+func (r *Repository) ListUserIDsByPermission(ctx context.Context, permissionCode string) ([]uuid.UUID, error) {
+	rows, err := r.DB.Query(ctx, `
+		select distinct u.id
+		from users u
+		join user_roles ur on ur.user_id = u.id
+		join role_permissions rp on rp.role_id = ur.role_id
+		join permissions p on p.id = rp.permission_id
+		where p.code = $1 and u.active = true
+	`, permissionCode)
+	if err != nil {
+		return nil, fmt.Errorf("list user ids by permission: %w", err)
+	}
+	defer rows.Close()
+
+	var ids []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan user id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 func (r *Repository) GetUser(ctx context.Context, id uuid.UUID) (*User, error) {
 	user, err := scanUser(r.DB.QueryRow(ctx, `
-		select id, username, password_hash, display_name, email, active, avatar_jpeg, created_at, updated_at
+		select `+userSelectColumns+`
 		from users
 		where id = $1
 	`, id))
@@ -128,7 +249,7 @@ func (r *Repository) GetUser(ctx context.Context, id uuid.UUID) (*User, error) {
 
 func (r *Repository) ListUsers(ctx context.Context) ([]User, error) {
 	rows, err := r.DB.Query(ctx, `
-		select id, username, password_hash, display_name, email, active, avatar_jpeg, created_at, updated_at
+		select `+userSelectColumns+`
 		from users
 		order by created_at desc
 	`)
@@ -173,10 +294,10 @@ func (r *Repository) CreateUser(ctx context.Context, input CreateUserInput, avat
 	}
 
 	user, err := scanUser(tx.QueryRow(ctx, `
-		insert into users (username, password_hash, display_name, email, active, avatar_jpeg)
-		values ($1, $2, $3, $4, $5, $6)
-		returning id, username, password_hash, display_name, email, active, avatar_jpeg, created_at, updated_at
-	`, input.Username, string(hash), input.DisplayName, input.Email, active, avatarArg))
+		insert into users (username, password_hash, display_name, email, active, auth_provider, avatar_jpeg)
+		values ($1, $2, $3, $4, $5, $6, $7)
+		returning `+userSelectColumns+`
+	`, input.Username, string(hash), input.DisplayName, input.Email, active, AuthProviderLocal, avatarArg))
 	if err != nil {
 		return nil, fmt.Errorf("create user: %w", err)
 	}
@@ -494,11 +615,23 @@ type scanner interface {
 
 func scanUser(row scanner) (*User, error) {
 	var user User
+	var passwordHash *string
+	var githubID *int64
 	var avatar []byte
-	if err := row.Scan(&user.ID, &user.Username, &user.PasswordHash, &user.DisplayName, &user.Email, &user.Active, &avatar, &user.CreatedAt, &user.UpdatedAt); err != nil {
+	if err := row.Scan(
+		&user.ID, &user.Username, &passwordHash, &user.AuthProvider, &githubID,
+		&user.DisplayName, &user.Email, &user.Active, &avatar, &user.CreatedAt, &user.UpdatedAt,
+	); err != nil {
 		return nil, fmt.Errorf("scan user: %w", err)
 	}
+	if passwordHash != nil {
+		user.PasswordHash = *passwordHash
+	}
+	user.GithubID = githubID
 	user.avatarJPEG = avatar
+	if user.AuthProvider == "" {
+		user.AuthProvider = AuthProviderLocal
+	}
 	applyAvatarURL(&user)
 	return &user, nil
 }

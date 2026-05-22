@@ -726,13 +726,27 @@ create index if not exists idx_test_cases_parent_active
     on test_cases(parent_case_id, created_at asc)
     where deleted_at is null and parent_case_id is not null;
 
-create index if not exists idx_business_data_sources_project_list_active
-    on business_data_sources(project_id, created_at desc)
-    where deleted_at is null;
-
-create unique index if not exists idx_business_data_sources_project_name_active
-    on business_data_sources(project_id, name)
-    where deleted_at is null;
+-- 006 迁移后 project_id 已移除；仅在列仍存在时创建项目级索引
+do $$
+begin
+    if exists (
+        select 1 from information_schema.columns
+        where table_schema = 'public'
+          and table_name = 'business_data_sources'
+          and column_name = 'project_id'
+    ) then
+        execute $idx$
+            create index if not exists idx_business_data_sources_project_list_active
+                on business_data_sources(project_id, created_at desc)
+                where deleted_at is null
+        $idx$;
+        execute $idx$
+            create unique index if not exists idx_business_data_sources_project_name_active
+                on business_data_sources(project_id, name)
+                where deleted_at is null
+        $idx$;
+    end if;
+end $$;
 
 create index if not exists idx_sql_parameter_sources_scope_active
     on sql_parameter_sources(project_id, service_id, created_at desc)
@@ -813,21 +827,45 @@ create index if not exists idx_mock_value_sets_project_active
     on mock_value_sets(project_id, created_at desc)
     where deleted_at is null;
 
-create unique index if not exists idx_ai_providers_project_name_active
-    on ai_providers(project_id, name) where deleted_at is null;
+do $$
+begin
+    if exists (
+        select 1 from information_schema.columns
+        where table_schema = 'public'
+          and table_name = 'ai_providers'
+          and column_name = 'project_id'
+    ) then
+        execute $idx$
+            create unique index if not exists idx_ai_providers_project_name_active
+                on ai_providers(project_id, name) where deleted_at is null
+        $idx$;
+        execute $idx$
+            create unique index if not exists idx_ai_providers_project_default_active
+                on ai_providers(project_id) where is_default and deleted_at is null
+        $idx$;
+        execute $idx$
+            create index if not exists idx_ai_providers_project_active
+                on ai_providers(project_id, created_at desc) where deleted_at is null
+        $idx$;
+    end if;
 
-create unique index if not exists idx_ai_providers_project_default_active
-    on ai_providers(project_id) where is_default and deleted_at is null;
-
-create index if not exists idx_ai_providers_project_active
-    on ai_providers(project_id, created_at desc) where deleted_at is null;
-
-create unique index if not exists project_ai_prompts_action_idx
-    on project_ai_prompts(project_id, action) where deleted_at is null;
-
-create index if not exists idx_project_ai_prompts_project_provider
-    on project_ai_prompts(project_id, provider_id)
-    where deleted_at is null;
+    if exists (
+        select 1 from information_schema.columns
+        where table_schema = 'public'
+          and table_name = 'project_ai_prompts'
+          and column_name = 'project_id'
+    ) then
+        execute $idx$
+            create unique index if not exists project_ai_prompts_action_idx
+                on project_ai_prompts(project_id, action) where deleted_at is null
+        $idx$;
+        execute $idx$
+            create index if not exists idx_project_ai_prompts_project_provider
+                on project_ai_prompts(project_id, provider_id)
+                where deleted_at is null
+        $idx$;
+    end if;
+end $$;
 
 create index if not exists idx_ai_sessions_owner_active
     on ai_sessions(project_id, user_id, updated_at desc)

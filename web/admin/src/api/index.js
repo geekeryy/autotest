@@ -8,6 +8,7 @@ function asList(data) {
 export const login = (data) => request.post('/auth/login', data)
 export const logout = () => request.post('/auth/logout')
 export const getMe = () => request.get('/auth/me')
+export const getGitHubOAuthStatus = () => request.get('/auth/github/status')
 
 export const listProjects = () => request.get('/projects').then(asList)
 export const createProject = (data) => request.post('/projects', data)
@@ -59,7 +60,7 @@ export const getRunResult = (runId) => request.get(`/runs/${runId}/result`)
  * @property {string=} dsn
  * @property {Object=} config
  */
-export const listDataSources = (params = {}) => request.get('/data-sources', { params }).then(asList)
+export const listDataSources = () => request.get('/data-sources').then(asList)
 export const createDataSource = (data) => request.post('/data-sources', data)
 export const updateDataSource = (id, data) => request.put(`/data-sources/${id}`, data)
 export const deleteDataSource = (id) => request.delete(`/data-sources/${id}`)
@@ -106,6 +107,10 @@ export const updateMockRoute = (projectId, serverId, routeId, data) =>
   request.put(`/projects/${projectId}/mock-servers/${serverId}/routes/${routeId}`, data)
 export const deleteMockRoute = (projectId, serverId, routeId) =>
   request.delete(`/projects/${projectId}/mock-servers/${serverId}/routes/${routeId}`)
+export const listMockAccessLogs = (projectId, serverId, params = {}) =>
+  request.get(`/projects/${projectId}/mock-servers/${serverId}/access-logs`, { params })
+export const clearMockAccessLogs = (projectId, serverId) =>
+  request.delete(`/projects/${projectId}/mock-servers/${serverId}/access-logs`)
 
 // Scenario orchestration
 export const listScenarios = (params = {}) => request.get('/scenarios', { params }).then(asList)
@@ -131,20 +136,20 @@ export const getScenarioRunReport = (runId) => request.get(`/runs/${runId}/repor
 export const exportScenarioRun = (runId, format = 'json') =>
   request.get(`/runs/${runId}/export`, { params: { format }, responseType: 'blob' })
 
-// AI providers (per-project) and AI invocation
+// AI providers (platform-wide) and AI invocation
 export const listAIProviderTypes = () => request.get('/ai-provider-types').then(asList)
-export const listAIProviders = (projectId) => request.get(`/projects/${projectId}/ai-providers`).then(asList)
-export const createAIProvider = (projectId, data) => request.post(`/projects/${projectId}/ai-providers`, data)
-export const updateAIProvider = (projectId, providerId, data) =>
-  request.put(`/projects/${projectId}/ai-providers/${providerId}`, data)
-export const deleteAIProvider = (projectId, providerId) =>
-  request.delete(`/projects/${projectId}/ai-providers/${providerId}`)
-export const testAIProvider = (projectId, providerId) =>
-  request.post(`/projects/${projectId}/ai-providers/${providerId}/test`, undefined, { timeout: 45000 })
-export const listAIProviderModels = (projectId, providerId) =>
-  request.get(`/projects/${projectId}/ai-providers/${providerId}/models`, { timeout: 30000 })
-export const discoverAIProviderModels = (projectId, data) =>
-  request.post(`/projects/${projectId}/ai-providers/models/discover`, data, { timeout: 30000 })
+export const listAIProviders = () => request.get('/ai-providers').then(asList)
+export const createAIProvider = (data) => request.post('/ai-providers', data)
+export const updateAIProvider = (providerId, data) =>
+  request.put(`/ai-providers/${providerId}`, data)
+export const deleteAIProvider = (providerId) =>
+  request.delete(`/ai-providers/${providerId}`)
+export const testAIProvider = (providerId) =>
+  request.post(`/ai-providers/${providerId}/test`, undefined, { timeout: 45000 })
+export const listAIProviderModels = (providerId) =>
+  request.get(`/ai-providers/${providerId}/models`, { timeout: 30000 })
+export const discoverAIProviderModels = (data) =>
+  request.post('/ai-providers/models/discover', data, { timeout: 30000 })
 export const aiChat = (projectId, data) =>
   request.post(`/projects/${projectId}/ai/chat`, data, { timeout: 120000 })
 
@@ -178,15 +183,13 @@ export const renameAISession = (projectId, sessionId, data) =>
 export const deleteAISession = (projectId, sessionId) =>
   request.delete(`/projects/${projectId}/ai/sessions/${sessionId}`)
 
-// Project AI Prompts (per-project prompt config)
-export const listProjectAIPrompts = (projectId) =>
-  request.get(`/projects/${projectId}/ai-prompts`).then(asList)
-export const createProjectAIPrompt = (projectId, data) =>
-  request.post(`/projects/${projectId}/ai-prompts`, data)
-export const updateProjectAIPrompt = (projectId, promptId, data) =>
-  request.put(`/projects/${projectId}/ai-prompts/${promptId}`, data)
-export const deleteProjectAIPrompt = (projectId, promptId) =>
-  request.delete(`/projects/${projectId}/ai-prompts/${promptId}`)
+// Platform AI Prompts (global prompt config)
+export const listProjectAIPrompts = () => request.get('/ai-prompts').then(asList)
+export const createProjectAIPrompt = (data) => request.post('/ai-prompts', data)
+export const updateProjectAIPrompt = (promptId, data) =>
+  request.put(`/ai-prompts/${promptId}`, data)
+export const deleteProjectAIPrompt = (promptId) =>
+  request.delete(`/ai-prompts/${promptId}`)
 
 /** @param {string} projectId */
 export const listScriptLibraryTemplates = (projectId) =>

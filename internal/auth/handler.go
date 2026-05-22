@@ -21,12 +21,17 @@ func NewHandler(service *Service) *Handler {
 
 func (h *Handler) RegisterPublic(r chi.Router) {
 	r.Post("/auth/login", h.login)
+	r.Get("/auth/github/status", h.githubStatus)
+	r.Get("/auth/github/login", h.githubLogin)
+	r.Get("/auth/github/callback", h.githubCallback)
+}
+
+func (h *Handler) RegisterAuthenticated(r chi.Router) {
+	r.Get("/auth/me", h.me)
+	r.Post("/auth/logout", h.logout)
 }
 
 func (h *Handler) RegisterProtected(r chi.Router) {
-	r.Get("/auth/me", h.me)
-	r.Post("/auth/logout", h.logout)
-
 	r.Group(func(r chi.Router) {
 		r.Use(h.service.RequirePermission(PermissionUsersManage))
 		r.Get("/users", h.listUsers)
@@ -63,6 +68,35 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, response)
+}
+
+func (h *Handler) githubStatus(w http.ResponseWriter, r *http.Request) {
+	httpx.JSON(w, http.StatusOK, map[string]bool{
+		"configured": h.service.GitHubOAuthEnabled(),
+	})
+}
+
+func (h *Handler) githubLogin(w http.ResponseWriter, r *http.Request) {
+	url, err := h.service.GitHubLoginURL()
+	if err != nil {
+		status := http.StatusServiceUnavailable
+		if !errors.Is(err, ErrGitHubOAuthDisabled) {
+			status = http.StatusInternalServerError
+		}
+		httpx.Error(w, status, err)
+		return
+	}
+	http.Redirect(w, r, url, http.StatusFound)
+}
+
+func (h *Handler) githubCallback(w http.ResponseWriter, r *http.Request) {
+	redirectURL, err := h.service.HandleGitHubCallback(r.Context(), r.URL.Query().Get("code"), r.URL.Query().Get("state"))
+	if err != nil {
+		query := "error=" + GitHubCallbackErrorQuery(err)
+		http.Redirect(w, r, h.service.FrontendLoginURL(query), http.StatusFound)
+		return
+	}
+	http.Redirect(w, r, redirectURL, http.StatusFound)
 }
 
 func (h *Handler) me(w http.ResponseWriter, r *http.Request) {

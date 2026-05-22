@@ -21,6 +21,16 @@ request.interceptors.response.use(
   (error) => {
     const status = error.response?.status
     const message = error.response?.data?.error || error.message || '请求失败'
+    if (status === 403) {
+      const pending = String(message).toLowerCase().includes('pending') || String(message).includes('审核')
+      if (pending) {
+        if (router.currentRoute.value.path !== '/pending-approval') {
+          router.replace('/pending-approval')
+        }
+        ElMessage.error(message)
+        return Promise.reject(error)
+      }
+    }
     if (status === 401) {
       clearToken()
       if (router.currentRoute.value.path !== '/login') {

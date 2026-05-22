@@ -278,7 +278,7 @@ func (s *Service) ChatStreamWithTools(
 		return s.streamFail(sink, errors.New("session store 未配置"))
 	}
 
-	provider, err := s.pickProvider(ctx, projectID, req.ProviderID)
+	provider, err := s.pickProvider(ctx, req.ProviderID)
 	if err != nil {
 		return s.streamFail(sink, err)
 	}
@@ -389,7 +389,7 @@ func (s *Service) ContinueAfterConfirm(
 		return s.streamFail(sink, err)
 	}
 
-	provider, err := s.pickProvider(ctx, projectID, providerID)
+	provider, err := s.pickProvider(ctx, providerID)
 	if err != nil {
 		return s.streamFail(sink, err)
 	}
@@ -784,10 +784,10 @@ func (s *Service) runStreamLoop(ctx context.Context, cfg *streamConfig) error {
 	return cfg.Sink(AssistantStreamEvent{Kind: StreamEventDone, Finish: "hop_budget_exhausted"})
 }
 
-// pickProvider falls back to the project default when callerID is zero.
-func (s *Service) pickProvider(ctx context.Context, projectID, callerID uuid.UUID) (*providerRow, error) {
+// pickProvider falls back to the platform default when callerID is zero.
+func (s *Service) pickProvider(ctx context.Context, callerID uuid.UUID) (*providerRow, error) {
 	if callerID != uuid.Nil {
-		row, err := s.repo.Get(ctx, projectID, callerID)
+		row, err := s.repo.Get(ctx, callerID)
 		if err != nil {
 			return nil, err
 		}
@@ -796,7 +796,7 @@ func (s *Service) pickProvider(ctx context.Context, projectID, callerID uuid.UUI
 		}
 		return row, nil
 	}
-	row, err := s.repo.GetDefaultProvider(ctx, projectID)
+	row, err := s.repo.GetDefaultProvider(ctx)
 	if err != nil {
 		return nil, err
 	}

@@ -712,7 +712,7 @@ func (f *fakeAIService) Chat(_ context.Context, _ uuid.UUID, req aiprovider.Chat
 	return f.response, nil
 }
 
-func (f *fakeAIService) List(_ context.Context, _ uuid.UUID) ([]aiprovider.Provider, error) {
+func (f *fakeAIService) List(_ context.Context) ([]aiprovider.Provider, error) {
 	return append([]aiprovider.Provider(nil), f.providers...), nil
 }
 
@@ -721,7 +721,7 @@ type fakePromptService struct {
 	err     error
 }
 
-func (f *fakePromptService) GetByAction(_ context.Context, _ uuid.UUID, action string) (*projectprompt.ProjectPrompt, error) {
+func (f *fakePromptService) GetByAction(_ context.Context, action string) (*projectprompt.ProjectPrompt, error) {
 	if f.err != nil {
 		return nil, f.err
 	}

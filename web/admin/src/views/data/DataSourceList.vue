@@ -3,26 +3,10 @@
     <div v-if="!embedded" class="page-header data-source-header">
       <div>
         <h2 class="page-title">业务数据源</h2>
-        <p class="page-subtitle">按当前项目维护被测业务库连接（与环境、服务无关），配置后可被 SQL 参数源与场景数据库步骤复用。</p>
+        <p class="page-subtitle">平台级被测业务库连接（与环境、服务无关），配置后可被 SQL 参数源与场景数据库步骤复用。</p>
       </div>
-      <el-button type="primary" :disabled="!canCreate" @click="openCreate">新增数据源</el-button>
+      <el-button v-if="canWrite" type="primary" :disabled="!canCreate" @click="openCreate">新增数据源</el-button>
     </div>
-    <div v-else class="data-source-embedded-toolbar">
-      <p class="page-subtitle">按当前全局项目维护被测业务库连接；与环境、服务无关，可被 SQL 参数源与场景数据库步骤复用。</p>
-      <el-button type="primary" :disabled="!canCreate" @click="openCreate">新增数据源</el-button>
-    </div>
-
-    <el-alert
-      v-if="!projectId"
-      class="project-hint"
-      type="info"
-      show-icon
-      :closable="false"
-      title="请先在左侧列表或顶部选择项目后再管理业务数据源。"
-    />
-
-
-
     <el-table :data="dataSources" border row-key="id" v-loading="loading">
       <el-table-column prop="name" label="名称" min-width="160" />
       <el-table-column prop="driver" label="Driver" width="120" />
@@ -31,9 +15,12 @@
       </el-table-column>
       <el-table-column label="操作" width="210" fixed="right">
         <template #default="{ row }">
-          <el-button type="primary" link :loading="testingId === row.id" @click="testConnection(row)">测试</el-button>
-          <el-button type="primary" link @click="openEdit(row)">编辑</el-button>
-          <el-button type="danger" link :loading="deletingId === row.id" @click="remove(row)">删除</el-button>
+          <template v-if="canWrite">
+            <el-button type="primary" link :loading="testingId === row.id" @click="testConnection(row)">测试</el-button>
+            <el-button type="primary" link @click="openEdit(row)">编辑</el-button>
+            <el-button type="danger" link :loading="deletingId === row.id" @click="remove(row)">删除</el-button>
+          </template>
+          <span v-else class="text-secondary">只读</span>
         </template>
       </el-table-column>
     </el-table>
@@ -83,7 +70,7 @@
 
 <script>
 import { createDataSource, deleteDataSource, listDataSources, testDataSource, updateDataSource } from '../../api'
-import { loadGlobalProjects, projectState } from '../../utils/currentProject'
+import { hasPermission } from '../../auth'
 
 export default {
   name: 'DataSourceList',
@@ -105,21 +92,15 @@ export default {
       form: this.emptyForm()
     }
   },
-  async created() {
-    await loadGlobalProjects()
-    await this.loadDataSources()
+  created() {
+    this.loadDataSources()
   },
   computed: {
-    projectId() {
-      return projectState.currentProjectId
+    canWrite() {
+      return hasPermission('projects:write')
     },
     canCreate() {
-      return !!this.projectId
-    }
-  },
-  watch: {
-    projectId() {
-      this.loadDataSources()
+      return this.canWrite
     }
   },
   methods: {
@@ -161,22 +142,14 @@ export default {
       return JSON.stringify(value, null, 2)
     },
     async loadDataSources() {
-      if (!this.projectId) {
-        this.dataSources = []
-        return
-      }
       this.loading = true
       try {
-        this.dataSources = await listDataSources({ projectId: this.projectId })
+        this.dataSources = await listDataSources()
       } finally {
         this.loading = false
       }
     },
     openCreate() {
-      if (!this.canCreate) {
-        this.$message.warning('请先选择项目')
-        return
-      }
       this.editing = null
       this.form = this.emptyForm()
       this.dialogVisible = true
@@ -239,7 +212,6 @@ export default {
       }
       if (this.form.password) config.password = this.form.password
       const payload = {
-        projectId: this.projectId,
         name: this.form.name,
         driver: this.form.driver,
         dsn: this.form.dsn,

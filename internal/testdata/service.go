@@ -39,13 +39,13 @@ var (
 //     （IsDefault=true && Enabled=true）。
 type AIProviderService interface {
 	Chat(ctx context.Context, projectID uuid.UUID, req aiprovider.ChatRequest) (*aiprovider.ChatResponse, error)
-	List(ctx context.Context, projectID uuid.UUID) ([]aiprovider.Provider, error)
+	List(ctx context.Context) ([]aiprovider.Provider, error)
 }
 
 // PromptService 是 testdata 服务依赖的 `internal/projectprompt` 子集，
 // 用于按 action 读取项目级 SystemPrompt / providerId / defaultModel。
 type PromptService interface {
-	GetByAction(ctx context.Context, projectID uuid.UUID, action string) (*projectprompt.ProjectPrompt, error)
+	GetByAction(ctx context.Context, action string) (*projectprompt.ProjectPrompt, error)
 }
 
 // repositoryAPI is the slice of `Repository` the service depends on. Defined
@@ -431,7 +431,7 @@ func (s *Service) requireTable(ctx context.Context, projectID, tableID uuid.UUID
 func (s *Service) resolveAIConfig(ctx context.Context, projectID uuid.UUID) (uuid.UUID, string, string, error) {
 	var cfg *projectprompt.ProjectPrompt
 	if s.promptSvc != nil {
-		got, err := s.promptSvc.GetByAction(ctx, projectID, projectprompt.ActionGenerateCaseData)
+		got, err := s.promptSvc.GetByAction(ctx, projectprompt.ActionGenerateCaseData)
 		if err == nil && got != nil {
 			cfg = got
 		}
@@ -442,7 +442,7 @@ func (s *Service) resolveAIConfig(ctx context.Context, projectID uuid.UUID) (uui
 		providerID = *cfg.ProviderID
 	}
 	if providerID == uuid.Nil {
-		fallback, err := s.lookupDefaultProvider(ctx, projectID)
+		fallback, err := s.lookupDefaultProvider(ctx)
 		if err != nil {
 			return uuid.Nil, "", "", err
 		}
@@ -466,13 +466,13 @@ func (s *Service) resolveAIConfig(ctx context.Context, projectID uuid.UUID) (uui
 // lookupDefaultProvider 找到项目内 IsDefault=true 且 Enabled=true 的 provider；
 // 若没有 IsDefault 但有任意启用 provider，则返回第一个启用项以便用户在仅配置一个
 // provider 时也能直接使用。两者都没有时返回 ErrAIProviderUnconfigured。
-func (s *Service) lookupDefaultProvider(ctx context.Context, projectID uuid.UUID) (uuid.UUID, error) {
+func (s *Service) lookupDefaultProvider(ctx context.Context) (uuid.UUID, error) {
 	if s.ai == nil {
 		return uuid.Nil, ErrAIProviderUnavailable
 	}
-	providers, err := s.ai.List(ctx, projectID)
+	providers, err := s.ai.List(ctx)
 	if err != nil {
-		return uuid.Nil, fmt.Errorf("查询项目默认 AI 提供商失败: %w", err)
+		return uuid.Nil, fmt.Errorf("查询平台默认 AI 提供商失败: %w", err)
 	}
 	var firstEnabled uuid.UUID
 	for _, p := range providers {

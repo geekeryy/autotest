@@ -18,6 +18,17 @@
       <el-table-column prop="username" label="用户名" />
       <el-table-column prop="displayName" label="显示名" />
       <el-table-column prop="email" label="邮箱" />
+      <el-table-column label="登录方式" width="110">
+        <template #default="{ row }">
+          {{ row.authProvider === 'github' ? 'GitHub' : '本地' }}
+        </template>
+      </el-table-column>
+      <el-table-column label="状态" width="120">
+        <template #default="{ row }">
+          <el-tag v-if="isPendingGithubUser(row)" type="warning" size="small">待审核</el-tag>
+          <span v-else>{{ row.active ? '已启用' : '已停用' }}</span>
+        </template>
+      </el-table-column>
       <el-table-column label="角色" min-width="180">
         <template #default="{ row }">
           <el-tag v-for="role in row.roles" :key="role.id" size="small">{{ role.name }}</el-tag>
@@ -52,7 +63,9 @@
     <el-dialog v-model="dialogVisible" :title="editing ? '编辑用户' : '新增用户'" width="560px">
       <el-form :model="form" label-width="90px">
         <el-form-item label="用户名"><el-input v-model="form.username" :disabled="editing" /></el-form-item>
-        <el-form-item label="密码"><el-input v-model="form.password" show-password :placeholder="editing ? '留空则不修改' : ''" /></el-form-item>
+        <el-form-item v-if="!isGithubEditing" label="密码">
+          <el-input v-model="form.password" show-password :placeholder="editing ? '留空则不修改' : ''" />
+        </el-form-item>
         <el-form-item label="头像">
           <div class="avatar-row">
             <el-avatar :size="56" :src="form.avatarPreview || undefined">{{ avatarPlaceholder }}</el-avatar>
@@ -118,11 +131,17 @@ export default {
     avatarPlaceholder() {
       return getInitials(this.form.displayName || this.form.username, '用')
     },
+    isGithubEditing() {
+      return !!(this.editing && this.editing.authProvider === 'github')
+    },
   },
   created() {
     this.load()
   },
   methods: {
+    isPendingGithubUser(row) {
+      return row.authProvider === 'github' && !row.active
+    },
     initialsForRow(row) {
       return getInitials(row.displayName || row.username, '用')
     },
