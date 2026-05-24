@@ -184,7 +184,7 @@ OAuth 登录方式、回调 URL、`trustedFrontendOrigins` 在管理后台 **用
 |------|------|------|
 | `VITE_API_BASE_URL` | 生产构建时 | API 根 URL（不含 `/api/v1`，由前端代码拼接）；见 `web/admin/.env.production.example` |
 
-本地 `make web-dev` 通过 Vite 代理访问 API，通常无需设置。生产部署（Firebase + API）时在 `web/admin/.env.production` 中配置 `VITE_API_BASE_URL`；本地验证生产构建可用 `make web-build-prod`。
+本地 `make web-dev` 在 `web/admin/.env.development` 配置 `VITE_API_BASE_URL=http://localhost:8080` 时**直连**后端 API（与生产分离部署一致）；未配置时回退为相对路径 `/api/v1` 走 Vite 代理。生产部署（Firebase + API）时在 `web/admin/.env.production` 中配置 `VITE_API_BASE_URL`；本地验证生产构建可用 `make web-build-prod`。
 
 #### Makefile / Docker Compose（工具层）
 

@@ -125,7 +125,7 @@ func TestLoginRejectsInactiveLocalUser(t *testing.T) {
 		ttl:    time.Hour,
 	}
 
-	_, err = svc.Login(context.Background(), LoginInput{Username: "alice", Password: "secret"})
+	_, err = svc.Login(context.Background(), LoginInput{Username: "alice", Password: "secret"}, RequestMeta{})
 	if !errors.Is(err, ErrUnauthorized) {
 		t.Fatalf("expected ErrUnauthorized, got %v", err)
 	}

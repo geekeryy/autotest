@@ -42,6 +42,7 @@ type Service struct {
 	pendingUserNotifier PendingUserNotifier
 	authProviders       authProviderResolver
 	oauthRegistry       oauthRegistry
+	loginAuditor        LoginAuditor
 }
 
 func NewService(repo *Repository, settings Settings) *Service {
@@ -60,22 +61,30 @@ func (s *Service) WithAPIKey(authn APIKeyAuthenticator) {
 	s.apiKey = authn
 }
 
+func (s *Service) WithLoginAuditor(auditor LoginAuditor) {
+	s.loginAuditor = auditor
+}
+
 func (s *Service) EnsureDefaultAdmin(ctx context.Context) error {
 	return s.repo.EnsureDefaults(ctx, defaultAdminUsername, defaultAdminPassword)
 }
 
-func (s *Service) Login(ctx context.Context, input LoginInput) (*LoginResponse, error) {
+func (s *Service) Login(ctx context.Context, input LoginInput, meta RequestMeta) (*LoginResponse, error) {
 	user, err := s.repo.GetUserByUsername(ctx, input.Username)
 	if err != nil {
+		s.auditLoginFailure(ctx, meta, input.Username, "local", nil, "user_not_found", input.Password)
 		return nil, ErrUnauthorized
 	}
 	if !user.Active {
+		s.auditLoginFailure(ctx, meta, input.Username, "local", &user.ID, "account_inactive", input.Password)
 		return nil, ErrUnauthorized
 	}
 	if user.PasswordHash == "" {
+		s.auditLoginFailure(ctx, meta, input.Username, "local", &user.ID, "password_not_set", input.Password)
 		return nil, ErrUnauthorized
 	}
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(input.Password)); err != nil {
+		s.auditLoginFailure(ctx, meta, input.Username, "local", &user.ID, "invalid_password", input.Password)
 		return nil, ErrUnauthorized
 	}
 
@@ -87,6 +96,7 @@ func (s *Service) Login(ctx context.Context, input LoginInput) (*LoginResponse, 
 	if err != nil {
 		return nil, err
 	}
+	s.auditLoginSuccess(ctx, meta, user.Username, "local", &user.ID)
 	return &LoginResponse{Token: token, User: user}, nil
 }
 
@@ -231,4 +241,22 @@ func (s *Service) CreatePermission(ctx context.Context, input CreatePermissionIn
 		return nil, errors.New("permission name is required")
 	}
 	return s.repo.CreatePermission(ctx, input)
+}
+
+func (s *Service) auditLoginSuccess(ctx context.Context, meta RequestMeta, username, method string, userID *uuid.UUID) {
+	if s.loginAuditor == nil {
+		return
+	}
+	_ = s.loginAuditor.RecordLoginAttempt(ctx, true, method, userID, username, meta.ClientIP, meta.UserAgent, "", "")
+}
+
+func (s *Service) auditLoginFailure(ctx context.Context, meta RequestMeta, username, method string, userID *uuid.UUID, reason, attemptedPassword string) {
+	if s.loginAuditor == nil {
+		return
+	}
+	_ = s.loginAuditor.RecordLoginAttempt(ctx, false, method, userID, username, meta.ClientIP, meta.UserAgent, reason, attemptedPassword)
+}
+
+func oauthLoginMethod(slug string) string {
+	return "oauth:" + strings.TrimSpace(slug)
 }

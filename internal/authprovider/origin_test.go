@@ -30,6 +30,48 @@ func TestNormalizeFrontendOrigin(t *testing.T) {
 	}
 }
 
+func TestOriginFromURL(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		in   string
+		want string
+		ok   bool
+	}{
+		{"https://api.example.com/api/v1/auth/oauth/github/callback", "https://api.example.com", true},
+		{"http://localhost:8080/api/v1/auth/oauth/github/callback", "http://localhost:8080", true},
+		{"", "", false},
+		{"not-a-url", "", false},
+	}
+	for _, tc := range cases {
+		got, ok := OriginFromURL(tc.in)
+		if ok != tc.ok {
+			t.Fatalf("OriginFromURL(%q) ok=%v want %v", tc.in, ok, tc.ok)
+		}
+		if tc.ok && got != tc.want {
+			t.Fatalf("OriginFromURL(%q)=%q want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestCallbackURLMatchesOrigin(t *testing.T) {
+	t.Parallel()
+
+	callback := "https://api.example.com/api/v1/auth/oauth/github/callback"
+	if !CallbackURLMatchesOrigin(callback, "https://api.example.com") {
+		t.Fatal("expected match")
+	}
+	if CallbackURLMatchesOrigin(callback, "https://other.example.com") {
+		t.Fatal("expected no match")
+	}
+	if CallbackURLMatchesOrigin("", "https://api.example.com") {
+		t.Fatal("expected empty callback to fail")
+	}
+	if CallbackURLMatchesOrigin(callback, "") {
+		t.Fatal("expected empty origin to fail")
+	}
+}
+
 func TestNormalizeTrustedFrontendOriginsDedupes(t *testing.T) {
 	t.Parallel()
 

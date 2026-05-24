@@ -232,6 +232,8 @@ export const updateApiKey = (id, data) => request.patch(`/api-keys/${id}`, data)
 export const rotateApiKey = (id) => request.post(`/api-keys/${id}/rotate`)
 export const deleteApiKey = (id) => request.delete(`/api-keys/${id}`)
 
+export const listAuditLogs = (params = {}) => request.get('/audit-logs', { params })
+
 export const listTestDataTables = (projectId) =>
   request.get(`/projects/${projectId}/test-data-tables`).then(asList)
 export const getTestDataTable = (projectId, tableId) =>

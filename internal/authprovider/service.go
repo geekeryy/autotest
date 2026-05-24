@@ -57,14 +57,17 @@ func (s *Service) resolveProvider(ctx context.Context, slug string, requireEnabl
 	return &cfg, nil
 }
 
-// ListLoginProviders returns enabled providers for the login page.
-func (s *Service) ListLoginProviders(ctx context.Context) ([]LoginProvider, error) {
+// ListLoginProviders returns enabled providers whose callback URL matches apiOrigin.
+func (s *Service) ListLoginProviders(ctx context.Context, apiOrigin string) ([]LoginProvider, error) {
 	rows, err := s.repo.ListEnabled(ctx)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]LoginProvider, 0, len(rows))
 	for _, row := range rows {
+		if !CallbackURLMatchesOrigin(row.CallbackURL, apiOrigin) {
+			continue
+		}
 		out = append(out, LoginProvider{
 			ID:           row.ID.String(),
 			Slug:         row.Slug,

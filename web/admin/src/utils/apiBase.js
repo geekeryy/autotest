@@ -18,12 +18,15 @@ export function apiPublicOrigin() {
   return window.location.origin
 }
 
-/** API 根路径：dev 始终用相对路径（走 Vite 代理）；生产用 VITE_API_BASE_URL + /api/v1。 */
+/**
+ * API 根路径。
+ * 配置了 VITE_API_BASE_URL 时（含本地 dev）直连该 origin；未配置时用相对路径 /api/v1（同域或 Vite 代理）。
+ */
 export function apiBaseURL() {
-  if (import.meta.env.DEV) return API_PREFIX
-  const origin = import.meta.env.VITE_API_BASE_URL
-  if (!origin) return API_PREFIX
-  return `${apiPublicOrigin()}${API_PREFIX}`
+  if (import.meta.env.VITE_API_BASE_URL) {
+    return `${apiPublicOrigin()}${API_PREFIX}`
+  }
+  return API_PREFIX
 }
 
 /** OAuth 回调 URL，由 API 域名 + slug 组成；保存登录方式时提交给后端持久化。 */

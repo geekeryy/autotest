@@ -67,7 +67,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, err)
 		return
 	}
-	response, err := h.service.Login(r.Context(), input)
+	response, err := h.service.Login(r.Context(), input, RequestMetaFromHTTP(r))
 	if err != nil {
 		if errors.Is(err, ErrUnauthorized) {
 			httpx.Error(w, http.StatusUnauthorized, errors.New("用户名或密码错误"))
@@ -80,7 +80,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) listLoginProviders(w http.ResponseWriter, r *http.Request) {
-	items, err := h.service.ListLoginProviders(r.Context())
+	items, err := h.service.ListLoginProviders(r.Context(), RequestAPIOrigin(r))
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, err)
 		return
@@ -109,7 +109,7 @@ func (h *Handler) oauthLogin(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) oauthCallback(w http.ResponseWriter, r *http.Request) {
 	slug := chi.URLParam(r, "slug")
-	redirectURL, frontendURL, err := h.service.HandleOAuthCallback(r.Context(), slug, r.URL.Query().Get("code"), r.URL.Query().Get("state"))
+	redirectURL, frontendURL, err := h.service.HandleOAuthCallback(r.Context(), slug, r.URL.Query().Get("code"), r.URL.Query().Get("state"), RequestMetaFromHTTP(r))
 	if err != nil {
 		query := "error=" + OAuthCallbackErrorQuery(err)
 		if frontendURL != "" {
@@ -147,7 +147,7 @@ func (h *Handler) githubLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) githubCallback(w http.ResponseWriter, r *http.Request) {
-	redirectURL, frontendURL, err := h.service.HandleGitHubCallback(r.Context(), r.URL.Query().Get("code"), r.URL.Query().Get("state"))
+	redirectURL, frontendURL, err := h.service.HandleGitHubCallback(r.Context(), r.URL.Query().Get("code"), r.URL.Query().Get("state"), RequestMetaFromHTTP(r))
 	if err != nil {
 		query := "error=" + OAuthCallbackErrorQuery(err)
 		if frontendURL != "" {

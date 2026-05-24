@@ -112,6 +112,7 @@ export const menuRoutes = [
         redirect: (to) => ({ path: '/users', query: { ...to.query, tab: 'permissions' } }),
       },
       { path: '/api-keys', component: () => import('../views/rbac/ApiKeyList.vue'), meta: { title: 'API Key', permission: 'apikeys:manage' } },
+      { path: '/audit-logs', component: () => import('../views/rbac/AuditLogList.vue'), meta: { title: '审计日志', permission: 'audit:read' } },
     ],
   }
 ]

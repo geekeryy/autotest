@@ -8,7 +8,7 @@
 - 管理后台提供登录流程、主应用布局、路由守卫、接口自动化测试平台页面、用户与权限管理、RBAC 风格访问控制。
 - 支持两种登录方式并存：
   - **本地用户名密码**：`POST /auth/login`；`active=false` 的本地用户与错误密码一样返回 401，避免账号状态枚举。本地密码登录始终可用，不可在后台关闭（bootstrap 能力）。
-  - **OAuth（GitHub / GitLab / Google）**：登录页调用 `GET /auth/login-providers` 获取已启用的 IdP 列表，点击跳转 `GET /auth/oauth/{slug}/login?frontendUrl={window.location.origin}`；后端按**当前登录方式**配置的 `trusted_frontend_origins` 校验 `frontendUrl`，写入 signed OAuth state；回调 `GET /auth/oauth/{slug}/callback` 成功后 302 到 `{frontendUrl}/login/oauth/callback#token=...`（hash 承载 JWT，避免 token 进入服务端 access log）。
+  - **OAuth（GitHub / GitLab / Google）**：登录页调用 `GET /auth/login-providers` 获取已启用的 IdP 列表（**仅返回 `callbackUrl` 域名与当前 API 请求域名一致的项**，便于多环境共用库时按后端实例过滤）；点击跳转 `GET /auth/oauth/{slug}/login?frontendUrl={window.location.origin}`；后端按**当前登录方式**配置的 `trusted_frontend_origins` 校验 `frontendUrl`，写入 signed OAuth state；回调 `GET /auth/oauth/{slug}/callback` 成功后 302 到 `{frontendUrl}/login/oauth/callback#token=...`（hash 承载 JWT，避免 token 进入服务端 access log）。
 - OAuth 登录方式在「**用户管理 → 登录方式**」Tab 配置（权限 `users:manage`）：支持 CRUD、`slug`（公开标识，唯一）、`clientSecret` 掩码、`callbackUrl`（保存时由前端根据 `VITE_API_BASE_URL` + slug 生成并持久化，列表只读展示）、**可信前端域名**（`trustedFrontendOrigins`，完整 scheme+host+port，无路径；**仅**用于该登录方式的 OAuth `frontendUrl` 回跳校验，与 CORS 无关；`development` 额外内置 localhost 默认项）、测试连接（构造授权 URL）。`client_secret` 第一版明文存库，API 响应掩码（同 AI Provider）。
 - 内置适配器：`github`、`gitlab`（extraConfig.baseUrl，默认 `https://gitlab.com`）、`google`。同类型可配置多条；**slug** 为 OAuth 路由与 IdP 回调 URL 的稳定公开标识（如 `github`、`company-github`），UUID 仅作内部主键。多开发环境可共用同一 GitHub OAuth App：各环境配置 slug=`github` 时回调路径一致（如 `http://localhost:8080/api/v1/auth/oauth/github/callback`），便于在 IdP 只登记一次。
 - 外部身份绑定表 `user_external_identities`（`provider_type` + `external_id` 唯一）；保留 `users.github_id` 双读兼容。用户名前缀：`gh_` / `gl_` / `gg_`。
@@ -94,4 +94,13 @@
 - 当前阶段仅允许 API Key 调用 OpenAPI/Swagger 导入接口（scope=`specs:import`）。
 - 其余接口对 API Key 来源拒绝调用，当前错误语义为「当前接口不支持 API Key 调用」。
 - 支持禁用、过期、最近使用时间审计和 rotate。
+
+## 审计日志
+
+- 平台持久化审计事件至 `audit_logs` 表；当前阶段记录所有用户**登录成功与失败**（action=`auth.login`），涵盖本地密码（`resource=local`）与 OAuth 回调（`resource=oauth:{slug}`）。
+- 失败事件在 `detail.reason` 中记录内部原因码（如 `invalid_password`、`account_inactive`、`exchange_failed`），本地密码登录失败时另在 `detail.attemptedPassword` 记录用户提交的明文密码；仅供管理员排查；对外 HTTP 响应仍保持既有语义（本地密码统一 401，OAuth 失败跳转 `/login?error=...`）。
+- 每条记录包含：操作者用户名、可选 `actor_user_id`、客户端 IP、User-Agent、成功与否、方式（resource）与时间戳。
+- 查询 API：`GET /audit-logs`（JWT、RejectAPIKey），需全局 RBAC 权限 `audit:read`；支持按 `action`、`success`、`username` 过滤与分页（`limit`/`offset`）。
+- 管理后台「系统管理 → 审计日志」（`/audit-logs`）展示登录审计列表；默认 admin 角色 bootstrap 时自动获得 `audit:read`。
+- 后续其他 mutating 操作可复用同一表结构与 `internal/auditlog` 包扩展 action 类型。
 - 重置后原 token 立即失效，新明文仅在独立一次性弹窗展示。

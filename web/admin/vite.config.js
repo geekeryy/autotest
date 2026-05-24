@@ -7,7 +7,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, __dirname, '')
-  // dev 代理目标（API 实际监听地址）；与 VITE_API_BASE_URL 分离，后者仅用于 OAuth 回调 URL
+  // 可选：未配置 VITE_API_BASE_URL 时 dev 代理目标；配置了 VITE_API_BASE_URL 则前端直连 API，代理可忽略
   const proxyTarget = (env.VITE_DEV_API_PROXY || 'http://localhost:8080').replace(/\/$/, '')
 
   if (mode === 'production' && !env.VITE_API_BASE_URL?.trim()) {

@@ -19,6 +19,7 @@ const (
 	PermissionRolesManage       = "roles:manage"
 	PermissionPermissionsManage = "permissions:manage"
 	PermissionAPIKeysManage     = "apikeys:manage"
+	PermissionAuditRead         = "audit:read"
 )
 
 // 认证来源：JWT 走原有用户名密码登录流程，APIKey 走 internal/apikey 校验。
@@ -185,4 +186,5 @@ var defaultPermissions = []defaultPermission{
 	{PermissionRolesManage, "管理角色", "角色管理接口权限"},
 	{PermissionPermissionsManage, "管理权限", "权限点管理接口权限"},
 	{PermissionAPIKeysManage, "管理API Key", "创建、禁用、删除 API Key（用于 CI/CD 调用平台开放接口）"},
+	{PermissionAuditRead, "查看审计日志", "查看平台审计日志"},
 }

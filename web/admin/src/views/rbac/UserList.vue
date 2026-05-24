@@ -37,9 +37,6 @@
           <el-tag v-for="role in row.roles" :key="role.id" size="small">{{ role.name }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="active" label="启用" width="80">
-        <template #default="{ row }">{{ row.active ? '是' : '否' }}</template>
-      </el-table-column>
       <el-table-column label="操作" width="160">
         <template #default="{ row }">
           <el-button type="primary" link @click="openEdit(row)">编辑</el-button>

@@ -89,12 +89,13 @@
 
 ### 管理后台与访问控制
 
-- [登录与后台基础](design/admin-and-access.md)：涉及登录、路由守卫、默认管理员账号密码对齐、首次改密或后台技术栈的请求，先判断是认证流程、权限导航还是启动初始化；默认管理员为 `admin`/`admin`（代码内 bootstrap），首次本地密码登录须改密后重新登录；`APP_ENV=production` 启动时校验 JWT 与数据库密码强度。支持本地用户名密码登录（bootstrap，不可关闭）与可配置 OAuth（GitHub/GitLab/Google，**用户管理 → 登录方式** Tab CRUD，`users:manage`）并存；OAuth 统一回调页 `/login/oauth/callback`（旧 `/login/github/callback` 重定向）；回跳前端地址由登录请求 `frontendUrl`（signed state）与**各登录方式**配置的 `trustedFrontendOrigins` 校验（**仅 OAuth 回跳，不用于 CORS**）。前后端分离部署时 CORS 白名单由环境变量 `CORS_ALLOWED_ORIGINS` 配置（逗号分隔）。`GET /auth/login-providers` 动态展示已启用的 IdP。
+- [登录与后台基础](design/admin-and-access.md)：涉及登录、路由守卫、默认管理员账号密码对齐、首次改密或后台技术栈的请求，先判断是认证流程、权限导航还是启动初始化；默认管理员为 `admin`/`admin`（代码内 bootstrap），首次本地密码登录须改密后重新登录；`APP_ENV=production` 启动时校验 JWT 与数据库密码强度。支持本地用户名密码登录（bootstrap，不可关闭）与可配置 OAuth（GitHub/GitLab/Google，**用户管理 → 登录方式** Tab CRUD，`users:manage`）并存；OAuth 统一回调页 `/login/oauth/callback`（旧 `/login/github/callback` 重定向）；回跳前端地址由登录请求 `frontendUrl`（signed state）与**各登录方式**配置的 `trustedFrontendOrigins` 校验（**仅 OAuth 回跳，不用于 CORS**）。前后端分离部署时 CORS 白名单由环境变量 `CORS_ALLOWED_ORIGINS` 配置（逗号分隔）。`GET /auth/login-providers` 动态展示已启用且 `callbackUrl` 域名与当前 API 请求域名一致的 IdP。
 - [全局项目上下文](design/admin-and-access.md)：涉及顶部项目选择、页面间项目复用、上次项目/环境恢复或未选择项目提示的请求，先判断是否应依赖全局项目，避免在页面内重复选择项目；项目管理页承载服务与环境管理；业务数据源、AI 提供商、Prompt 管理已归入「平台资源」菜单。
 - [服务与环境管理](design/admin-and-access.md)：涉及服务/环境树、环境变量 JSON、认证 JSON、编辑弹窗、提示图标或失焦格式化的请求，先判断变更是否影响运行控制台的环境编辑复用。
 - [菜单、布局与视觉品牌](design/admin-and-access.md)：涉及侧边栏菜单、收起、滚动区域、字体、配色、头像、退出登录或 logo 的请求，先判断是全局布局约束还是单页样式调整；左侧导航不应单独滚动。
 - [脚本库](design/admin-and-access.md)：涉及断言编辑器、场景脚本步骤、内置模板、项目自定义模板或 AI 生成脚本入口的请求，先判断模板作用域是全平台共享还是当前项目。
 - [用户权限与 API Key](design/admin-and-access.md)：涉及 RBAC 菜单、项目权限、API Key 列表/创建/重置/禁用/过期/审计或 CI/CD 调用的请求，先区分前端路由权限、全局后端权限和项目角色中间件；API Key 当前仅允许 `specs:import`，管理操作只作用于当前登录用户的 Key。**用户管理**页（`/users`）以 Tab 聚合用户、角色、权限、登录方式；历史路径 `/roles`、`/permissions`、`/auth-providers` 重定向到对应 Tab。用户管理支持上传头像：浏览器端先压成 JPEG，服务端再缩放编码后存入 `users.avatar_jpeg`，列表与 `/auth/me` 等接口在 JSON 中返回 `avatarUrl`（`data:image/jpeg;base64,...`），便于 Bearer 鉴权下直接用于 `<img>` / `el-avatar`。OAuth 首次登录创建的用户默认 `active=false`、无角色，管理员在用户管理中启用并分配角色后生效。
+- [审计日志](design/admin-and-access.md)：涉及登录成功/失败记录、审计日志列表查询或菜单权限的请求，先确认当前仅持久化 `auth.login` 事件（本地密码与 OAuth）；列表接口 `GET /audit-logs` 需 `audit:read` 权限，默认授予 admin 角色；前端「系统管理 → 审计日志」（`/audit-logs`）展示时间、用户、方式、结果、失败原因、IP 与 User-Agent。
 - [站内通知](design/admin-and-access.md)：涉及管理后台顶栏通知铃铛、未读角标、通知列表、已读状态、一键清空或 API Key 导入触发的通知写入的请求，先判断是否仅按登录用户隔离（不新增 RBAC 权限）；当前 API Key 成功导入 Swagger 时写入 `spec_import` 通知，GitHub 首次待审核用户注册时向拥有 `users:manage` 权限的用户写入 `user_pending` 通知；JWT 页面内手动导入不触发 spec 通知；正文与统计展示**本次实际变动**的接口数（`createdEndpoints + updatedEndpoints`），不含文档内未改动的端点；前端登录后通过 `GET /notifications/stream`（JWT、RejectAPIKey）SSE 实时推送，断线自动重连，页面重新可见时仅做一次 REST 同步；`POST /notifications/clear-all` 硬删除当前用户全部通知并通过 SSE 推送空 `snapshot`。
 
 ## 待用户决策

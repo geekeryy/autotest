@@ -34,6 +34,35 @@ func NormalizeFrontendOrigin(raw string) (string, error) {
 	return parsed.Scheme + "://" + parsed.Host, nil
 }
 
+// OriginFromURL extracts scheme://host from an absolute URL (ignores path/query/fragment).
+func OriginFromURL(raw string) (string, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", false
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return "", false
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return "", false
+	}
+	return parsed.Scheme + "://" + parsed.Host, true
+}
+
+// CallbackURLMatchesOrigin reports whether callbackURL belongs to the given API origin.
+func CallbackURLMatchesOrigin(callbackURL, apiOrigin string) bool {
+	callbackOrigin, ok := OriginFromURL(callbackURL)
+	if !ok {
+		return false
+	}
+	apiOrigin = strings.TrimSpace(apiOrigin)
+	if apiOrigin == "" {
+		return false
+	}
+	return strings.EqualFold(callbackOrigin, apiOrigin)
+}
+
 func normalizeTrustedFrontendOrigins(raw []string) ([]string, error) {
 	if raw == nil {
 		return []string{}, nil

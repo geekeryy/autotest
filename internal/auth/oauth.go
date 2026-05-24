@@ -51,7 +51,7 @@ type PendingUserNotifier func(ctx context.Context, user *User) error
 type authProviderResolver interface {
 	ResolveProvider(ctx context.Context, slug string) (*authprovider.ResolvedProvider, error)
 	ResolveProviderForCallback(ctx context.Context, slug string) (*authprovider.ResolvedProvider, error)
-	ListLoginProviders(ctx context.Context) ([]authprovider.LoginProviderItem, error)
+	ListLoginProviders(ctx context.Context, apiOrigin string) ([]authprovider.LoginProviderItem, error)
 	GitHubOAuthConfigured(ctx context.Context) (bool, error)
 	FirstGitHubProviderID(ctx context.Context) (string, error)
 }
@@ -73,11 +73,11 @@ func (s *Service) FrontendLoginURL(origin, query string) string {
 	return frontendLoginURL(origin, query)
 }
 
-func (s *Service) ListLoginProviders(ctx context.Context) ([]authprovider.LoginProviderItem, error) {
+func (s *Service) ListLoginProviders(ctx context.Context, apiOrigin string) ([]authprovider.LoginProviderItem, error) {
 	if s.authProviders == nil {
 		return []authprovider.LoginProviderItem{}, nil
 	}
-	return s.authProviders.ListLoginProviders(ctx)
+	return s.authProviders.ListLoginProviders(ctx, apiOrigin)
 }
 
 func (s *Service) OAuthLoginURL(ctx context.Context, slug, frontendURL string) (string, error) {
@@ -110,55 +110,67 @@ func (s *Service) OAuthLoginURL(ctx context.Context, slug, frontendURL string) (
 	return oauthCfg.AuthCodeURL(state, oauth2.AccessTypeOnline), nil
 }
 
-func (s *Service) HandleOAuthCallback(ctx context.Context, slug, code, state string) (redirectURL string, frontendURL string, err error) {
+func (s *Service) HandleOAuthCallback(ctx context.Context, slug, code, state string, meta RequestMeta) (redirectURL string, frontendURL string, err error) {
+	method := oauthLoginMethod(slug)
 	if s.oauthRegistry == nil {
+		s.auditLoginFailure(ctx, meta, "", method, nil, "oauth_disabled", "")
 		return "", "", ErrOAuthDisabled
 	}
 	payload, err := s.verifyOAuthState(state)
 	if err != nil {
+		s.auditLoginFailure(ctx, meta, "", method, nil, OAuthCallbackErrorQuery(err), "")
 		return "", "", err
 	}
 	frontendURL = strings.TrimSpace(payload.FrontendURL)
 	if strings.TrimSpace(code) == "" {
+		s.auditLoginFailure(ctx, meta, "", method, nil, OAuthCallbackErrorQuery(ErrOAuthMissingCode), "")
 		return "", frontendURL, ErrOAuthMissingCode
 	}
 
 	resolved, err := s.resolveOAuthProvider(ctx, slug, false)
 	if err != nil {
+		s.auditLoginFailure(ctx, meta, "", method, nil, OAuthCallbackErrorQuery(err), "")
 		return "", frontendURL, err
 	}
 	if frontendURL != "" {
 		if origin, validateErr := s.validateFrontendURLForProvider(frontendURL, resolved.TrustedFrontendOrigins); validateErr != nil {
+			s.auditLoginFailure(ctx, meta, "", method, nil, OAuthCallbackErrorQuery(validateErr), "")
 			return "", "", validateErr
 		} else {
 			frontendURL = origin
 		}
 	}
 	if err := s.validateOAuthCredentials(resolved); err != nil {
+		s.auditLoginFailure(ctx, meta, "", method, nil, OAuthCallbackErrorQuery(err), "")
 		return "", frontendURL, err
 	}
 
 	adapter, err := s.oauthRegistry.Get(resolved.ProviderType)
 	if err != nil {
+		s.auditLoginFailure(ctx, meta, "", method, nil, OAuthCallbackErrorQuery(err), "")
 		return "", frontendURL, err
 	}
 	oauthCfg, err := s.buildOAuth2Config(resolved, adapter)
 	if err != nil {
+		s.auditLoginFailure(ctx, meta, "", method, nil, OAuthCallbackErrorQuery(err), "")
 		return "", frontendURL, err
 	}
 
 	token, err := oauthCfg.Exchange(ctx, code)
 	if err != nil {
+		s.auditLoginFailure(ctx, meta, "", method, nil, OAuthCallbackErrorQuery(ErrOAuthExchangeFailed), "")
 		return "", frontendURL, fmt.Errorf("%w: %w", ErrOAuthExchangeFailed, err)
 	}
 
 	profile, err := adapter.FetchProfile(ctx, *resolved, token)
 	if err != nil {
+		s.auditLoginFailure(ctx, meta, "", method, nil, OAuthCallbackErrorQuery(ErrOAuthProfileFetchFailed), "")
 		return "", frontendURL, fmt.Errorf("%w: %w", ErrOAuthProfileFetchFailed, err)
 	}
 
 	user, created, err := s.resolveExternalUser(ctx, resolved.ProviderType, profile, resolved.DefaultActive, resolved.AutoRegister)
 	if err != nil {
+		s.auditLoginFailure(ctx, meta, profile.Login, method, nil, OAuthCallbackErrorQuery(err), "")
 		return "", frontendURL, err
 	}
 	if created && !resolved.DefaultActive && s.pendingUserNotifier != nil {
@@ -167,11 +179,14 @@ func (s *Service) HandleOAuthCallback(ctx context.Context, slug, code, state str
 
 	jwtToken, err := s.tokenForUser(user)
 	if err != nil {
+		s.auditLoginFailure(ctx, meta, user.Username, method, &user.ID, "token_issue_failed", "")
 		return "", frontendURL, err
 	}
 	if frontendURL == "" {
+		s.auditLoginFailure(ctx, meta, user.Username, method, &user.ID, OAuthCallbackErrorQuery(ErrInvalidFrontendURL), "")
 		return "", "", ErrInvalidFrontendURL
 	}
+	s.auditLoginSuccess(ctx, meta, user.Username, method, &user.ID)
 	return oauthSuccessRedirect(frontendURL, jwtToken), frontendURL, nil
 }
 
@@ -212,7 +227,7 @@ func (s *Service) GitHubLoginURL(ctx context.Context, frontendURL string) (strin
 	return s.LegacyGitHubLoginURL(ctx, frontendURL)
 }
 
-func (s *Service) HandleGitHubCallback(ctx context.Context, code, state string) (string, string, error) {
+func (s *Service) HandleGitHubCallback(ctx context.Context, code, state string, meta RequestMeta) (string, string, error) {
 	if s.authProviders == nil {
 		return "", "", ErrOAuthDisabled
 	}
@@ -220,7 +235,7 @@ func (s *Service) HandleGitHubCallback(ctx context.Context, code, state string) 
 	if err != nil {
 		return "", "", ErrOAuthDisabled
 	}
-	return s.HandleOAuthCallback(ctx, providerSlug, code, state)
+	return s.HandleOAuthCallback(ctx, providerSlug, code, state, meta)
 }
 
 func (s *Service) validateOAuthCredentials(resolved *authprovider.ResolvedProvider) error {

@@ -12,6 +12,7 @@ import (
 	"autotest/internal/aisession"
 	"autotest/internal/aitools/builtin"
 	"autotest/internal/apikey"
+	"autotest/internal/auditlog"
 	"autotest/internal/auth"
 	"autotest/internal/authprovider"
 	testcase "autotest/internal/case"
@@ -69,6 +70,9 @@ func main() {
 	authOAuthRegistry := authprovider.NewRegistry(nil)
 	authProviderSvc := authprovider.NewService(authProviderRepo, authOAuthRegistry)
 	authSvc.WithAuthProvider(authProviderSvc, authOAuthRegistry)
+	auditLogRepo := auditlog.NewRepository(repo)
+	auditLogSvc := auditlog.NewService(auditLogRepo)
+	authSvc.WithLoginAuditor(auditLogSvc)
 	if err := authSvc.EnsureDefaultAdmin(ctx); err != nil {
 		logx.Error("ensure default admin", "err", err)
 		os.Exit(1)
@@ -191,6 +195,9 @@ func main() {
 		runner.NewHandler(runSvc, scenarioRepo, projectSvc).Register(r)
 		apikey.NewHandler(apiKeySvc, authSvc.RequirePermission).Register(r)
 		notification.NewHandler(notificationSvc).Register(r)
+		auditlog.NewHandler(auditLogSvc).Register(r.Group(func(r chi.Router) {
+			r.Use(authSvc.RequirePermission(auth.PermissionAuditRead))
+		}))
 
 		aianalysis.NewHandler(repo, aiProviderSvc, projectPromptSvc, reportRepo, projectHandler).
 			WithTools(aiReadOnly).
