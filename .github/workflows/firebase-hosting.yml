@@ -34,6 +34,10 @@ jobs:
           VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
         run: npm ci && npm run build
 
+      - name: Prepare Firebase project config
+        working-directory: web/admin
+        run: cp .firebaserc.example .firebaserc
+
       - id: auth
         uses: google-github-actions/auth@v2
         with:
@@ -42,9 +46,13 @@ jobs:
           service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
           create_credentials_file: true
 
+      # action-hosting-deploy expects JSON credentials, not a file path.
+      - name: Load WIF credentials for Firebase CLI
+        run: echo "FIREBASE_CREDENTIALS=$(jq -c . "${{ steps.auth.outputs.credentials_file_path }}")" >> "$GITHUB_ENV"
+
       - uses: FirebaseExtended/action-hosting-deploy@v0
         with:
-          firebaseServiceAccount: ${{ steps.auth.outputs.credentials_file_path }}
+          firebaseServiceAccount: ${{ env.FIREBASE_CREDENTIALS }}
           projectId: ${{ vars.GCP_PROJECT_ID }}
           target: autotest
           channelId: live
