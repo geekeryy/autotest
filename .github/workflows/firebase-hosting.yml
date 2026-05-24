@@ -22,6 +22,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Validate deploy configuration
+        env:
+          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          GCP_SERVICE_ACCOUNT: ${{ vars.GCP_SERVICE_ACCOUNT }}
+          VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
+        run: |
+          missing=0
+          for name in GCP_PROJECT_ID GCP_WORKLOAD_IDENTITY_PROVIDER GCP_SERVICE_ACCOUNT VITE_API_BASE_URL; do
+            value="${!name}"
+            if [ -z "$value" ]; then
+              echo "::error::GitHub Actions variable $name is not set"
+              missing=1
+            fi
+          done
+          exit "$missing"
+
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -38,22 +55,12 @@ jobs:
         working-directory: web/admin
         run: cp .firebaserc.example .firebaserc
 
-      - id: auth
-        uses: google-github-actions/auth@v2
+      - uses: google-github-actions/auth@v2
         with:
           project_id: ${{ vars.GCP_PROJECT_ID }}
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
-          create_credentials_file: true
 
-      # action-hosting-deploy expects JSON credentials, not a file path.
-      - name: Load WIF credentials for Firebase CLI
-        run: echo "FIREBASE_CREDENTIALS=$(jq -c . "${{ steps.auth.outputs.credentials_file_path }}")" >> "$GITHUB_ENV"
-
-      - uses: FirebaseExtended/action-hosting-deploy@v0
-        with:
-          firebaseServiceAccount: ${{ env.FIREBASE_CREDENTIALS }}
-          projectId: ${{ vars.GCP_PROJECT_ID }}
-          target: autotest
-          channelId: live
-          entryPoint: web/admin
+      - name: Deploy to Firebase Hosting
+        working-directory: web/admin
+        run: npm run deploy:hosting -- --project "${{ vars.GCP_PROJECT_ID }}"

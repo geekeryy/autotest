@@ -7,7 +7,8 @@
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
     "build:dev": "vite build --mode development",
-    "preview": "vite preview --host 0.0.0.0"
+    "preview": "vite preview --host 0.0.0.0",
+    "deploy:hosting": "firebase deploy --only hosting --non-interactive"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.1",
@@ -30,6 +31,7 @@
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^6.0.6",
+    "firebase-tools": "^15.18.0",
     "vite": "^8.0.10"
   }
 }

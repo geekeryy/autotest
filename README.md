@@ -34,33 +34,9 @@ make web-dev
 开发服务器自动将 `/api` 代理到后端 `http://localhost:8080`。
 首次登录须修改密码，改密成功后使用新密码重新登录。
 
-### 2. 生产部署（默认）
+### 2. All-in-One
 
-**Firebase Hosting 前端 + 自托管 Docker API**，详见 [docs/design/architecture.md — 生产部署](docs/design/architecture.md#生产部署)。
-
-```bash
-# 服务器：启动 API + PostgreSQL
-cp deploy/prod/.env.example .env
-# 编辑 JWT_SECRET、POSTGRES_*、CORS_ALLOWED_ORIGINS
-set -a && . ./.env && set +a
-./scripts/with-database-url.sh compose -- COMPOSE_PROFILES=bundled-db \
-  docker compose --project-directory deploy/prod -f deploy/prod/docker-compose.yml up -d --build
-
-# 本地 / CI：构建并发布前端
-cp web/admin/.env.production.example web/admin/.env.production
-# VITE_API_BASE_URL=https://api.example.com
-make firebase-deploy
-```
-
-构建 API 镜像（多架构）：
-
-```bash
-make docker-buildx
-```
-
-### 3. All-in-One（可选）
-
-单镜像快速试用（内嵌前端，非默认生产方案）：
+单镜像快速试用（内嵌前端）：
 
 ```bash
 cp deploy/all-in-one/.env.example deploy/all-in-one/.env

@@ -468,12 +468,11 @@ CORS_ALLOWED_ORIGINS=https://your-app.web.app,https://admin.example.com
 #### 1. 初始化 Firebase
 
 ```bash
-npm install -g firebase-tools
-firebase login
-
 cd web/admin
-cp .firebaserc.example .firebaserc   # 填写 Firebase 项目 ID 与 Hosting target（默认 autotest）
+npm ci
+cp .firebaserc.example .firebaserc   # 项目 geekeryy，Hosting site autotest-one
 cp .env.production.example .env.production
+# 本地首次部署需 firebase login；CI 使用 WIF，无需 login
 ```
 
 `.env.production`：
@@ -495,7 +494,7 @@ make firebase-deploy
 
 ```bash
 make web-build-prod
-cd web/admin && firebase deploy --only hosting:autotest
+cd web/admin && npm run deploy:hosting
 ```
 
 `firebase.json` 已配置 SPA fallback（所有路径回退 `index.html`）。
@@ -519,7 +518,7 @@ GITHUB_REPO=geekeryy/autotest ./scripts/setup-firebase-github-wif.sh
 | `GCP_SERVICE_ACCOUNT` | `github-firebase-deploy@geekeryy.iam.gserviceaccount.com` |
 | `VITE_API_BASE_URL` | `https://api.example.com`（仅域名） |
 
-Workflow 见 `.github/workflows/firebase-hosting.yml`：推送到 `main` 且 `web/admin/**` 有变更时，`npm run build` 注入 `vars.VITE_API_BASE_URL` 并部署到 Firebase Hosting target `autotest`（live channel）。也可在 Actions 页手动 **Run workflow**。
+Workflow 见 `.github/workflows/firebase-hosting.yml`：推送到 `main` 且 `web/admin/**` 有变更时，先校验上述四个 Variable 均已配置，再 `npm run build` 注入 `VITE_API_BASE_URL`，最后 `npm run deploy:hosting` 部署到 `autotest-one`（target 由 `firebase.json` 指定，`https://autotest-one.web.app`）。也可在 Actions 页手动 **Run workflow**。
 
 > 若组织策略禁止创建 JSON 密钥，`firebase init` 的 GitHub 集成会失败；请使用本 WIF 方案，不要用 `FIREBASE_SERVICE_ACCOUNT` secret。
 

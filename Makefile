@@ -81,12 +81,16 @@ web-build: ## 构建前端产物（development 模式，加载 .env.development�
 	npm --prefix web/admin run build:dev
 	
 firebase-deploy: ## 构建并部署前端到 Firebase Hosting（需 firebase CLI 与 .firebaserc）。
-	npm --prefix web/admin run build
 	@if [ ! -f web/admin/.firebaserc ]; then \
-		echo "请先复制 web/admin/.firebaserc.example 为 .firebaserc 并填写 Firebase 项目 ID"; \
+		echo "请先复制 web/admin/.firebaserc.example 为 .firebaserc"; \
 		exit 1; \
 	fi
-	cd web/admin && firebase deploy --only hosting:autotest
+	@if [ ! -f web/admin/.env.production ] && [ -z "$$VITE_API_BASE_URL" ]; then \
+		echo "请先配置 web/admin/.env.production 或导出 VITE_API_BASE_URL"; \
+		exit 1; \
+	fi
+	npm --prefix web/admin run build
+	cd web/admin && npm run deploy:hosting
 
 test: ## 运行 Go 单元测试（APP_ENV=test）。
 	APP_ENV=test go test ./... ./internal/testdata
