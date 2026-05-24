@@ -4,8 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"time"
+
+	"autotest/internal/config"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -15,16 +16,24 @@ type Config struct {
 	MaxConns    int32
 }
 
-func ConfigFromEnv() Config {
-	url := os.Getenv("DATABASE_URL")
+func ConfigFromURL(url string) Config {
 	if url == "" {
 		url = "postgres://autotest:autotest@localhost:5432/autotest?sslmode=disable"
 	}
-
 	return Config{
 		DatabaseURL: url,
 		MaxConns:    10,
 	}
+}
+
+// ConfigFromEnv reads POSTGRES_* from the environment.
+// Prefer passing an explicit URL from config.Config in new code.
+func ConfigFromEnv() Config {
+	url, err := config.DatabaseURLFromEnv()
+	if err != nil {
+		return ConfigFromURL("")
+	}
+	return ConfigFromURL(url)
 }
 
 func Open(ctx context.Context, cfg Config) (*pgxpool.Pool, error) {

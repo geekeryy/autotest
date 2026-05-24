@@ -20,6 +20,7 @@
 // even when we forward them, but we still skip them explicitly so the
 // downstream handler does not see them as events.
 
+import { apiBaseURL } from './apiBase'
 import { getToken } from './storage'
 
 /**
@@ -147,7 +148,7 @@ function parseFrame(frame) {
 
 function absolute(url) {
   if (/^https?:\/\//i.test(url)) return url
-  const base = import.meta.env.VITE_API_BASE_URL || '/api/v1'
+  const base = apiBaseURL()
   if (url.startsWith('/')) return base + url
   return `${base}/${url}`
 }

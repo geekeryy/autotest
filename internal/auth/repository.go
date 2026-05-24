@@ -3,7 +3,9 @@ package auth
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
+	"strings"
 
 	"autotest/internal/store"
 
@@ -20,14 +22,20 @@ type repositoryBackend interface {
 	EnsureDefaults(ctx context.Context, adminUsername, adminPassword string) error
 	GetUserByUsername(ctx context.Context, username string) (*User, error)
 	GetUserByGithubID(ctx context.Context, githubID int64) (*User, error)
+	GetUserByExternalIdentity(ctx context.Context, providerType, externalID string) (*User, error)
+	EnsureExternalIdentity(ctx context.Context, userID uuid.UUID, providerType, externalID string) error
+	AllocateOAuthUsername(ctx context.Context, prefix, login string) (string, error)
 	AllocateGithubUsername(ctx context.Context, base string) (string, error)
 	CreateGithubUser(ctx context.Context, input GithubUserInput) (*User, error)
+	CreateOAuthUser(ctx context.Context, input OAuthUserInput) (*User, error)
 	UpdateGithubUserProfile(ctx context.Context, id uuid.UUID, displayName, email string, avatarJPEG []byte) (*User, error)
+	UpdateOAuthUserProfile(ctx context.Context, id uuid.UUID, displayName, email string, avatarJPEG []byte) (*User, error)
 	ListUserIDsByPermission(ctx context.Context, permissionCode string) ([]uuid.UUID, error)
 	GetUser(ctx context.Context, id uuid.UUID) (*User, error)
 	ListUsers(ctx context.Context) ([]User, error)
 	CreateUser(ctx context.Context, input CreateUserInput, avatarJPEG []byte) (*User, error)
 	UpdateUser(ctx context.Context, id uuid.UUID, input UpdateUserInput, touchAvatar, clearAvatar bool, avatarJPEG []byte) (*User, error)
+	UpdatePassword(ctx context.Context, userID uuid.UUID, passwordHash string) error
 	DeleteUser(ctx context.Context, id uuid.UUID) error
 	ListRoles(ctx context.Context) ([]Role, error)
 	CreateRole(ctx context.Context, input CreateRoleInput) (*Role, error)
@@ -44,7 +52,7 @@ func NewRepository(repo store.Repository) *Repository {
 
 const userSelectColumns = `
 	id, username, password_hash, auth_provider, github_id,
-	display_name, email, active, avatar_jpeg, created_at, updated_at
+	display_name, email, active, must_change_password, avatar_jpeg, created_at, updated_at
 `
 
 func (r *Repository) EnsureDefaults(ctx context.Context, adminUsername, adminPassword string) error {
@@ -100,16 +108,15 @@ func (r *Repository) EnsureDefaults(ctx context.Context, adminUsername, adminPas
 	}
 
 	var userID uuid.UUID
-	// 冲突时必须写入 excluded.password_hash：否则仅首次插入时密码正确，
-	// 已存在用户时每次启动生成的新哈希被丢弃，会导致默认 admin/admin123（或 .env 配置）无法登录。
+	// 首次插入默认管理员须改密；已存在且已改密用户不再覆盖 password_hash。
 	if err := tx.QueryRow(ctx, `
-		insert into users (username, password_hash, display_name, active)
-		values ($1, $2, '系统管理员', true)
+		insert into users (username, password_hash, display_name, active, must_change_password)
+		values ($1, $2, '系统管理员', true, true)
 		on conflict (username)
 		do update set
-			password_hash = excluded.password_hash,
 			active = true,
-			updated_at = now()
+			updated_at = now(),
+			password_hash = case when users.must_change_password then excluded.password_hash else users.password_hash end
 		returning id
 	`, adminUsername, string(hash)).Scan(&userID); err != nil {
 		return fmt.Errorf("upsert default admin: %w", err)
@@ -138,13 +145,77 @@ func (r *Repository) GetUserByUsername(ctx context.Context, username string) (*U
 	return scanUser(row)
 }
 
-func (r *Repository) GetUserByGithubID(ctx context.Context, githubID int64) (*User, error) {
-	row := r.DB.QueryRow(ctx, `
-		select `+userSelectColumns+`
-		from users
-		where github_id = $1
-	`, githubID)
-	return scanUser(row)
+func (r *Repository) GetUserByExternalIdentity(ctx context.Context, providerType, externalID string) (*User, error) {
+	if r.DB == nil {
+		return nil, fmt.Errorf("database unavailable")
+	}
+	var userID uuid.UUID
+	err := r.DB.QueryRow(ctx, `
+		select user_id from user_external_identities
+		where provider_type = $1 and external_id = $2
+	`, providerType, externalID).Scan(&userID)
+	if err == nil {
+		return r.GetUser(ctx, userID)
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return nil, fmt.Errorf("lookup external identity: %w", err)
+	}
+	if providerType == AuthProviderGithub {
+		if githubID, parseErr := parseGithubExternalID(externalID); parseErr == nil {
+			return r.GetUserByGithubID(ctx, githubID)
+		}
+	}
+	return nil, pgx.ErrNoRows
+}
+
+func (r *Repository) EnsureExternalIdentity(ctx context.Context, userID uuid.UUID, providerType, externalID string) error {
+	_, err := r.DB.Exec(ctx, `
+		insert into user_external_identities (user_id, provider_type, external_id)
+		values ($1, $2, $3)
+		on conflict (provider_type, external_id) do nothing
+	`, userID, providerType, externalID)
+	if err != nil {
+		return fmt.Errorf("ensure external identity: %w", err)
+	}
+	return nil
+}
+
+func parseGithubExternalID(externalID string) (int64, error) {
+	var id int64
+	_, err := fmt.Sscan(strings.TrimSpace(externalID), &id)
+	return id, err
+}
+
+func (r *Repository) AllocateOAuthUsername(ctx context.Context, prefix, login string) (string, error) {
+	base := prefix + sanitizeOAuthLoginLocal(login)
+	candidate := base
+	for i := 0; i < 100; i++ {
+		var exists bool
+		if err := r.DB.QueryRow(ctx, `select exists(select 1 from users where username = $1)`, candidate).Scan(&exists); err != nil {
+			return "", fmt.Errorf("check oauth username: %w", err)
+		}
+		if !exists {
+			return candidate, nil
+		}
+		candidate = fmt.Sprintf("%s_%d", base, i+1)
+	}
+	return "", fmt.Errorf("unable to allocate oauth username for %s", base)
+}
+
+func sanitizeOAuthLoginLocal(login string) string {
+	login = strings.ToLower(strings.TrimSpace(login))
+	login = strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '-', r == '_', r == '.':
+			return r
+		default:
+			return '_'
+		}
+	}, login)
+	if login == "" {
+		return "user"
+	}
+	return login
 }
 
 func (r *Repository) AllocateGithubUsername(ctx context.Context, base string) (string, error) {
@@ -162,10 +233,40 @@ func (r *Repository) AllocateGithubUsername(ctx context.Context, base string) (s
 	return "", fmt.Errorf("unable to allocate github username for %s", base)
 }
 
+func (r *Repository) GetUserByGithubID(ctx context.Context, githubID int64) (*User, error) {
+	row := r.DB.QueryRow(ctx, `
+		select `+userSelectColumns+`
+		from users
+		where github_id = $1
+	`, githubID)
+	return scanUser(row)
+}
+
+func externalType(input OAuthUserInput) string {
+	if input.ExternalType != "" {
+		return input.ExternalType
+	}
+	return input.ProviderType
+}
+
 func (r *Repository) CreateGithubUser(ctx context.Context, input GithubUserInput) (*User, error) {
+	return r.CreateOAuthUser(ctx, OAuthUserInput{
+		Username:     input.Username,
+		DisplayName:  input.DisplayName,
+		Email:        input.Email,
+		AuthProvider: AuthProviderGithub,
+		GithubID:     &input.GithubID,
+		Active:       input.Active,
+		AvatarJPEG:   input.AvatarJPEG,
+		ExternalType: AuthProviderGithub,
+		ExternalID:   fmt.Sprintf("%d", input.GithubID),
+	})
+}
+
+func (r *Repository) CreateOAuthUser(ctx context.Context, input OAuthUserInput) (*User, error) {
 	tx, err := r.DB.Begin(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("begin create github user: %w", err)
+		return nil, fmt.Errorf("begin create oauth user: %w", err)
 	}
 	defer tx.Rollback(ctx)
 
@@ -174,21 +275,39 @@ func (r *Repository) CreateGithubUser(ctx context.Context, input GithubUserInput
 		avatarArg = input.AvatarJPEG
 	}
 
+	var githubArg any
+	if input.GithubID != nil {
+		githubArg = *input.GithubID
+	}
+
 	user, err := scanUser(tx.QueryRow(ctx, `
 		insert into users (username, display_name, email, active, auth_provider, github_id, avatar_jpeg)
 		values ($1, $2, $3, $4, $5, $6, $7)
 		returning `+userSelectColumns+`
-	`, input.Username, input.DisplayName, input.Email, input.Active, AuthProviderGithub, input.GithubID, avatarArg))
+	`, input.Username, input.DisplayName, input.Email, input.Active, input.AuthProvider, githubArg, avatarArg))
 	if err != nil {
-		return nil, fmt.Errorf("create github user: %w", err)
+		return nil, fmt.Errorf("create oauth user: %w", err)
 	}
+
+	if _, err := tx.Exec(ctx, `
+		insert into user_external_identities (user_id, provider_type, external_id)
+		values ($1, $2, $3)
+		on conflict (provider_type, external_id) do nothing
+	`, user.ID, externalType(input), input.ExternalID); err != nil {
+		return nil, fmt.Errorf("create external identity: %w", err)
+	}
+
 	if err := tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("commit create github user: %w", err)
+		return nil, fmt.Errorf("commit create oauth user: %w", err)
 	}
 	return r.GetUser(ctx, user.ID)
 }
 
 func (r *Repository) UpdateGithubUserProfile(ctx context.Context, id uuid.UUID, displayName, email string, avatarJPEG []byte) (*User, error) {
+	return r.UpdateOAuthUserProfile(ctx, id, displayName, email, avatarJPEG)
+}
+
+func (r *Repository) UpdateOAuthUserProfile(ctx context.Context, id uuid.UUID, displayName, email string, avatarJPEG []byte) (*User, error) {
 	if len(avatarJPEG) > 0 {
 		if _, err := r.DB.Exec(ctx, `
 			update users
@@ -333,7 +452,7 @@ func (r *Repository) UpdateUser(ctx context.Context, id uuid.UUID, input UpdateU
 		}
 		if _, err := tx.Exec(ctx, `
 			update users
-			set password_hash = $2, display_name = $3, email = $4, active = $5, updated_at = now()
+			set password_hash = $2, display_name = $3, email = $4, active = $5, must_change_password = false, updated_at = now()
 			where id = $1
 		`, id, string(hash), input.DisplayName, input.Email, active); err != nil {
 			return nil, fmt.Errorf("update user: %w", err)
@@ -367,6 +486,24 @@ func (r *Repository) UpdateUser(ctx context.Context, id uuid.UUID, input UpdateU
 		return nil, fmt.Errorf("commit update user: %w", err)
 	}
 	return r.GetUser(ctx, id)
+}
+
+func (r *Repository) UpdatePassword(ctx context.Context, userID uuid.UUID, passwordHash string) error {
+	if r.DB == nil {
+		return fmt.Errorf("database unavailable")
+	}
+	tag, err := r.DB.Exec(ctx, `
+		update users
+		set password_hash = $2, must_change_password = false, updated_at = now()
+		where id = $1
+	`, userID, passwordHash)
+	if err != nil {
+		return fmt.Errorf("update password: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return pgx.ErrNoRows
+	}
+	return nil
 }
 
 func (r *Repository) DeleteUser(ctx context.Context, id uuid.UUID) error {
@@ -620,7 +757,7 @@ func scanUser(row scanner) (*User, error) {
 	var avatar []byte
 	if err := row.Scan(
 		&user.ID, &user.Username, &passwordHash, &user.AuthProvider, &githubID,
-		&user.DisplayName, &user.Email, &user.Active, &avatar, &user.CreatedAt, &user.UpdatedAt,
+		&user.DisplayName, &user.Email, &user.Active, &user.MustChangePassword, &avatar, &user.CreatedAt, &user.UpdatedAt,
 	); err != nil {
 		return nil, fmt.Errorf("scan user: %w", err)
 	}

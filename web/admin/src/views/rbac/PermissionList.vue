@@ -1,6 +1,9 @@
 <template>
-  <div class="page-card">
-    <div class="page-header">
+  <div :class="embedded ? 'tab-panel' : 'page-card'">
+    <div v-if="embedded" class="tab-panel-toolbar">
+      <el-button type="primary" @click="dialogVisible = true">新增权限点</el-button>
+    </div>
+    <div v-else class="page-header">
       <h2 class="page-title">权限菜单</h2>
       <el-button type="primary" @click="dialogVisible = true">新增权限点</el-button>
     </div>
@@ -39,6 +42,12 @@ import { getListLoadErrorMessage } from '../../utils/listPageLoad'
 export default {
   name: 'PermissionList',
   components: { ListLoadError },
+  props: {
+    embedded: {
+      type: Boolean,
+      default: false,
+    },
+  },
   data() {
     return {
       loading: false,
@@ -73,3 +82,11 @@ export default {
   }
 }
 </script>
+
+<style scoped>
+.tab-panel-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+</style>

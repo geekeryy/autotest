@@ -18,6 +18,8 @@ import (
 	"strings"
 	"time"
 
+	"autotest/internal/config"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -290,14 +292,9 @@ func main() {
 		return
 	}
 
-	dbURL := os.Getenv("DATABASE_URL")
-	if dbURL == "" {
-		host := envOrDefault("POSTGRES_HOST", "localhost")
-		port := envOrDefault("POSTGRES_PORT", "5432")
-		user := envOrDefault("POSTGRES_USER", "autotest")
-		pass := envOrDefault("POSTGRES_PASSWORD", "autotest")
-		dbName := envOrDefault("POSTGRES_DB", "autotest")
-		dbURL = fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable", user, pass, host, port, dbName)
+	dbURL, err := config.DatabaseURLFromEnv()
+	if err != nil {
+		log.Fatalf("database config: %v", err)
 	}
 	pool, err := openDB(context.Background(), dbURL)
 	if err != nil {

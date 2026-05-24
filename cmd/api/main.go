@@ -13,7 +13,9 @@ import (
 	"autotest/internal/aitools/builtin"
 	"autotest/internal/apikey"
 	"autotest/internal/auth"
+	"autotest/internal/authprovider"
 	testcase "autotest/internal/case"
+	"autotest/internal/config"
 	"autotest/internal/generator"
 	"autotest/internal/httpx"
 	"autotest/internal/logx"
@@ -34,16 +36,21 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
-	"github.com/joho/godotenv"
 )
 
 func main() {
-	loadDotEnvIfDev()
+	cfg, err := config.Load()
+	if err != nil {
+		logx.InitWith("error", "text")
+		logx.Error("load config", "err", err)
+		os.Exit(1)
+	}
 
-	logx.Init()
+	logx.InitWith(cfg.LogLevel, cfg.LogFormat)
+	logx.Info("config loaded", "summary", cfg.String())
 
 	ctx := context.Background()
-	db, err := store.Open(ctx, store.ConfigFromEnv())
+	db, err := store.Open(ctx, store.ConfigFromURL(cfg.DatabaseURL))
 	if err != nil {
 		logx.Error("open database", "err", err)
 		os.Exit(1)
@@ -53,7 +60,15 @@ func main() {
 	repo := store.NewRepository(db)
 
 	authRepo := auth.NewRepository(repo)
-	authSvc := auth.NewService(authRepo)
+	authSettings := auth.Settings{
+		JWTSecret:     cfg.JWTSecret,
+		IsDevelopment: cfg.IsDevelopment(),
+	}
+	authSvc := auth.NewService(authRepo, authSettings)
+	authProviderRepo := authprovider.NewRepository(repo)
+	authOAuthRegistry := authprovider.NewRegistry(nil)
+	authProviderSvc := authprovider.NewService(authProviderRepo, authOAuthRegistry)
+	authSvc.WithAuthProvider(authProviderSvc, authOAuthRegistry)
 	if err := authSvc.EnsureDefaultAdmin(ctx); err != nil {
 		logx.Error("ensure default admin", "err", err)
 		os.Exit(1)
@@ -106,7 +121,12 @@ func main() {
 	r.Use(logx.RequestLogger)
 	r.Use(middleware.Recoverer)
 	r.Use(timeoutExceptStream(60 * time.Second))
-	r.Use(devCORS)
+	if cfg.EnableCORS() {
+		r.Use(auth.CORSMiddleware(cfg.CORSAllowedOrigins, cfg.EnableDevCORS()))
+		if !cfg.EnableDevCORS() && len(cfg.CORSAllowedOrigins) == 0 {
+			logx.Warn("CORS_ALLOWED_ORIGINS is empty; cross-origin browser API calls will be rejected (same-origin deployments are unaffected)")
+		}
+	}
 
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		httpx.JSON(w, http.StatusOK, map[string]string{"status": "ok"})
@@ -136,8 +156,10 @@ func main() {
 	api.Group(func(r chi.Router) {
 		r.Use(authSvc.Authenticate)
 		r.Use(authSvc.RequireActiveUser())
+		r.Use(authSvc.RequirePasswordChanged())
 		r.Use(authSvc.RejectAPIKey())
 		authHandler.RegisterProtected(r)
+		authprovider.NewHandler(authProviderSvc, authSvc.RequirePermission(auth.PermissionUsersManage)).Register(r)
 		projectHandler.Register(r)
 		testcase.NewHandler(caseSvc).Register(r)
 		specHandler.Register(r)
@@ -179,18 +201,17 @@ func main() {
 	// 通过 AllowAPIKeyScope("specs:import") 校验 scope；JWT 来源不受影响。
 	api.Group(func(r chi.Router) {
 		r.Use(authSvc.Authenticate)
+		r.Use(authSvc.RequireActiveUser())
+		r.Use(authSvc.RequirePasswordChanged())
 		r.Use(authSvc.AllowAPIKeyScope(apikey.ScopeSpecsImport))
 		specHandler.RegisterImport(r)
 	})
 
 	r.Mount("/api/v1", api)
+	registerAdminUI(r)
 
-	addr := os.Getenv("ADDR")
-	if addr == "" {
-		addr = ":8080"
-	}
-	logx.Info("api listening", "addr", addr)
-	if err := http.ListenAndServe(addr, r); err != nil {
+	logx.Info("api listening", "addr", cfg.Addr)
+	if err := http.ListenAndServe(cfg.Addr, r); err != nil {
 		logx.Error("listen", "err", err)
 		os.Exit(1)
 	}
@@ -253,26 +274,4 @@ func isStreamPath(path string) bool {
 		return true
 	}
 	return false
-}
-
-func devCORS(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-func loadDotEnvIfDev() {
-	for _, key := range []string{"GO_ENV", "ENV", "APP_ENV"} {
-		if strings.EqualFold(os.Getenv(key), "production") {
-			return
-		}
-	}
-	_ = godotenv.Load()
 }

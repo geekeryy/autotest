@@ -1,0 +1,12 @@
+{
+  "projects": {
+    "default": "geekeryy"
+  },
+  "targets": {
+    "geekeryy": {
+      "hosting": {
+        "autotest": ["autotest"]
+      }
+    }
+  }
+}

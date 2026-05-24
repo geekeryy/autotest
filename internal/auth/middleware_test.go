@@ -201,6 +201,51 @@ func TestRequireActiveUser(t *testing.T) {
 	}
 }
 
+func TestRequirePasswordChanged(t *testing.T) {
+	t.Parallel()
+
+	svc := &Service{}
+	mw := svc.RequirePasswordChanged()
+
+	cases := []struct {
+		name       string
+		principal  *Principal
+		wantStatus int
+		wantNext   bool
+	}{
+		{
+			name:       "missing principal returns 401",
+			principal:  nil,
+			wantStatus: http.StatusUnauthorized,
+			wantNext:   false,
+		},
+		{
+			name:       "password already changed allowed",
+			principal:  &Principal{UserID: uuid.New(), MustChangePassword: false},
+			wantStatus: http.StatusOK,
+			wantNext:   true,
+		},
+		{
+			name:       "must change password rejected with 403",
+			principal:  &Principal{UserID: uuid.New(), MustChangePassword: true},
+			wantStatus: http.StatusForbidden,
+			wantNext:   false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			status, called := runWithPrincipal(t, mw, tc.principal)
+			if status != tc.wantStatus {
+				t.Fatalf("status=%d want %d", status, tc.wantStatus)
+			}
+			if called != tc.wantNext {
+				t.Fatalf("nextCalled=%v want %v", called, tc.wantNext)
+			}
+		})
+	}
+}
+
 func TestAuthenticateRejectsAPIKeyWhenNoAuthenticator(t *testing.T) {
 	t.Parallel()
 

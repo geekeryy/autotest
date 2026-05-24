@@ -26,3 +26,15 @@ export function hasPermission(code) {
   if (!code) return true
   return permissionCodes().includes(code)
 }
+
+export function hasAnyPermission(codes) {
+  if (!codes?.length) return true
+  return codes.some((code) => hasPermission(code))
+}
+
+export function routePermissionAllowed(meta) {
+  if (meta?.permissions?.length) {
+    return hasAnyPermission(meta.permissions)
+  }
+  return hasPermission(meta?.permission)
+}

@@ -15,11 +15,11 @@ func TestOAuthStateRoundTrip(t *testing.T) {
 	t.Parallel()
 
 	svc := &Service{secret: []byte("test-secret")}
-	state, err := svc.OAuthStateForTest(time.Now().Add(5 * time.Minute))
+	state, err := svc.OAuthStateForTest(time.Now().Add(5*time.Minute), "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.verifyOAuthState(state); err != nil {
+	if _, err := svc.verifyOAuthState(state); err != nil {
 		t.Fatalf("verifyOAuthState: %v", err)
 	}
 }
@@ -28,11 +28,11 @@ func TestOAuthStateExpired(t *testing.T) {
 	t.Parallel()
 
 	svc := &Service{secret: []byte("test-secret")}
-	state, err := svc.OAuthStateForTest(time.Now().Add(-time.Minute))
+	state, err := svc.OAuthStateForTest(time.Now().Add(-time.Minute), "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.verifyOAuthState(state); err == nil {
+	if _, err := svc.verifyOAuthState(state); err == nil {
 		t.Fatal("expected expired state error")
 	}
 }
@@ -40,10 +40,21 @@ func TestOAuthStateExpired(t *testing.T) {
 func TestGithubUsernameSanitize(t *testing.T) {
 	t.Parallel()
 
-	if got := githubUsername("Hello.World"); got != "gh_hello_world" {
+	if got := githubUsername("Hello.World"); got != "gh_hello.world" {
 		t.Fatalf("got %q", got)
 	}
 	if got := githubUsername(""); got != "gh_user" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestOAuthUsernamePrefixes(t *testing.T) {
+	t.Parallel()
+
+	if got := oauthUsernamePrefix("gitlab"); got != "gl_" {
+		t.Fatalf("got %q", got)
+	}
+	if got := oauthUsernamePrefix("google"); got != "gg_" {
 		t.Fatalf("got %q", got)
 	}
 }
@@ -96,7 +107,7 @@ func TestResolveGithubUserCreatesInactiveUser(t *testing.T) {
 	}
 }
 
-func TestGitHubCallbackErrorQuery(t *testing.T) {
+func TestOAuthCallbackErrorQuery(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
@@ -104,12 +115,13 @@ func TestGitHubCallbackErrorQuery(t *testing.T) {
 		want string
 	}{
 		{ErrInvalidOAuthState, "invalid_state"},
-		{ErrGitHubOAuthExchangeFailed, "exchange_failed"},
-		{fmt.Errorf("wrap: %w", ErrGitHubProfileFetchFailed), "profile_failed"},
+		{ErrOAuthExchangeFailed, "exchange_failed"},
+		{fmt.Errorf("wrap: %w", ErrOAuthProfileFetchFailed), "profile_failed"},
+		{ErrRegistrationDisabled, "registration_disabled"},
 		{errors.New("other"), "oauth_failed"},
 	}
 	for _, tc := range cases {
-		if got := GitHubCallbackErrorQuery(tc.err); got != tc.want {
+		if got := OAuthCallbackErrorQuery(tc.err); got != tc.want {
 			t.Fatalf("err=%v got %q want %q", tc.err, got, tc.want)
 		}
 	}
@@ -135,16 +147,25 @@ func TestResolveGithubUserRetriesAfterDuplicateGithubID(t *testing.T) {
 }
 
 type oauthMemRepo struct {
-	byGithub map[int64]*User
+	byGithub   map[int64]*User
+	byExternal map[string]*User
+}
+
+func (r *oauthMemRepo) externalKey(providerType, externalID string) string {
+	return providerType + ":" + externalID
 }
 
 func (r *oauthMemRepo) ensureMaps() {
 	if r.byGithub == nil {
 		r.byGithub = map[int64]*User{}
 	}
+	if r.byExternal == nil {
+		r.byExternal = map[string]*User{}
+	}
 }
 
 func (r *oauthMemRepo) EnsureDefaults(context.Context, string, string) error { return nil }
+func (r *oauthMemRepo) UpdatePassword(context.Context, uuid.UUID, string) error { return nil }
 
 func (r *oauthMemRepo) GetUserByGithubID(_ context.Context, githubID int64) (*User, error) {
 	r.ensureMaps()
@@ -155,11 +176,44 @@ func (r *oauthMemRepo) GetUserByGithubID(_ context.Context, githubID int64) (*Us
 	return user, nil
 }
 
+func (r *oauthMemRepo) GetUserByExternalIdentity(_ context.Context, providerType, externalID string) (*User, error) {
+	r.ensureMaps()
+	user, ok := r.byExternal[r.externalKey(providerType, externalID)]
+	if !ok {
+		return nil, pgx.ErrNoRows
+	}
+	return user, nil
+}
+
+func (r *oauthMemRepo) EnsureExternalIdentity(_ context.Context, userID uuid.UUID, providerType, externalID string) error {
+	r.ensureMaps()
+	r.byExternal[r.externalKey(providerType, externalID)] = &User{ID: userID}
+	return nil
+}
+
+func (r *oauthMemRepo) AllocateOAuthUsername(_ context.Context, prefix, base string) (string, error) {
+	return prefix + base, nil
+}
+
 func (r *oauthMemRepo) AllocateGithubUsername(_ context.Context, base string) (string, error) {
 	return base, nil
 }
 
-func (r *oauthMemRepo) CreateGithubUser(_ context.Context, input GithubUserInput) (*User, error) {
+func (r *oauthMemRepo) CreateGithubUser(ctx context.Context, input GithubUserInput) (*User, error) {
+	return r.CreateOAuthUser(ctx, OAuthUserInput{
+		Username:     input.Username,
+		DisplayName:  input.DisplayName,
+		Email:        input.Email,
+		AuthProvider: AuthProviderGithub,
+		GithubID:     &input.GithubID,
+		Active:       input.Active,
+		AvatarJPEG:   input.AvatarJPEG,
+		ProviderType: AuthProviderGithub,
+		ExternalID:   fmt.Sprintf("%d", input.GithubID),
+	})
+}
+
+func (r *oauthMemRepo) CreateOAuthUser(_ context.Context, input OAuthUserInput) (*User, error) {
 	r.ensureMaps()
 	user := &User{
 		ID:           uuid.New(),
@@ -167,15 +221,22 @@ func (r *oauthMemRepo) CreateGithubUser(_ context.Context, input GithubUserInput
 		DisplayName:  input.DisplayName,
 		Email:        input.Email,
 		Active:       input.Active,
-		AuthProvider: AuthProviderGithub,
-		GithubID:     &input.GithubID,
+		AuthProvider: input.AuthProvider,
+		GithubID:     input.GithubID,
 	}
-	r.byGithub[input.GithubID] = user
+	if input.GithubID != nil {
+		r.byGithub[*input.GithubID] = user
+	}
+	r.byExternal[r.externalKey(externalType(input), input.ExternalID)] = user
 	return user, nil
 }
 
-func (r *oauthMemRepo) UpdateGithubUserProfile(_ context.Context, id uuid.UUID, displayName, email string, _ []byte) (*User, error) {
-	for _, user := range r.byGithub {
+func (r *oauthMemRepo) UpdateGithubUserProfile(ctx context.Context, id uuid.UUID, displayName, email string, avatar []byte) (*User, error) {
+	return r.UpdateOAuthUserProfile(ctx, id, displayName, email, avatar)
+}
+
+func (r *oauthMemRepo) UpdateOAuthUserProfile(_ context.Context, id uuid.UUID, displayName, email string, _ []byte) (*User, error) {
+	for _, user := range r.byExternal {
 		if user.ID == id {
 			user.DisplayName = displayName
 			user.Email = email
@@ -220,7 +281,7 @@ type oauthRaceRepo struct {
 	oauthMemRepo
 }
 
-func (r *oauthRaceRepo) CreateGithubUser(ctx context.Context, input GithubUserInput) (*User, error) {
+func (r *oauthRaceRepo) CreateOAuthUser(ctx context.Context, input OAuthUserInput) (*User, error) {
 	r.ensureMaps()
 	existing := &User{
 		ID:           uuid.New(),
@@ -228,9 +289,12 @@ func (r *oauthRaceRepo) CreateGithubUser(ctx context.Context, input GithubUserIn
 		DisplayName:  input.DisplayName,
 		Email:        input.Email,
 		Active:       input.Active,
-		AuthProvider: AuthProviderGithub,
-		GithubID:     &input.GithubID,
+		AuthProvider: input.AuthProvider,
+		GithubID:     input.GithubID,
 	}
-	r.byGithub[input.GithubID] = existing
+	if input.GithubID != nil {
+		r.byGithub[*input.GithubID] = existing
+	}
+	r.byExternal[r.externalKey(externalType(input), input.ExternalID)] = existing
 	return nil, fmt.Errorf(`duplicate key value violates unique constraint "users_github_id_key"`)
 }

@@ -1,6 +1,7 @@
 // Notification SSE client (GET /notifications/stream).
 // Uses fetch + ReadableStream so we can send Authorization; reconnects on drop.
 
+import { apiBaseURL } from './apiBase'
 import { getToken } from './storage'
 
 const DEFAULT_LIMIT = 20
@@ -142,7 +143,7 @@ function parseFrame(frame) {
 
 function absolute(url) {
   if (/^https?:\/\//i.test(url)) return url
-  const base = import.meta.env.VITE_API_BASE_URL || '/api/v1'
+  const base = apiBaseURL()
   if (url.startsWith('/')) return base + url
   return `${base}/${url}`
 }

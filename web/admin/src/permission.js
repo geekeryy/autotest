@@ -1,8 +1,10 @@
 import router from './router'
 import { getToken } from './utils/storage'
-import { hasPermission, loadCurrentUser, authState } from './auth'
+import { loadCurrentUser, authState, routePermissionAllowed } from './auth'
 
-const pendingAllowedPaths = ['/pending-approval', '/login/github/callback']
+const oauthCallbackPaths = ['/login/oauth/callback', '/login/github/callback']
+const pendingAllowedPaths = ['/pending-approval', ...oauthCallbackPaths]
+const passwordChangeAllowedPaths = ['/change-password', ...oauthCallbackPaths]
 
 router.beforeEach(async (to) => {
   document.title = `${to.meta?.title || '管理后台'} - Autotest`
@@ -31,11 +33,22 @@ router.beforeEach(async (to) => {
     return '/pending-approval'
   }
 
+  if (user?.mustChangePassword) {
+    if (passwordChangeAllowedPaths.includes(to.path)) {
+      return true
+    }
+    return '/change-password'
+  }
+
+  if (user && !user.mustChangePassword && to.path === '/change-password') {
+    return '/dashboard'
+  }
+
   if (user?.active && to.path === '/pending-approval') {
     return '/dashboard'
   }
 
-  if (!hasPermission(to.meta?.permission)) {
+  if (!routePermissionAllowed(to.meta)) {
     return '/dashboard'
   }
   return true

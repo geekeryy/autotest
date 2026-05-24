@@ -1,6 +1,9 @@
 <template>
-  <div class="page-card">
-    <div class="page-header">
+  <div :class="embedded ? 'tab-panel' : 'page-card'">
+    <div v-if="embedded" class="tab-panel-toolbar">
+      <el-button type="primary" @click="openCreate">新增角色</el-button>
+    </div>
+    <div v-else class="page-header">
       <h2 class="page-title">角色管理</h2>
       <el-button type="primary" @click="openCreate">新增角色</el-button>
     </div>
@@ -55,6 +58,12 @@ import { getListLoadErrorMessage } from '../../utils/listPageLoad'
 export default {
   name: 'RoleList',
   components: { ListLoadError },
+  props: {
+    embedded: {
+      type: Boolean,
+      default: false,
+    },
+  },
   data() {
     return {
       loading: false,
@@ -131,5 +140,11 @@ export default {
 .el-tag {
   margin-right: 4px;
   margin-bottom: 4px;
+}
+
+.tab-panel-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
 }
 </style>

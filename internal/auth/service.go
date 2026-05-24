@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -12,7 +11,14 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+const (
+	defaultAdminUsername = "admin"
+	defaultAdminPassword = "admin"
+)
+
 var ErrUnauthorized = errors.New("invalid username or password")
+var ErrMustChangePassword = errors.New("must change password")
+var ErrPasswordUnchanged = errors.New("new password must differ from current password")
 
 // APIKeyAuthenticator 由 internal/apikey 实现，用于在 Authenticate 中间件中
 // 桥接 API Key 校验逻辑，避免 internal/auth 反向依赖 apikey 包。
@@ -20,24 +26,31 @@ type APIKeyAuthenticator interface {
 	Authenticate(ctx context.Context, token string) (*Principal, error)
 }
 
+type Settings struct {
+	JWTSecret     string
+	IsDevelopment bool
+}
+
 type Service struct {
 	repo                repositoryBackend
+	settings            Settings
 	secret              []byte
 	ttl                 time.Duration
+	isDevelopment       bool
 	apiKey              APIKeyAuthenticator
 	httpClient          *http.Client
 	pendingUserNotifier PendingUserNotifier
+	authProviders       authProviderResolver
+	oauthRegistry       oauthRegistry
 }
 
-func NewService(repo *Repository) *Service {
-	secret := os.Getenv("JWT_SECRET")
-	if secret == "" {
-		secret = "autotest-dev-secret-change-me"
-	}
+func NewService(repo *Repository, settings Settings) *Service {
 	return &Service{
-		repo:   repo,
-		secret: []byte(secret),
-		ttl:    24 * time.Hour,
+		repo:          repo,
+		settings:      settings,
+		secret:        []byte(settings.JWTSecret),
+		ttl:           24 * time.Hour,
+		isDevelopment: settings.IsDevelopment,
 	}
 }
 
@@ -48,15 +61,7 @@ func (s *Service) WithAPIKey(authn APIKeyAuthenticator) {
 }
 
 func (s *Service) EnsureDefaultAdmin(ctx context.Context) error {
-	username := os.Getenv("ADMIN_USERNAME")
-	if username == "" {
-		username = "admin"
-	}
-	password := os.Getenv("ADMIN_PASSWORD")
-	if password == "" {
-		password = "admin123"
-	}
-	return s.repo.EnsureDefaults(ctx, username, password)
+	return s.repo.EnsureDefaults(ctx, defaultAdminUsername, defaultAdminPassword)
 }
 
 func (s *Service) Login(ctx context.Context, input LoginInput) (*LoginResponse, error) {
@@ -108,12 +113,44 @@ func (s *Service) ValidateToken(ctx context.Context, token string) (*Principal, 
 		permissions[permission.Code] = struct{}{}
 	}
 	return &Principal{
-		UserID:      user.ID,
-		Username:    user.Username,
-		Active:      user.Active,
-		Permissions: permissions,
-		Source:      SourceJWT,
+		UserID:             user.ID,
+		Username:           user.Username,
+		Active:             user.Active,
+		MustChangePassword: user.MustChangePassword,
+		Permissions:        permissions,
+		Source:             SourceJWT,
 	}, nil
+}
+
+func (s *Service) ChangePassword(ctx context.Context, userID uuid.UUID, input ChangePasswordInput) error {
+	current := strings.TrimSpace(input.CurrentPassword)
+	next := strings.TrimSpace(input.NewPassword)
+	if current == "" || next == "" {
+		return errors.New("current password and new password are required")
+	}
+	if len(next) < 6 {
+		return errors.New("new password must be at least 6 characters")
+	}
+	if current == next {
+		return ErrPasswordUnchanged
+	}
+
+	user, err := s.repo.GetUser(ctx, userID)
+	if err != nil {
+		return ErrUnauthorized
+	}
+	if user.PasswordHash == "" {
+		return errors.New("password change is not supported for this account")
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(current)); err != nil {
+		return ErrUnauthorized
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(next), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+	return s.repo.UpdatePassword(ctx, userID, string(hash))
 }
 
 func (s *Service) ListUsers(ctx context.Context) ([]User, error) {

@@ -36,8 +36,18 @@ func (f *fakeAuthRepo) GetUser(_ context.Context, id uuid.UUID) (*User, error) {
 }
 
 func (f *fakeAuthRepo) EnsureDefaults(context.Context, string, string) error { return nil }
+func (f *fakeAuthRepo) UpdatePassword(context.Context, uuid.UUID, string) error { return nil }
 func (f *fakeAuthRepo) GetUserByGithubID(context.Context, int64) (*User, error) {
 	return nil, pgx.ErrNoRows
+}
+func (f *fakeAuthRepo) GetUserByExternalIdentity(context.Context, string, string) (*User, error) {
+	return nil, pgx.ErrNoRows
+}
+func (f *fakeAuthRepo) EnsureExternalIdentity(context.Context, uuid.UUID, string, string) error {
+	return nil
+}
+func (f *fakeAuthRepo) AllocateOAuthUsername(context.Context, string, string) (string, error) {
+	return "", errors.New("not implemented")
 }
 func (f *fakeAuthRepo) AllocateGithubUsername(context.Context, string) (string, error) {
 	return "", errors.New("not implemented")
@@ -45,7 +55,13 @@ func (f *fakeAuthRepo) AllocateGithubUsername(context.Context, string) (string, 
 func (f *fakeAuthRepo) CreateGithubUser(context.Context, GithubUserInput) (*User, error) {
 	return nil, errors.New("not implemented")
 }
+func (f *fakeAuthRepo) CreateOAuthUser(context.Context, OAuthUserInput) (*User, error) {
+	return nil, errors.New("not implemented")
+}
 func (f *fakeAuthRepo) UpdateGithubUserProfile(context.Context, uuid.UUID, string, string, []byte) (*User, error) {
+	return nil, errors.New("not implemented")
+}
+func (f *fakeAuthRepo) UpdateOAuthUserProfile(context.Context, uuid.UUID, string, string, []byte) (*User, error) {
 	return nil, errors.New("not implemented")
 }
 func (f *fakeAuthRepo) ListUserIDsByPermission(context.Context, string) ([]uuid.UUID, error) {

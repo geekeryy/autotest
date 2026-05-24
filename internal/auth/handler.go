@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 
+	"autotest/internal/authprovider"
 	"autotest/internal/httpx"
 
 	"github.com/go-chi/chi/v5"
@@ -21,6 +22,9 @@ func NewHandler(service *Service) *Handler {
 
 func (h *Handler) RegisterPublic(r chi.Router) {
 	r.Post("/auth/login", h.login)
+	r.Get("/auth/login-providers", h.listLoginProviders)
+	r.Get("/auth/oauth/{slug}/login", h.oauthLogin)
+	r.Get("/auth/oauth/{slug}/callback", h.oauthCallback)
 	r.Get("/auth/github/status", h.githubStatus)
 	r.Get("/auth/github/login", h.githubLogin)
 	r.Get("/auth/github/callback", h.githubCallback)
@@ -29,6 +33,7 @@ func (h *Handler) RegisterPublic(r chi.Router) {
 func (h *Handler) RegisterAuthenticated(r chi.Router) {
 	r.Get("/auth/me", h.me)
 	r.Post("/auth/logout", h.logout)
+	r.Post("/auth/change-password", h.changePassword)
 }
 
 func (h *Handler) RegisterProtected(r chi.Router) {
@@ -64,10 +69,57 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	}
 	response, err := h.service.Login(r.Context(), input)
 	if err != nil {
+		if errors.Is(err, ErrUnauthorized) {
+			httpx.Error(w, http.StatusUnauthorized, errors.New("用户名或密码错误"))
+			return
+		}
 		httpx.Error(w, http.StatusUnauthorized, err)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, response)
+}
+
+func (h *Handler) listLoginProviders(w http.ResponseWriter, r *http.Request) {
+	items, err := h.service.ListLoginProviders(r.Context())
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, items)
+}
+
+func (h *Handler) oauthLogin(w http.ResponseWriter, r *http.Request) {
+	slug := chi.URLParam(r, "slug")
+	frontendURL := r.URL.Query().Get("frontendUrl")
+	url, err := h.service.OAuthLoginURL(r.Context(), slug, frontendURL)
+	if err != nil {
+		if errors.Is(err, ErrInvalidFrontendURL) {
+			httpx.Error(w, http.StatusBadRequest, err)
+			return
+		}
+		status := http.StatusServiceUnavailable
+		if !errors.Is(err, ErrOAuthDisabled) && !errors.Is(err, authprovider.ErrProviderNotFound) && !errors.Is(err, authprovider.ErrProviderDisabled) {
+			status = http.StatusInternalServerError
+		}
+		httpx.Error(w, status, err)
+		return
+	}
+	http.Redirect(w, r, url, http.StatusFound)
+}
+
+func (h *Handler) oauthCallback(w http.ResponseWriter, r *http.Request) {
+	slug := chi.URLParam(r, "slug")
+	redirectURL, frontendURL, err := h.service.HandleOAuthCallback(r.Context(), slug, r.URL.Query().Get("code"), r.URL.Query().Get("state"))
+	if err != nil {
+		query := "error=" + OAuthCallbackErrorQuery(err)
+		if frontendURL != "" {
+			http.Redirect(w, r, h.service.FrontendLoginURL(frontendURL, query), http.StatusFound)
+			return
+		}
+		httpx.Error(w, http.StatusBadRequest, err)
+		return
+	}
+	http.Redirect(w, r, redirectURL, http.StatusFound)
 }
 
 func (h *Handler) githubStatus(w http.ResponseWriter, r *http.Request) {
@@ -77,10 +129,15 @@ func (h *Handler) githubStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) githubLogin(w http.ResponseWriter, r *http.Request) {
-	url, err := h.service.GitHubLoginURL()
+	frontendURL := r.URL.Query().Get("frontendUrl")
+	url, err := h.service.GitHubLoginURL(r.Context(), frontendURL)
 	if err != nil {
+		if errors.Is(err, ErrInvalidFrontendURL) {
+			httpx.Error(w, http.StatusBadRequest, err)
+			return
+		}
 		status := http.StatusServiceUnavailable
-		if !errors.Is(err, ErrGitHubOAuthDisabled) {
+		if !errors.Is(err, ErrOAuthDisabled) {
 			status = http.StatusInternalServerError
 		}
 		httpx.Error(w, status, err)
@@ -90,10 +147,14 @@ func (h *Handler) githubLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) githubCallback(w http.ResponseWriter, r *http.Request) {
-	redirectURL, err := h.service.HandleGitHubCallback(r.Context(), r.URL.Query().Get("code"), r.URL.Query().Get("state"))
+	redirectURL, frontendURL, err := h.service.HandleGitHubCallback(r.Context(), r.URL.Query().Get("code"), r.URL.Query().Get("state"))
 	if err != nil {
-		query := "error=" + GitHubCallbackErrorQuery(err)
-		http.Redirect(w, r, h.service.FrontendLoginURL(query), http.StatusFound)
+		query := "error=" + OAuthCallbackErrorQuery(err)
+		if frontendURL != "" {
+			http.Redirect(w, r, h.service.FrontendLoginURL(frontendURL, query), http.StatusFound)
+			return
+		}
+		httpx.Error(w, http.StatusBadRequest, err)
 		return
 	}
 	http.Redirect(w, r, redirectURL, http.StatusFound)
@@ -114,6 +175,31 @@ func (h *Handler) me(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
+	httpx.JSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (h *Handler) changePassword(w http.ResponseWriter, r *http.Request) {
+	principal := PrincipalFromContext(r.Context())
+	if principal == nil {
+		httpx.Error(w, http.StatusUnauthorized, errors.New("missing principal"))
+		return
+	}
+	var input ChangePasswordInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		httpx.Error(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := h.service.ChangePassword(r.Context(), principal.UserID, input); err != nil {
+		switch {
+		case errors.Is(err, ErrUnauthorized):
+			httpx.Error(w, http.StatusUnauthorized, errors.New("当前密码错误"))
+		case errors.Is(err, ErrPasswordUnchanged):
+			httpx.Error(w, http.StatusBadRequest, errors.New("新密码不能与当前密码相同"))
+		default:
+			httpx.Error(w, http.StatusBadRequest, err)
+		}
+		return
+	}
 	httpx.JSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 

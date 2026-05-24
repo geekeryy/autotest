@@ -29,6 +29,10 @@ export default {
     try {
       setToken(decodeURIComponent(token))
       const user = await loadCurrentUser()
+      if (user?.mustChangePassword) {
+        await this.$router.replace('/change-password')
+        return
+      }
       if (user?.active) {
         const redirect = this.$route.query.redirect || '/dashboard'
         await this.$router.replace(redirect)

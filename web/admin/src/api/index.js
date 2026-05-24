@@ -7,8 +7,21 @@ function asList(data) {
 
 export const login = (data) => request.post('/auth/login', data)
 export const logout = () => request.post('/auth/logout')
+export const changePassword = (data) => request.post('/auth/change-password', data)
 export const getMe = () => request.get('/auth/me')
 export const getGitHubOAuthStatus = () => request.get('/auth/github/status')
+
+/** 登录页可用 OAuth 方式（公开，无需 JWT） */
+export const listLoginProviders = () => request.get('/auth/login-providers').then(asList)
+export const listAuthProviderTypes = () => request.get('/auth-provider-types').then(asList)
+export const listAuthProviders = () => request.get('/auth-providers').then(asList)
+export const createAuthProvider = (data) => request.post('/auth-providers', data)
+export const updateAuthProvider = (providerId, data) =>
+  request.put(`/auth-providers/${providerId}`, data)
+export const deleteAuthProvider = (providerId) =>
+  request.delete(`/auth-providers/${providerId}`)
+export const testAuthProvider = (providerId) =>
+  request.post(`/auth-providers/${providerId}/test`)
 
 export const listProjects = () => request.get('/projects').then(asList)
 export const createProject = (data) => request.post('/projects', data)

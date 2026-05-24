@@ -1,15 +1,18 @@
 # 接口自动化测试平台设计总览
 
-本文档仅作为设计总览和导航。业务需求索引见 `docs/requirements.md`；工程规范和 agent 协作约束见 `.cursor/rules/*.mdc`。
+本文档作为设计文档导航。需求与文档索引见 [requirements.md](../requirements.md)；架构与部署见 [architecture.md](architecture.md)；快速上手见根目录 [README.md](../../README.md)。工程规范和 agent 协作约束见 `.cursor/rules/*.mdc`。
 
 ## 设计文档
 
-- [平台基础与服务模型](platform-core.md)：术语、项目/服务/环境、Runner、断言、报告、示例服务和 migrations。
-- [API 导入与运行控制台](api-management-and-runner.md)：OpenAPI/Swagger 导入、API 管理、运行控制台、请求编辑、响应展示、环境认证继承。
-- [场景编排](scenario-orchestration.md)：场景步骤、变量传递、脚本步骤、控制流、克隆、步骤 Tab、运行结果。
-- [Mock、模板变量与测试数据](mock-template-and-test-data.md)：Mock Server、Mock Value Sets、运行时模拟标签、模板变量、SQL 参数源、测试数据表。
-- [AI 能力](ai-capabilities.md)：AI 提供商、平台 Prompt、AI 生成、失败分析、spec 变更影响分析。
-- [管理后台与访问控制](admin-and-access.md)：后台布局、全局项目上下文、服务环境管理、菜单、视觉品牌、脚本库、API Key。
+| 文档 | 内容 |
+|------|------|
+| [architecture.md](architecture.md) | 系统架构、配置与环境变量、部署（Firebase 分离为默认，All-in-One 可选） |
+| [platform-core.md](platform-core.md) | 术语、项目/服务/环境、Runner、断言、报告、示例服务 |
+| [api-management-and-runner.md](api-management-and-runner.md) | OpenAPI/Swagger 导入、API 管理、运行控制台、环境认证 |
+| [scenario-orchestration.md](scenario-orchestration.md) | 场景步骤、变量传递、控制流、克隆、运行报告 |
+| [mock-template-and-test-data.md](mock-template-and-test-data.md) | Mock Server、Mock Value Sets、模板变量、SQL 参数源、测试数据 |
+| [ai-capabilities.md](ai-capabilities.md) | AI 提供商、Prompt、生成/分析、Tool Calling、全局助理浮窗 |
+| [admin-and-access.md](admin-and-access.md) | 登录与 OAuth、RBAC、菜单、通知、API Key |
 
 ## 待用户决策
 

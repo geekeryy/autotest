@@ -1,6 +1,6 @@
 # 平台基础与服务模型设计
 
-本文档记录接口自动化测试平台的基础业务模型。需求索引见 `docs/requirements.md`。
+本文档记录接口自动化测试平台的基础业务模型。需求索引见 [requirements.md](../requirements.md)。
 
 ## 术语
 

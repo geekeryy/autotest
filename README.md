@@ -10,127 +10,83 @@ API 自动化测试平台，支持接口请求模板管理、场景编排、Mock
 - **AI 辅助** -- 接入 DeepSeek / OpenAI / Anthropic / Ollama 等大模型，一键生成请求参数、断言脚本与测试数据
 - **RBAC 权限** -- 基于角色的访问控制，细粒度管理项目与资源
 - **运行控制台** -- 实时查看执行状态、响应详情与断言结果
-
-## Architecture
-
-```
-┌──────────────────────────────────────────────────────────────┐
-│                        Frontend (Vue 3)                      │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────────┐ │
-│  │ Projects │ │Requests  │ │Scenarios │ │  Spec Import     │ │
-│  │ Services │ │Templates │ │  Runner  │ │  Mock / RBAC     │ │
-│  └──────────┘ └──────────┘ └──────────┘ └──────────────────┘ │
-└──────────────────────────┬───────────────────────────────────┘
-                           │ /api/v1/*
-┌──────────────────────────┴───────────────────────────────────┐
-│                       Backend (Go)                           │
-│  ┌─────────────────────────────────────────────────────────┐ │
-│  │                    HTTP Layer (Gin)                     │ │
-│  │   auth middleware · JWT · RBAC permission check         │ │
-│  └─────────────────────────┬───────────────────────────────┘ │
-│                            │                                 │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────────┐ │
-│  │   spec   │ │ request  │ │ scenario │ │   mockserver     │ │
-│  │ importer │ │ template │ │  runner  │ │  matcher/runtime │ │
-│  └────┬─────┘ └────┬─────┘ └────┬─────┘ └────┬─────────────┘ │
-│       │            │            │             │              │
-│  ┌────┴────────────┴────────────┴─────────────┴────────────┐ │
-│  │              Shared Services & Utils                    │ │
-│  │  httpx · assertion · sampler · generator · paramsource  │ │
-│  │  aiprovider · scriptlibrary · projectprompt · report    │ │
-│  └──────────────────────────┬──────────────────────────────┘ │
-│                             │                                │
-│  ┌──────────────────────────┴──────────────────────────────┐ │
-│  │                    Store (PostgreSQL)                   │ │
-│  └─────────────────────────────────────────────────────────┘ │
-└──────────────────────────────────────────────────────────────┘
-```
+- **CI/CD 集成** -- 支持 API Key 与 API 调用，可用于自动化测试与持续集成
 
 ## Quick Start
 
 ### Prerequisites
 
-- Go >= 1.23
+- Go >= 1.25
 - Node.js >= 18
 - PostgreSQL >= 14 (本地已安装，或使用 Docker Compose)
 
-### 1. 启动后端
+### 1. 本地开发
 
 ```bash
 make init   # 等待数据库就绪 + 执行迁移
 make run-api
+make web-dev
 ```
 
 默认连接 `postgres://autotest:autotest@localhost:5432/autotest`，启动后自动创建管理员账号：
 
-| 项目   | 默认值     |
-| ------ | ---------- |
-| 用户名 | `admin`    |
-| 密码   | `admin123` |
+访问 `http://localhost:5173`，账号 `admin`，密码 `admin`，
+开发服务器自动将 `/api` 代理到后端 `http://localhost:8080`。
+首次登录须修改密码，改密成功后使用新密码重新登录。
 
-### 2. 启动前端
+### 2. 生产部署（默认）
 
-```bash
-cd web/admin
-npm install
-npm run dev
-```
-
-访问 `http://localhost:5173`，开发服务器自动将 `/api` 代理到后端 `http://localhost:8080`。
-
-### 3. 生产构建
+**Firebase Hosting 前端 + 自托管 Docker API**，详见 [docs/design/architecture.md — 生产部署](docs/design/architecture.md#生产部署)。
 
 ```bash
-cd web/admin
-npm run build
+# 服务器：启动 API + PostgreSQL
+cp deploy/prod/.env.example .env
+# 编辑 JWT_SECRET、POSTGRES_*、CORS_ALLOWED_ORIGINS
+set -a && . ./.env && set +a
+./scripts/with-database-url.sh compose -- COMPOSE_PROFILES=bundled-db \
+  docker compose --project-directory deploy/prod -f deploy/prod/docker-compose.yml up -d --build
+
+# 本地 / CI：构建并发布前端
+cp web/admin/.env.production.example web/admin/.env.production
+# VITE_API_BASE_URL=https://api.example.com
+make firebase-deploy
 ```
+
+构建 API 镜像（多架构）：
+
+```bash
+make docker-buildx
+```
+
+### 3. All-in-One（可选）
+
+单镜像快速试用（内嵌前端，非默认生产方案）：
+
+```bash
+cp deploy/all-in-one/.env.example deploy/all-in-one/.env
+make all-in-one-up
+```
+
+访问 `http://localhost:8080`。详见 [architecture.md — All-in-One（可选）](docs/design/architecture.md#all-in-one可选)。
 
 ## Configuration
 
-根目录创建 `.env` 文件覆盖默认值，`Makefile` 会自动加载：
+配置由 `internal/config` 在启动时统一加载。根目录创建 `.env`（参考 `.env.example`），`Makefile` 会自动 `include` 并 export。
 
-```env
-# PostgreSQL
-DB_MANAGED=external          # external | docker
-POSTGRES_DB=autotest
-POSTGRES_USER=autotest
-POSTGRES_PASSWORD=autotest
-POSTGRES_HOST=localhost
-POSTGRES_PORT=5432
+| 环境      | APP_ENV               | 说明                                               |
+| --------- | --------------------- | -------------------------------------------------- |
+| 本地开发  | `development`（默认） | 自动读 `.env`，开启 dev CORS                       |
+| 测试 / CI | `test`                | `make test` 已内置；集成测试用 `make test-integration`（见 [architecture.md](docs/design/architecture.md#3-测试--ci)） |
+| 生产      | `production`          | API 不读 `.env`；启动时校验 JWT 与数据库密码强度 |
 
-# Application
-ADDR=:8080
-ADMIN_USERNAME=admin
-ADMIN_PASSWORD=admin123
-JWT_SECRET=autotest-dev-secret-change-me
-```
-
-> `DB_MANAGED=external` 使用外部 PostgreSQL；设为 `docker` 则通过 `docker compose up -d postgres` 启动容器。
-
-## API Key (CI/CD)
-
-平台支持通过 API Key 让 CI/CD 流水线以非交互方式调用后端开放接口。
-
-- 管理后台「系统管理 → API Key」生成令牌，明文仅在创建时弹窗一次性展示；数据库只保存 SHA-256 哈希与前后缀掩码（形如 `at-7vqj2…2yag`）。
-- 令牌带 `at-` 前缀，可禁用、可设过期时间、自动记录最近使用时间用于审计。
-- 当前阶段 API Key 仅获得 `specs:import` 作用域，**只允许调用 OpenAPI/Swagger 导入接口**。调用其他接口会被路由层 `RejectAPIKey` 守卫拦截并返回 403。
-- 仅拥有 `apikeys:manage` 权限的角色（默认 `admin`）可创建、编辑、删除 API Key。
-
-导入 OpenAPI/Swagger 示例：
-
-```bash
-curl -X POST "http://localhost:8080/api/v1/projects/$PROJ/services/$SVC/specs/import" \
-  -H "Authorization: Bearer at-7vqj2k9xm3t8p4nrh5w6cs8d1bf2yzag" \
-  -H "Content-Type: application/yaml" \
-  --data-binary @openapi.yaml
-```
+完整变量清单、加载顺序、Docker Compose 与部署方式见 [docs/design/architecture.md](docs/design/architecture.md)。需求与文档索引见 [docs/requirements.md](docs/requirements.md)。
 
 ## TODO
+
 - 基于 OpenAPI Spec 自动生成完整测试场景
 - 现在不做 MCP，但保留 MCP 友好的内部结构
 - 自动生成正向、反向用例
 - 集成通知（飞书/钉钉/Slack webhook）
-- 认证方式扩展（OAuth2 等）
 - 变量引用与函数计算增强
 - 审计日志
 - API 文档页面

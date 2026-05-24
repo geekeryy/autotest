@@ -3,21 +3,27 @@ package spec
 import (
 	"context"
 	"encoding/json"
-	"os"
 	"testing"
 	"time"
 
+	"autotest/internal/config"
 	"autotest/internal/store"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func TestRepositorySyncEndpointsUnchangedDoesNotError(t *testing.T) {
-	databaseURL := os.Getenv("DATABASE_URL")
-	if databaseURL == "" {
-		t.Skip("DATABASE_URL is required for repository integration test")
+func integrationDatabaseURL(t *testing.T) string {
+	t.Helper()
+	databaseURL, err := config.DatabaseURLFromEnv()
+	if err != nil {
+		t.Skipf("POSTGRES_* is required for repository integration test: %v", err)
 	}
+	return databaseURL
+}
+
+func TestRepositorySyncEndpointsUnchangedDoesNotError(t *testing.T) {
+	databaseURL := integrationDatabaseURL(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -99,10 +105,7 @@ func TestRepositorySyncEndpointsUnchangedDoesNotError(t *testing.T) {
 }
 
 func TestRepositorySyncEndpointsCountsFingerprintChange(t *testing.T) {
-	databaseURL := os.Getenv("DATABASE_URL")
-	if databaseURL == "" {
-		t.Skip("DATABASE_URL is required for repository integration test")
-	}
+	databaseURL := integrationDatabaseURL(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

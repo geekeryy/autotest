@@ -1,0 +1,51 @@
+name: Deploy Firebase Hosting
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "web/admin/**"
+      - ".github/workflows/firebase-hosting.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: firebase-hosting-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/admin/package-lock.json
+
+      - name: Build admin frontend
+        working-directory: web/admin
+        env:
+          VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
+        run: npm ci && npm run build
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+          create_credentials_file: true
+
+      - uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          firebaseServiceAccount: ${{ steps.auth.outputs.credentials_file_path }}
+          projectId: ${{ vars.GCP_PROJECT_ID }}
+          target: autotest
+          channelId: live
+          entryPoint: web/admin

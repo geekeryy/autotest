@@ -188,7 +188,7 @@
 
 <script>
 import { logout } from '../api'
-import { authState, hasPermission, resetCurrentUser } from '../auth'
+import { authState, routePermissionAllowed, resetCurrentUser } from '../auth'
 import { clearToken } from '../utils/storage'
 import { menuRoutes } from '../router'
 import { loadGlobalProjects, projectState, setCurrentProjectId } from '../utils/currentProject'
@@ -227,8 +227,6 @@ const icons = {
   '/template-reference': 'Reading',
   '/system': 'Setting',
   '/users': 'User',
-  '/roles': 'UserFilled',
-  '/permissions': 'Key',
   '/api-keys': 'Postcard'
 }
 
@@ -237,7 +235,7 @@ function buildVisibleMenus(routes) {
     if (item.meta?.hidden) return menus
 
     const children = item.children ? buildVisibleMenus(item.children) : []
-    const canAccess = hasPermission(item.meta?.permission)
+    const canAccess = routePermissionAllowed(item.meta)
 
     if (children.length) {
       if (canAccess) {

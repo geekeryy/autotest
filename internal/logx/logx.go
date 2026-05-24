@@ -13,11 +13,22 @@ var logger = slog.Default()
 // Init configures the process-wide slog logger from environment variables.
 // LOG_LEVEL defaults to info; LOG_FORMAT defaults to text.
 func Init() {
-	level := ParseLevel(os.Getenv("LOG_LEVEL"))
-	format := strings.ToLower(strings.TrimSpace(os.Getenv("LOG_FORMAT")))
+	InitWith("", "")
+}
+
+// InitWith configures the process-wide slog logger. Empty level or format fall back to info/text.
+func InitWith(level, format string) {
+	if strings.TrimSpace(level) == "" {
+		level = "info"
+	}
+	if strings.TrimSpace(format) == "" {
+		format = "text"
+	}
+	levelParsed := ParseLevel(level)
+	format = strings.ToLower(strings.TrimSpace(format))
 	opts := &slog.HandlerOptions{
-		Level:     level,
-		AddSource: level <= slog.LevelDebug,
+		Level:     levelParsed,
+		AddSource: levelParsed <= slog.LevelDebug,
 	}
 	var handler slog.Handler
 	switch format {

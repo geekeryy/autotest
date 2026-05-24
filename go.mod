@@ -18,6 +18,7 @@ require (
 )
 
 require (
+	cloud.google.com/go/compute/metadata v0.3.0 // indirect
 	github.com/PaesslerAG/gval v1.0.0 // indirect
 	github.com/dlclark/regexp2 v1.11.4 // indirect
 	github.com/go-openapi/jsonpointer v0.21.0 // indirect

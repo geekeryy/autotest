@@ -324,7 +324,7 @@ select {
   margin-bottom: 12px;
 }
 
-.list-load-error :deep(.el-alert__title) {
+.list-load-error .el-alert__title {
   display: inline-flex;
   align-items: center;
   gap: 8px;

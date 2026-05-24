@@ -1,0 +1,20 @@
+.git
+.gitignore
+.cursor
+**/.DS_Store
+**/*.md
+!migrations/*.sql
+
+# 前端源码与依赖（镜像内重新构建）
+web/admin/node_modules
+web/admin/dist
+
+# 本地构建产物
+**/*.test
+**/*_test.go
+tests/
+
+# 开发环境
+.env
+.env.*
+!.env.example

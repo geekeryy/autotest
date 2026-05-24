@@ -30,6 +30,8 @@ const (
 const (
 	AuthProviderLocal  = "local"
 	AuthProviderGithub = "github"
+	AuthProviderGitlab = "gitlab"
+	AuthProviderGoogle = "google"
 )
 
 type User struct {
@@ -40,8 +42,9 @@ type User struct {
 	GithubID     *int64       `json:"githubId,omitempty"`
 	DisplayName  string       `json:"displayName"`
 	Email        string       `json:"email"`
-	Active       bool         `json:"active"`
-	AvatarURL    string       `json:"avatarUrl,omitempty"`
+	Active              bool         `json:"active"`
+	MustChangePassword  bool         `json:"mustChangePassword"`
+	AvatarURL           string       `json:"avatarUrl,omitempty"`
 	Roles        []Role       `json:"roles,omitempty"`
 	Permissions  []Permission `json:"permissions,omitempty"`
 	CreatedAt    time.Time    `json:"createdAt"`
@@ -57,6 +60,19 @@ type GithubUserInput struct {
 	GithubID    int64
 	Active      bool
 	AvatarJPEG  []byte
+}
+
+type OAuthUserInput struct {
+	Username     string
+	DisplayName  string
+	Email        string
+	AuthProvider string
+	GithubID     *int64
+	ExternalType string
+	ExternalID   string
+	ProviderType string // same as ExternalType; kept for oauth flow compatibility
+	Active       bool
+	AvatarJPEG   []byte
 }
 
 type Role struct {
@@ -76,6 +92,11 @@ type Permission struct {
 	Description string    `json:"description"`
 	CreatedAt   time.Time `json:"createdAt"`
 	UpdatedAt   time.Time `json:"updatedAt"`
+}
+
+type ChangePasswordInput struct {
+	CurrentPassword string `json:"currentPassword"`
+	NewPassword     string `json:"newPassword"`
 }
 
 type LoginInput struct {
@@ -136,6 +157,8 @@ type Principal struct {
 	Username    string
 	Active      bool
 	Permissions map[string]struct{}
+	// MustChangePassword 为 true 时除改密相关接口外应拒绝访问。
+	MustChangePassword bool
 	// Source 区分调用来源：SourceJWT 或 SourceAPIKey；默认空值视为 SourceJWT。
 	Source string
 	// Scopes 仅在 Source 为 SourceAPIKey 时由 internal/apikey 注入，
