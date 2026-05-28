@@ -31,7 +31,7 @@ export POSTGRES_USER POSTGRES_PASSWORD POSTGRES_HOST POSTGRES_PORT POSTGRES_DB P
 # 按文件名顺序执行数据库迁移脚本。
 MIGRATIONS := $(sort $(wildcard migrations/*.sql))
 
-.PHONY: help init up wait-db migrate run-api run-e2e-api web-install web-dev web-build web-build-prod firebase-deploy test test-integration docker-buildx docker-buildx-init docker-buildx-push all-in-one-up all-in-one-down
+.PHONY: help init up wait-db migrate run-api run-mcp build-mcp run-e2e-api web-install web-dev web-build web-build-prod firebase-deploy test test-integration docker-buildx docker-buildx-init docker-buildx-push all-in-one-up all-in-one-down
 
 help: ## 显示可用命令。
 	@awk 'BEGIN {FS = ":.*##"; printf "用法: make <目标>\n\n目标:\n"} /^[a-zA-Z0-9_-]+:.*##/ {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -67,6 +67,13 @@ migrate: wait-db ## 执行 migrations/ 目录下的 SQL 迁移。
 
 run-api: ## 运行 Go API（配置由 internal/config 加载，development 时自动读 .env）。
 	go run ./cmd/api
+
+run-mcp: ## 运行 MCP 服务（stdio）；需 AUTOTEST_API_KEY，可选 AUTOTEST_PROJECT_ID / AUTOTEST_SERVICE_ID。
+	go run ./cmd/mcp
+
+build-mcp: ## 构建 MCP 可执行文件到 bin/autotest-mcp。
+	@mkdir -p bin
+	go build -o bin/autotest-mcp ./cmd/mcp
 
 run-e2e-api: ## 运行 e2e 测试目标 API（APP_ENV=test）。
 	APP_ENV=test go run ./tests/e2e_api

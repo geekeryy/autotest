@@ -8,6 +8,7 @@
 
 ## OpenAPI/Swagger 导入
 
+- **MCP 导入**：独立进程 `cmd/mcp` 通过 MCP 工具 `import_swagger`、`import_swagger_from_url` 调用同一 `POST .../specs/import` 接口（API Key + `specs:import`）。配置与 Cursor 示例见 [mcp-swagger-import.md](mcp-swagger-import.md)。
 - 支持 **OpenAPI 3.0.x / 3.1.x** 原生导入，以及 **Swagger 2.0**（经 kin-openapi 转换为 OpenAPI 3 后解析）。导入器统一产出 OpenAPI 3 语义的 `requestSchema` / `responseSchema`。
 - 对 vendor 文档中常见的非严格校验问题（schema 上误用 `examples`、default 与 enum 标签不一致、额外 sibling 字段如 `BDCZLXXLIST`）采用宽松校验，保证 imperfect spec 仍可导入端点与约束。
 - PathItem 级 `parameters` 会合并进各 operation 的 `requestSchema.parameters`；同名同 `in` 时 operation 级覆盖 path 级。

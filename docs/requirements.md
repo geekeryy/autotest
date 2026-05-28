@@ -47,6 +47,7 @@
 
 ### API 导入与运行控制台
 
+- [MCP Swagger 导入](design/mcp-swagger-import.md)：涉及 Cursor/Claude Desktop 等 MCP 客户端通过 `cmd/mcp` 调用 `import_swagger` / `import_swagger_from_url`、环境变量 `AUTOTEST_*` 或 API Key `specs:import` 的请求，先确认与 HTTP `POST .../specs/import` 语义一致且不扩大 API Key 白名单。
 - [OpenAPI/Swagger 导入](design/api-management-and-runner.md)：涉及 spec 上传、导入响应、幂等刷新、端点写入、模板自动生成或 schema 约束保留的请求，优先检查导入是否会产生重复数据或返回过大字段；当前导入响应为统计摘要，但 spec 列表仍可能返回 `normalizedSnapshot`。
 - [API 管理](design/api-management-and-runner.md)：涉及导入历史、接口请求模板列表、手工模板、新增/编辑入口或页面权限的请求，先判断目标是 `api_endpoints` 还是可运行模板 `test_cases`；`cases:read`、`cases:write`、`specs:import` 当前主要用于前端路由/按钮权限，后端 cases/spec 扁平路由未全部强制这些权限。
 - [运行控制台请求编辑](design/api-management-and-runner.md)：涉及接口 Tab、Path/Query/Header/Body/断言分区、默认参数、保存用例或请求快照的请求，先判断是否改变用户可编辑请求模型；当前无独立「变量」Tab，路径模板和路径参数值必须保持分离。

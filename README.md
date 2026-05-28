@@ -81,10 +81,22 @@ make all-in-one-up
 
 完整变量清单、加载顺序、Docker Compose 与部署方式见 [docs/design/architecture.md](docs/design/architecture.md)。需求与文档索引见 [docs/requirements.md](docs/requirements.md)。
 
+## MCP（Swagger 导入）
+
+可通过 MCP 将 OpenAPI/Swagger 导入平台（供 Cursor 等客户端调用）：
+
+```bash
+export AUTOTEST_API_KEY=at-your-key
+export AUTOTEST_PROJECT_ID=<project-uuid>
+export AUTOTEST_SERVICE_ID=<service-uuid>
+make run-mcp
+```
+
+配置示例见 [.cursor/mcp.json.example](.cursor/mcp.json.example)，设计说明见 [docs/design/mcp-swagger-import.md](docs/design/mcp-swagger-import.md)。
+
 ## TODO
 
 - 基于 OpenAPI Spec 自动生成完整测试场景
-- 现在不做 MCP，但保留 MCP 友好的内部结构
 - 自动生成正向、反向用例
 - 集成通知（飞书/钉钉/Slack webhook）
 - 变量引用与函数计算增强
