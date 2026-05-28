@@ -33,6 +33,7 @@ import (
 	"autotest/internal/spec"
 	"autotest/internal/store"
 	"autotest/internal/testdata"
+	"autotest/internal/testprofile"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -116,6 +117,10 @@ func main() {
 	authSvc.WithAPIKey(apiKeySvc)
 	aiSessionRepo := aisession.NewRepository(repo)
 	aiSessionSvc := aisession.NewService(aiSessionRepo)
+	testProfileRepo := testprofile.NewPGRepository(repo)
+	testProfileDS := testprofile.NewPGDataSource(repo)
+	testProfileSvc := testprofile.NewService(testProfileRepo, testProfileDS)
+	aiProviderSvc.WithProfileContext(testProfileSvc)
 	caseRunner := runner.New(nil, nil, reportRepo)
 	runSvc := runner.NewService(caseSvc, projectSvc, reportRepo, caseRunner, paramSourceSvc, testDataSvc, mockSetSvc)
 
@@ -202,6 +207,7 @@ func main() {
 		aianalysis.NewHandler(repo, aiProviderSvc, projectPromptSvc, reportRepo, projectHandler).
 			WithTools(aiReadOnly).
 			Register(r)
+		testprofile.NewHandler(testProfileSvc).Register(r)
 	})
 
 	// API Key 白名单组：当前仅 OpenAPI/Swagger 导入接口允许 API Key 调用，

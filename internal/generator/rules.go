@@ -6,6 +6,7 @@ import (
 
 	testcase "autotest/internal/case"
 	"autotest/internal/sampler"
+	"autotest/internal/testprofile"
 )
 
 const (
@@ -20,7 +21,15 @@ func (HappyPathRule) ID() string {
 	return RuleHappyPath
 }
 
-func (HappyPathRule) Generate(endpoint Endpoint) ([]testcase.Draft, error) {
+func (r HappyPathRule) Generate(endpoint Endpoint) ([]testcase.Draft, error) {
+	return r.generate(endpoint, nil)
+}
+
+func (r HappyPathRule) GenerateWithProfile(endpoint Endpoint, profile *testprofile.Profile) ([]testcase.Draft, error) {
+	return r.generate(endpoint, profile)
+}
+
+func (HappyPathRule) generate(endpoint Endpoint, profile *testprofile.Profile) ([]testcase.Draft, error) {
 	sample := sampler.FromSchema(endpoint.RequestSchema)
 	request := map[string]any{
 		"method":    strings.ToUpper(endpoint.Method),
@@ -33,11 +42,16 @@ func (HappyPathRule) Generate(endpoint Endpoint) ([]testcase.Draft, error) {
 	if sample.Security != nil {
 		request["security"] = sample.Security
 	}
-	assertions := []map[string]any{
-		{
-			"type":     "status_code",
-			"expected": defaultExpectedStatus(endpoint.ResponseSchema),
-		},
+
+	expectedStatus := defaultExpectedStatus(endpoint.ResponseSchema)
+	var assertions []map[string]any
+
+	if profile != nil && profile.ResponseConvention != nil {
+		assertions = testprofile.BuildConventionAssertions(profile.ResponseConvention, expectedStatus)
+	} else {
+		assertions = []map[string]any{
+			{"type": "status_code", "expected": expectedStatus},
+		}
 	}
 
 	rawRequest, err := json.Marshal(request)

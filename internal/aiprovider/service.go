@@ -38,9 +38,16 @@ type MockSetSummary struct {
 }
 
 // Service applies validation, defaulting and orchestrates client-side AI calls.
+// ProfileContextProvider retrieves the formatted project test profile for
+// injection into AI assistant prompts.
+type ProfileContextProvider interface {
+	GetPromptContext(ctx context.Context, projectID uuid.UUID) (string, error)
+}
+
 type Service struct {
-	repo     *Repository
-	mockSets MockSetSummaryProvider
+	repo           *Repository
+	mockSets       MockSetSummaryProvider
+	profileContext ProfileContextProvider
 }
 
 // NewService constructs a Service.
@@ -52,6 +59,13 @@ func NewService(repo *Repository) *Service {
 // 在所有依赖构造完毕后再连接二者，避免循环 import。
 func (s *Service) WithMockSets(provider MockSetSummaryProvider) *Service {
 	s.mockSets = provider
+	return s
+}
+
+// WithProfileContext 注入项目测试画像上下文源，让 AI 助理在生成场景时能利用
+// 项目已有的运行时知识（响应约定、字段枚举、接口依赖等）。
+func (s *Service) WithProfileContext(provider ProfileContextProvider) *Service {
+	s.profileContext = provider
 	return s
 }
 

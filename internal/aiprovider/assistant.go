@@ -242,6 +242,9 @@ type streamConfig struct {
 	// be injected on every LLM call inside runStreamLoop without
 	// threading the request through every helper.
 	PageContext    json.RawMessage
+	// ProfileContext is the formatted project test profile injected as an
+	// additional system message to give the AI project-specific knowledge.
+	ProfileContext string
 	VisionEnabled  bool
 	// TurnHasImages is true when the current chat request included images
 	// (set before runStreamLoop even if history reload lags).
@@ -290,6 +293,12 @@ func (s *Service) ChatStreamWithTools(
 	cfg, err := s.prepareStreamConfig(projectID, userID, req, provider, cli, store, sink, tools)
 	if err != nil {
 		return s.streamFail(sink, err)
+	}
+
+	if s.profileContext != nil {
+		if pc, err := s.profileContext.GetPromptContext(ctx, projectID); err == nil && pc != "" {
+			cfg.ProfileContext = pc
+		}
 	}
 
 	userText := strings.TrimSpace(req.UserMessage)
@@ -562,7 +571,7 @@ func (s *Service) runStreamLoop(ctx context.Context, cfg *streamConfig) error {
 		return s.streamFail(cfg.Sink, err)
 	}
 
-	messages := buildClientMessages(history, cfg.PageContext, cfg.VisionEnabled)
+	messages := buildClientMessages(history, cfg.PageContext, cfg.ProfileContext, cfg.VisionEnabled)
 	initialHopBudget := cfg.HopBudget
 
 	for cfg.HopBudget > 0 {
@@ -864,9 +873,12 @@ func (s *Service) streamFail(sink StreamCallback, err error) error {
 // after the assistant prompt, so the model knows what the user is
 // currently looking at without us persisting state that's better kept
 // transient.
-func buildClientMessages(history []StoredMessage, pageContext json.RawMessage, visionEnabled bool) []client.Message {
-	out := make([]client.Message, 0, len(history)+2)
+func buildClientMessages(history []StoredMessage, pageContext json.RawMessage, profileContext string, visionEnabled bool) []client.Message {
+	out := make([]client.Message, 0, len(history)+3)
 	out = append(out, client.Message{Role: "system", Content: assistantChatSystem})
+	if profileContext != "" {
+		out = append(out, client.Message{Role: "system", Content: "## 项目测试画像\n" + profileContext})
+	}
 	if msg, ok := renderPageContextSystem(pageContext); ok {
 		out = append(out, msg)
 	}
