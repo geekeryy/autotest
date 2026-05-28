@@ -36,7 +36,7 @@ func TestBuildClientMessages_FiltersPendingAndPreservesToolCalls(t *testing.T) {
 		},
 	}
 
-	msgs := buildClientMessages(history, nil, true)
+	msgs := buildClientMessages(history, nil, "", true)
 
 	// 1) 系统提示先行；2) 跳过 pending_confirm 消息。
 	if len(msgs) != 4 {
@@ -69,7 +69,7 @@ func TestBuildClientMessages_FiltersPendingAndPreservesToolCalls(t *testing.T) {
 // AI assistant be aware of the user's current page.
 func TestBuildClientMessages_InjectsPageContext(t *testing.T) {
 	page := json.RawMessage(`{"path":"/scenarios/abc","scenarioId":"abc","scenarioName":"checkout flow"}`)
-	msgs := buildClientMessages(nil, page, false)
+	msgs := buildClientMessages(nil, page, "", false)
 
 	if len(msgs) != 2 {
 		t.Fatalf("expected system + page-context system message, got %d", len(msgs))
@@ -104,7 +104,7 @@ func TestBuildClientMessages_SkipsEmptyPageContext(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			msgs := buildClientMessages(nil, tc.in, false)
+			msgs := buildClientMessages(nil, tc.in, "", false)
 			if len(msgs) != 1 {
 				t.Fatalf("expected only the assistant prompt, got %d msgs", len(msgs))
 			}
