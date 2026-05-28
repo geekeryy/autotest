@@ -114,12 +114,14 @@ type AssistantThinkingState struct {
 }
 
 // AssistantToolCall is the public representation of a tool invocation.
-// Mutating is `true` for write tools requiring user confirmation.
+// RequiresConfirm is true for destructive writes (delete_*) that must be
+// approved before execution. Mutating is kept for backward-compatible UI.
 type AssistantToolCall struct {
-	ID        string          `json:"id"`
-	Name      string          `json:"name"`
-	Arguments json.RawMessage `json:"arguments"`
-	Mutating  bool            `json:"mutating,omitempty"`
+	ID              string          `json:"id"`
+	Name            string          `json:"name"`
+	Arguments       json.RawMessage `json:"arguments"`
+	Mutating        bool            `json:"mutating,omitempty"`
+	RequiresConfirm bool            `json:"requiresConfirm,omitempty"`
 }
 
 // AssistantToolResult mirrors a single tool execution result.
@@ -207,10 +209,11 @@ type StoredMessageInput struct {
 // ai_messages.tool_calls. The Mutating flag is propagated so the handler
 // can react without re-checking the tool registry.
 type StoredToolCall struct {
-	ID        string          `json:"id"`
-	Name      string          `json:"name"`
-	Arguments json.RawMessage `json:"arguments"`
-	Mutating  bool            `json:"mutating,omitempty"`
+	ID              string          `json:"id"`
+	Name            string          `json:"name"`
+	Arguments       json.RawMessage `json:"arguments"`
+	Mutating        bool            `json:"mutating,omitempty"`
+	RequiresConfirm bool            `json:"requiresConfirm,omitempty"`
 }
 
 // Status constants mirror the CHECK on ai_messages.status. We duplicate
@@ -673,42 +676,130 @@ func (s *Service) runStreamLoop(ctx context.Context, cfg *streamConfig) error {
 			return cfg.Sink(AssistantStreamEvent{Kind: StreamEventDone, Model: model, Finish: finish})
 		}
 
-		// 2) Partition tool calls. If any are mutating, persist as
-		// pending_confirm and suspend. We deliberately do NOT execute the
-		// readonly ones in this hop: keeping the persisted state minimal
-		// makes the resume flow trivial.
-		mutating := pickMutating(toolCalls, cfg.Tools)
-		if len(mutating) > 0 {
+		// 2) Partition tool calls. Auto-run read-only and non-destructive
+		// writes; suspend only when a delete_* (RequiresConfirm) tool is present.
+		confirmCalls := pickRequiresConfirm(toolCalls, cfg.Tools)
+		autoCalls := pickAutoExecute(toolCalls, cfg.Tools)
+
+		if len(autoCalls) > 0 {
 			storedCalls := toStoredCalls(toolCalls, cfg.Tools)
 			payload, err := json.Marshal(storedCalls)
 			if err != nil {
 				return s.streamFail(cfg.Sink, fmt.Errorf("序列化工具调用失败: %w", err))
 			}
-			msg, err := cfg.Store.AppendMessage(ctx, cfg.SessionID, StoredMessageInput{
+			assistantMsg, err := cfg.Store.AppendMessage(ctx, cfg.SessionID, StoredMessageInput{
 				Role:             "assistant",
 				Content:          textBuf.String(),
 				ReasoningContent: reasoningBuf.String(),
 				ToolCalls:        payload,
-				Status:           storedStatusPendingConfirm,
+				Status:           storedStatusFinal,
 				Model:            model,
 				ElapsedMillis:    elapsed,
 				UsageDetails:     usageRaw,
 			})
 			if err != nil {
-				return s.streamFail(cfg.Sink, fmt.Errorf("持久化挂起助理消息失败: %w", err))
+				return s.streamFail(cfg.Sink, fmt.Errorf("持久化助理消息失败: %w", err))
 			}
 			if err := cfg.emitUsageIfNeeded(usageDetail); err != nil {
 				return err
 			}
-			if err := cfg.Sink(AssistantStreamEvent{Kind: StreamEventMessage, Message: toPersisted(msg)}); err != nil {
+			if err := cfg.Sink(AssistantStreamEvent{Kind: StreamEventMessage, Message: toPersisted(assistantMsg)}); err != nil {
 				return err
 			}
-			for _, call := range mutating {
+			messages = append(messages, client.Message{
+				Role:             "assistant",
+				Content:          textBuf.String(),
+				ReasoningContent: reasoningBuf.String(),
+				ToolCalls:        toolCalls,
+			})
+			for _, call := range autoCalls {
+				ac := toAssistantCall(call, cfg.Tools)
+				if err := cfg.Sink(AssistantStreamEvent{Kind: StreamEventToolCall, ToolCall: &ac}); err != nil {
+					return err
+				}
+				content := executeToolCall(ctx, cfg.Tools, call)
+				toolMsg, err := cfg.Store.AppendMessage(ctx, cfg.SessionID, StoredMessageInput{
+					Role:       "tool",
+					Content:    content,
+					ToolCallID: call.ID,
+					Status:     storedStatusFinal,
+				})
+				if err != nil {
+					return s.streamFail(cfg.Sink, fmt.Errorf("持久化工具结果失败: %w", err))
+				}
+				if err := cfg.Sink(AssistantStreamEvent{Kind: StreamEventMessage, Message: toPersisted(toolMsg)}); err != nil {
+					return err
+				}
+				if err := cfg.Sink(AssistantStreamEvent{Kind: StreamEventToolResult, ToolResult: &AssistantToolResult{
+					CallID:  call.ID,
+					Name:    call.Name,
+					Content: content,
+				}}); err != nil {
+					return err
+				}
+				messages = append(messages, client.Message{
+					Role:       "tool",
+					ToolCallID: call.ID,
+					Content:    content,
+				})
+			}
+		}
+
+		if len(confirmCalls) > 0 {
+			storedCalls := toStoredCalls(toolCalls, cfg.Tools)
+			payload, err := json.Marshal(storedCalls)
+			if err != nil {
+				return s.streamFail(cfg.Sink, fmt.Errorf("序列化工具调用失败: %w", err))
+			}
+			status := storedStatusPendingConfirm
+			if len(autoCalls) == 0 {
+				// No auto tools ran yet; persist the assistant turn now.
+				msg, err := cfg.Store.AppendMessage(ctx, cfg.SessionID, StoredMessageInput{
+					Role:             "assistant",
+					Content:          textBuf.String(),
+					ReasoningContent: reasoningBuf.String(),
+					ToolCalls:        payload,
+					Status:           status,
+					Model:            model,
+					ElapsedMillis:    elapsed,
+					UsageDetails:     usageRaw,
+				})
+				if err != nil {
+					return s.streamFail(cfg.Sink, fmt.Errorf("持久化挂起助理消息失败: %w", err))
+				}
+				if err := cfg.emitUsageIfNeeded(usageDetail); err != nil {
+					return err
+				}
+				if err := cfg.Sink(AssistantStreamEvent{Kind: StreamEventMessage, Message: toPersisted(msg)}); err != nil {
+					return err
+				}
+			} else {
+				// Auto tools already persisted an assistant row; add a pending row for confirm-only calls.
+				msg, err := cfg.Store.AppendMessage(ctx, cfg.SessionID, StoredMessageInput{
+					Role:             "assistant",
+					Content:          "",
+					ReasoningContent: "",
+					ToolCalls:        payload,
+					Status:           status,
+					Model:            model,
+				})
+				if err != nil {
+					return s.streamFail(cfg.Sink, fmt.Errorf("持久化挂起助理消息失败: %w", err))
+				}
+				if err := cfg.Sink(AssistantStreamEvent{Kind: StreamEventMessage, Message: toPersisted(msg)}); err != nil {
+					return err
+				}
+			}
+			for _, call := range confirmCalls {
 				if err := cfg.Sink(AssistantStreamEvent{Kind: StreamEventPendingConfirm, ToolCall: call}); err != nil {
 					return err
 				}
 			}
 			return cfg.Sink(AssistantStreamEvent{Kind: StreamEventDone, Model: model, Finish: "pending_confirm"})
+		}
+
+		if len(autoCalls) > 0 {
+			continue
 		}
 
 		// 3) Only readonly tools -> persist the assistant turn, execute
@@ -746,7 +837,8 @@ func (s *Service) runStreamLoop(ctx context.Context, cfg *streamConfig) error {
 		})
 
 		for _, call := range toolCalls {
-			if err := cfg.Sink(AssistantStreamEvent{Kind: StreamEventToolCall, ToolCall: toAssistantCall(call, cfg.Tools)}); err != nil {
+			ac := toAssistantCall(call, cfg.Tools)
+			if err := cfg.Sink(AssistantStreamEvent{Kind: StreamEventToolCall, ToolCall: &ac}); err != nil {
 				return err
 			}
 			content := executeToolCall(ctx, cfg.Tools, call)
@@ -825,9 +917,8 @@ func (s *Service) applyDecision(ctx context.Context, cfg *streamConfig, call Sto
 	if !ok {
 		return encodeToolError(fmt.Sprintf("未知工具: %s", call.Name)), true
 	}
-	if !tool.Mutating {
-		// Defensive: only mutating tools should pass through this path.
-		return encodeToolError(fmt.Sprintf("工具 %s 不是受控写工具，拒绝执行", call.Name)), true
+	if !tool.RequiresConfirm {
+		return encodeToolError(fmt.Sprintf("工具 %s 不需要人工确认，拒绝通过确认接口执行", call.Name)), true
 	}
 	value, err := tool.Run(ctx, call.Arguments)
 	if err != nil {
@@ -944,26 +1035,45 @@ func renderPageContextSystem(pageContext json.RawMessage) (client.Message, bool)
 	return client.Message{Role: "system", Content: body}, true
 }
 
-// pickMutating returns the assistant-facing projection of tool calls that
-// require user confirmation. Order matches the original call order.
-func pickMutating(calls []client.ToolCall, tools map[string]aitools.Tool) []*AssistantToolCall {
+// pickRequiresConfirm returns tool calls that must be approved by the user.
+func pickRequiresConfirm(calls []client.ToolCall, tools map[string]aitools.Tool) []*AssistantToolCall {
 	out := []*AssistantToolCall{}
+	for _, c := range calls {
+		tool, ok := tools[c.Name]
+		if !ok || !tool.RequiresConfirm {
+			continue
+		}
+		out = append(out, toAssistantCallPtr(c, tool))
+	}
+	return out
+}
+
+// pickAutoExecute returns read-only tools and mutating tools that do not
+// require confirmation (create/update).
+func pickAutoExecute(calls []client.ToolCall, tools map[string]aitools.Tool) []client.ToolCall {
+	out := make([]client.ToolCall, 0, len(calls))
 	for _, c := range calls {
 		tool, ok := tools[c.Name]
 		if !ok {
 			continue
 		}
-		if !tool.Mutating {
+		if tool.RequiresConfirm {
 			continue
 		}
-		out = append(out, &AssistantToolCall{
-			ID:        c.ID,
-			Name:      c.Name,
-			Arguments: c.Arguments,
-			Mutating:  true,
-		})
+		out = append(out, c)
 	}
 	return out
+}
+
+func toAssistantCallPtr(c client.ToolCall, tool aitools.Tool) *AssistantToolCall {
+	ac := AssistantToolCall{
+		ID:              c.ID,
+		Name:            c.Name,
+		Arguments:       c.Arguments,
+		Mutating:        tool.Mutating,
+		RequiresConfirm: tool.RequiresConfirm,
+	}
+	return &ac
 }
 
 // toStoredCalls produces the JSON-serialisable shape persisted in
@@ -971,32 +1081,32 @@ func pickMutating(calls []client.ToolCall, tools map[string]aitools.Tool) []*Ass
 func toStoredCalls(calls []client.ToolCall, tools map[string]aitools.Tool) []StoredToolCall {
 	out := make([]StoredToolCall, 0, len(calls))
 	for _, c := range calls {
-		mut := false
-		if t, ok := tools[c.Name]; ok {
-			mut = t.Mutating
-		}
-		out = append(out, StoredToolCall{
+		stored := StoredToolCall{
 			ID:        c.ID,
 			Name:      c.Name,
 			Arguments: c.Arguments,
-			Mutating:  mut,
-		})
+		}
+		if t, ok := tools[c.Name]; ok {
+			stored.Mutating = t.Mutating
+			stored.RequiresConfirm = t.RequiresConfirm
+		}
+		out = append(out, stored)
 	}
 	return out
 }
 
 // toAssistantCall is the small bridge to the SSE event shape.
-func toAssistantCall(c client.ToolCall, tools map[string]aitools.Tool) *AssistantToolCall {
-	mut := false
-	if t, ok := tools[c.Name]; ok {
-		mut = t.Mutating
-	}
-	return &AssistantToolCall{
+func toAssistantCall(c client.ToolCall, tools map[string]aitools.Tool) AssistantToolCall {
+	ac := AssistantToolCall{
 		ID:        c.ID,
 		Name:      c.Name,
 		Arguments: c.Arguments,
-		Mutating:  mut,
 	}
+	if t, ok := tools[c.Name]; ok {
+		ac.Mutating = t.Mutating
+		ac.RequiresConfirm = t.RequiresConfirm
+	}
+	return ac
 }
 
 // removeCall returns the persisted tool_calls JSON with the given call id

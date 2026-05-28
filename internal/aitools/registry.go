@@ -33,15 +33,19 @@ import (
 // supported providers) describing the function input. An empty value is
 // treated as `{"type":"object","properties":{}}` (no arguments).
 //
-// Mutating signals that the tool changes platform state. The aiprovider
-// service uses this flag to decide whether to invoke the tool directly or
-// route it through the human-in-the-loop confirmation flow (see PR-2).
+// Mutating signals that the tool changes platform state.
+//
+// RequiresConfirm marks destructive or high-risk writes (typically delete_*)
+// that must pause the SSE stream until the user approves via
+// /tool-calls/{id}/confirm. Non-destructive mutating tools (create/update)
+// execute immediately in the tool loop.
 type Tool struct {
-	Name        string
-	Description string
-	Parameters  json.RawMessage
-	Mutating    bool
-	Run         func(ctx context.Context, args json.RawMessage) (any, error)
+	Name            string
+	Description     string
+	Parameters      json.RawMessage
+	Mutating        bool
+	RequiresConfirm bool
+	Run             func(ctx context.Context, args json.RawMessage) (any, error)
 }
 
 // ToDefinition converts the tool into a client-facing definition that can be

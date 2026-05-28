@@ -89,6 +89,15 @@ func (f *fakeScenarioService) Update(_ context.Context, id uuid.UUID, input scen
 	return sc, nil
 }
 
+func (f *fakeScenarioService) Delete(_ context.Context, id uuid.UUID) error {
+	if _, ok := f.scenarios[id]; !ok {
+		return scenario.ErrScenarioNotFound
+	}
+	delete(f.scenarios, id)
+	delete(f.stepsByOS, id)
+	return nil
+}
+
 func (f *fakeScenarioService) UpsertStep(_ context.Context, scenarioID uuid.UUID, input scenario.UpsertStepInput) (*scenario.Step, error) {
 	if f.upsertErr != nil {
 		return nil, f.upsertErr

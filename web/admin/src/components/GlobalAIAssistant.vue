@@ -427,7 +427,7 @@
           </div>
         </div>
         <div class="ai-composer-footer" :class="{ 'ai-composer-footer--page': isPageLayout }">
-          <span class="ai-composer-hint" v-if="state.pendingCalls.length">先处理上方等待确认的写操作</span>
+          <span class="ai-composer-hint" v-if="state.pendingCalls.length">先处理上方等待确认的删除操作</span>
           <span class="ai-composer-hint" v-else>Enter 换行 · {{ sendShortcutHint }} 发送</span>
           <ModelSettingsPopover
             v-if="isPageLayout"

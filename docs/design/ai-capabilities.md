@@ -52,7 +52,7 @@
 
 - 平台为分析类与对话型 AI 入口提供统一的 Tool Calling 框架，工具实现位于 `internal/aitools`。
 - 工具描述使用 JSON Schema（draft-07 子集），由 `internal/aiprovider/client` 在调用 LLM 时按 OpenAI `tools/tool_calls` 与 Anthropic `tool_use` 双协议自动适配,调用方无需关心 provider 差异。
-- 工具元数据携带 `Mutating bool`,只读工具可直接执行;Mutating（写）工具必须经过下文「写工具确认」中的人在回路流程,任何分析类 action 都只允许暴露只读工具。
+- 工具元数据携带 `Mutating` 与 `RequiresConfirm`：只读工具直接执行；**create/update 类写工具**（`Mutating=true` 且 `RequiresConfirm=false`）在对话流中自动执行；**delete_* 等删除类写工具**（`RequiresConfirm=true`）必须经过下文「写工具确认」的人在回路流程。任何分析类 action 都只允许暴露只读工具。
 - 工具循环最多 `MaxToolHops` 跳(默认 6);达到上限仍未给出结论时返回中文提示并停止,不允许无限工具调用。
 - 工具运行错误以 `{"error":"..."}` 形式注入到对话中,模型据此自行决策是否换工具或停止;错误本身不算 LLM 调用失败,不应让整个 action 中断。
 - 工具调用沿用调用方 `context.Context` 上的 `*auth.Principal` 与 `ProjectRoleFromContext` 进行权限判定。在此之上还有一层"会话项目隔离"——SSE handler 与分析类入口在调用工具循环前都会通过 `aitools.WithCaller(ctx, CallerContext{UserID, ProjectID})` 把当前用户与会话项目 ID 写入 ctx；工具实现统一调 `aitools.ResolveProjectID(ctx, "")`（或拿到对象 projectId 后 `aitools.RequireProjectAccess(ctx, projectID)`）做强校验，确保 AI 既无法跨项目操作、也不需要也无法手动指定项目。
@@ -68,20 +68,17 @@
 
 ## 内置工具集（`internal/aitools/builtin`）
 
-按域拆分为四个源文件：
-
-- `builtin.go`：`Deps` / `ReadOnly` / `Mutating` / `All` 入口与 `rawSchema` helper。
-- `deps.go`：消费侧接口（`CaseService` / `ScenarioService` / `SpecRepository` / `ProjectService`），每个依赖 nil 时对应工具运行期返回中文错误，而不是 panic。
-- `builtin_meta.go`：服务/接口/环境的 discovery（`list_services` / `list_endpoints` / `list_environments` / `get_endpoint`）。`list_endpoints` 返回 method/path/operationId/summary/tags 的精简摘要，调用方需要 schema 时再走 `get_endpoint`。
-- `builtin_cases.go`：接口请求模板相关（`get_case` / `list_cases` / `create_case_from_endpoint` / `update_case_assertions`）。
-- `builtin_scenarios.go`：场景与步骤编排（`get_scenario` / `list_scenarios` / `create_scenario_with_steps` / `add_scenario_step` / `update_scenario_step` / `delete_scenario_step` / `reorder_scenario_steps`）。
+按域拆分为多个源文件（`builtin_meta` / `builtin_cases` / `builtin_scenarios` / `builtin_projects` / `builtin_spec` / `builtin_mockserver` / `builtin_mockset` / `builtin_testdata` / `builtin_paramsource` / `builtin_scripts` / `builtin_runs` 等），入口为 `builtin.go` 的 `ReadOnly` / `Mutating` / `All`。
 
 工具分类：
 
-- 只读（discovery / 查询）：`list_services` / `list_endpoints` / `list_environments` / `get_endpoint` / `list_cases` / `get_case` / `list_scenarios` / `get_scenario`。
-- 受控写（mutating，必经人在回路确认）：`create_case_from_endpoint` / `update_case_assertions` / `create_scenario_with_steps` / `add_scenario_step` / `update_scenario_step` / `delete_scenario_step` / `reorder_scenario_steps`。
-- 平台 **不暴露** "运行" 类工具。AI 完成场景生成后由用户在前端手动点击运行按钮，确保所有真实测试动作都经过人的明确触发。
-- 平台 **不暴露** 服务（service）/环境（environment）的创建、更新工具。项目基础结构（服务、环境、AI 提供商、Prompt、OpenAPI spec 导入、Mock Server 启停等）属于平台管理面，仅由用户手工维护；AI 工具只读相关元信息以辅助生成场景，但永远不会写入。
+- **只读**（discovery / 查询，分析类与浮窗均可用）：服务/接口/环境/Spec、接口模板、场景、Mock、测试数据、SQL 参数源、脚本库、运行历史等 `list_*` / `get_*` / `preview_*`。
+- **自动写**（`Mutating` 且 `RequiresConfirm=false`）：create/update/reorder/import 等，在 SSE 工具循环中立即执行，无需用户点确认。
+- **删除写**（`RequiresConfirm=true`，名称通常为 `delete_*`）：删除服务/环境、场景、步骤、Mock、测试数据表、数据源、脚本模板等，浮窗展示确认卡片，用户批准后才执行。
+- 平台 **不暴露**「运行」类工具（单接口/场景执行仍由用户手动触发）。
+- 平台 **不暴露** 用户管理相关写能力：用户/角色/权限/登录方式/API Key 等系统管理接口不在工具集中。
+
+完整工具名以 `builtin.All()` 注册顺序为准（约 60+ 个）；新增工具须遵循 `additionalProperties: false`、不暴露 `projectId`、删除类使用 `deleteTool` helper。
 
 ## AI 场景生成与编排
 
