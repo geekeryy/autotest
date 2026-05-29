@@ -177,6 +177,7 @@ func main() {
 			Cases:        caseSvc,
 			Scenarios:    scenarioSvc,
 			Specs:        specRepo,
+			Generator:    generator.NewDefault(),
 			SpecImporter: specSvc,
 			Projects:     projectSvc,
 			ParamSource:  paramSourceSvc,

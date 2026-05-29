@@ -655,6 +655,10 @@ func (c *capturingCaseService) Patch(_ context.Context, _ uuid.UUID, _ testcase.
 	return nil, errors.New("capturingCaseService.Patch not implemented in test")
 }
 
+func (c *capturingCaseService) UpsertGenerated(_ context.Context, _ testcase.Draft) (*testcase.TestCase, error) {
+	return nil, errors.New("capturingCaseService.UpsertGenerated not implemented in test")
+}
+
 func mustJSON(t *testing.T, v any) json.RawMessage {
 	t.Helper()
 	b, err := json.Marshal(v)

@@ -82,6 +82,7 @@ func Mutating(deps Deps) []aitools.Tool {
 		updateCaseAssertionsTool(deps),
 		updateCaseTool(deps),
 		// scenarios
+		generateCoverageScenariosTool(deps),
 		createScenarioWithStepsTool(deps),
 		addScenarioStepTool(deps),
 		updateScenarioStepTool(deps),

@@ -4,6 +4,7 @@ import (
 	"context"
 
 	testcase "autotest/internal/case"
+	"autotest/internal/generator"
 	"autotest/internal/mockserver"
 	"autotest/internal/mockset"
 	"autotest/internal/paramsource"
@@ -30,6 +31,7 @@ type Deps struct {
 	Cases        CaseService
 	Scenarios    ScenarioService
 	Specs        SpecRepository
+	Generator    *generator.Generator
 	SpecImporter SpecImporter
 	Projects     ProjectService
 	ParamSource  ParamSourceService
@@ -48,6 +50,7 @@ type CaseService interface {
 	CreateManual(ctx context.Context, input testcase.CreateManualInput) (*testcase.TestCase, error)
 	CreateSaved(ctx context.Context, parentCaseID uuid.UUID, input testcase.CreateSavedInput) (*testcase.TestCase, error)
 	Patch(ctx context.Context, testCaseID uuid.UUID, input testcase.PatchInput) (*testcase.TestCase, error)
+	UpsertGenerated(ctx context.Context, draft testcase.Draft) (*testcase.TestCase, error)
 }
 
 // ScenarioService is the slice of `internal/scenario.Service` we depend on.

@@ -311,7 +311,7 @@
         <div v-if="state.pendingCalls.length" class="ai-pending-block">
           <div class="ai-pending-title">
             <el-icon><Warning /></el-icon>
-            <span>{{ state.pendingCalls.length }} 项写操作等待确认</span>
+            <span>{{ state.pendingCalls.length }} 项删除操作等待确认</span>
           </div>
           <AIToolCallConfirm
             v-for="call in state.pendingCalls"

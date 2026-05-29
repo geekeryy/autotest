@@ -202,6 +202,10 @@ func (r *recordingCaseService) CreateSaved(_ context.Context, _ uuid.UUID, _ tes
 	return nil, errors.New("recordingCaseService.CreateSaved not configured")
 }
 
+func (r *recordingCaseService) UpsertGenerated(_ context.Context, _ testcase.Draft) (*testcase.TestCase, error) {
+	return nil, errors.New("recordingCaseService.UpsertGenerated not configured")
+}
+
 func (r *recordingCaseService) Patch(ctx context.Context, id uuid.UUID, input testcase.PatchInput) (*testcase.TestCase, error) {
 	if r.patchFn != nil {
 		return r.patchFn(ctx, id, input)

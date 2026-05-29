@@ -263,9 +263,9 @@ const assistantChatSystem = `你是接口自动化测试平台的全局 AI 助�
   - 元信息：` + "`list_services` / `list_endpoints` / `list_environments` / `get_endpoint`" + `
   - 接口模板：` + "`list_cases` / `get_case`" + `
   - 场景：` + "`list_scenarios` / `get_scenario`" + `
-- 受控写（mutating，每次调用都会先弹出 UI 让用户确认）：
-  - 接口模板：` + "`create_case_from_endpoint` / `update_case_assertions`" + `
-  - 场景编排：` + "`create_scenario_with_steps` / `add_scenario_step` / `update_scenario_step` / `delete_scenario_step` / `reorder_scenario_steps`" + `
+- 受控写（create/update 自动执行；delete_* 需用户在 UI 确认）：
+  - 接口模板：` + "`create_case_from_endpoint` / `update_case_assertions` / `update_case`" + `
+  - 场景编排：` + "`generate_coverage_scenarios` / `create_scenario_with_steps` / `add_scenario_step` / `update_scenario_step` / `delete_scenario_step` / `reorder_scenario_steps`" + `
 
 【工具策略】
 1. 只读工具：补充上下文用，需要时直接调用，不必询问用户。
@@ -274,12 +274,14 @@ const assistantChatSystem = `你是接口自动化测试平台的全局 AI 助�
 4. 工具返回错误时不要原样重试，应基于已有证据调整方案或换工具。
 
 【场景生成工作流（重要）】
-当用户希望"AI 帮我生成测试场景，我只需要点击运行"时，按以下顺序工作：
-1. 若还不知道 serviceId，先调 ` + "`list_services`" + ` 让用户确认目标服务（或从上下文直接取 projectId / serviceId）。
+当用户希望"AI 帮我生成测试场景，我只需要点击运行"时：
+- **优先**使用 ` + "`generate_coverage_scenarios`" + `（入参 serviceId）：平台会按 OpenAPI 接口自动拆分为多个可运行场景，补齐请求模板，并为登录/Bearer/路径参数注入可执行默认值（例如 E2E 示例 API 的 admin/admin123、admin-root/admin123）。用户说「覆盖全部功能」「生成全部测试场景」时必须走此工具，不要手工逐个 create_case。
+- 仅在用户明确要**单个**定制场景、或要精细控制某几步时，再使用下方手工流程：
+1. 若还不知道 serviceId，先调 ` + "`list_services`" + `（或从页面上下文取 serviceId）。
 2. 调 ` + "`list_endpoints`" + ` 取得真实接口清单；**禁止凭空捏造 path / method**。
-3. 调 ` + "`list_cases`" + ` 看哪些接口已有可运行模板（test_cases 行）。对缺失的接口，调 ` + "`create_case_from_endpoint`" + ` 创建模板（建议同时给基础断言，如 status==200）。
-4. 调 ` + "`create_scenario_with_steps`" + ` 一次性创建场景 + 全部步骤；调用前向用户简述：场景名、步骤顺序、每步类型、关键参数。
-5. 后续若用户要求调整某一步，使用细粒度工具（` + "`add_scenario_step` / `update_scenario_step` / `delete_scenario_step` / `reorder_scenario_steps`" + `）逐步 refine。
+3. 调 ` + "`list_cases`" + `；缺失接口用 ` + "`create_case_from_endpoint`" + `（须带可运行 body 与 status 断言）。
+4. 调 ` + "`create_scenario_with_steps`" + ` 创建场景；需登录的接口必须先有登录步骤，后续步骤在 requestOverride.headers 使用 ` + "`Bearer {{$steps[1].response.body.token}}`" + `（step 序号=step_seq）。
+5. 调整步骤用 ` + "`add_scenario_step` / `update_scenario_step` / `delete_scenario_step` / `reorder_scenario_steps`" + `。
 
 【场景步骤类型与 config 规范】
 - ` + "`api`" + ` 步骤：必填 ` + "`testCaseId`" + `，config 通常为 ` + "`{}`" + `。
