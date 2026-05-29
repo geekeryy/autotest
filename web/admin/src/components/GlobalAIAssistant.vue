@@ -28,7 +28,7 @@
     <div
       v-if="visible"
       class="ai-panel"
-      :class="{ 'ai-panel--page': isPageLayout }"
+      :class="{ 'ai-panel--page': isPageLayout, 'ai-panel--home': isHomeVariant }"
     >
       <!-- Drag resize handle (panel only) -->
       <div
@@ -96,7 +96,7 @@
       </header>
 
       <div
-        v-if="isPageLayout && paneBarLabel"
+        v-if="showPaneBar"
         class="ai-pane-bar"
         :class="{ 'ai-pane-bar--focused': paneFocused }"
       >
@@ -165,24 +165,18 @@
           <div class="ai-empty-icon" :class="{ 'ai-empty-icon--page': isPageLayout }">
             <el-icon :size="isPageLayout ? 56 : 48"><ChatLineRound /></el-icon>
           </div>
-          <p class="ai-empty-title">{{ isPageLayout ? '今天有什么可以帮你？' : 'AI 助理' }}</p>
-          <p class="ai-empty-desc">
-            {{
-              isPageLayout
-                ? '我可以查询接口与场景、生成编排步骤、调整断言；写操作会先请你确认。'
-                : '我可以帮你查询用例、场景、接口定义，并按需调整测试断言。'
-            }}
-          </p>
+          <p class="ai-empty-title">{{ emptyTitle }}</p>
+          <p class="ai-empty-desc">{{ emptyDesc }}</p>
           <p v-if="!isPageLayout" class="ai-empty-hint">写工具调用会先暂停并请你确认</p>
           <div v-if="isPageLayout" class="ai-empty-prompts">
             <button
-              v-for="prompt in pagePromptSuggestions"
-              :key="prompt"
+              v-for="(prompt, idx) in pagePromptSuggestions"
+              :key="promptKey(prompt, idx)"
               type="button"
               class="ai-empty-prompt"
               @click="applyPrompt(prompt)"
             >
-              {{ prompt }}
+              {{ promptLabel(prompt) }}
             </button>
           </div>
         </div>
@@ -299,6 +293,28 @@
                 <span class="ai-replying-label">AI 正在回复…</span>
               </div>
               <MarkdownView v-if="item.msg.role === 'assistant' && item.msg.content" :source="item.msg.content" />
+              <div
+                v-if="item.msg.role === 'assistant' && pendingCallsForMessage(item.msg).length"
+                class="ai-inline-confirms"
+              >
+                <div class="ai-inline-confirms__label">需要你确认或补充以下信息</div>
+                <template v-for="call in pendingCallsForMessage(item.msg)" :key="call.id">
+                  <AIScenarioGenConfirm
+                    v-if="isGenToolCall(call)"
+                    inline
+                    :call="call"
+                    :disabled="state.streaming"
+                    @decide="onDecide"
+                  />
+                  <AIToolCallConfirm
+                    v-else
+                    inline
+                    :call="call"
+                    :disabled="state.streaming"
+                    @decide="onDecide"
+                  />
+                </template>
+              </div>
               <AIUsageDebugPanel
                 v-if="item.msg.role === 'assistant' && state.debugEnabled && item.msg.usageDetails"
                 :usage="item.msg.usageDetails"
@@ -308,19 +324,10 @@
         </template>
 
 
-        <div v-if="state.pendingCalls.length" class="ai-pending-block">
-          <div class="ai-pending-title">
-            <el-icon><Warning /></el-icon>
-            <span>{{ state.pendingCalls.length }} 项删除操作等待确认</span>
-          </div>
-          <AIToolCallConfirm
-            v-for="call in state.pendingCalls"
-            :key="call.id"
-            :call="call"
-            :disabled="state.streaming"
-            @decide="onDecide"
-          />
-        </div>
+        <AIScenarioGenProgress
+          v-if="state.genJobProgress"
+          :progress="state.genJobProgress"
+        />
 
         <div v-if="state.error" class="ai-error">
           <el-icon><CircleClose /></el-icon>
@@ -427,7 +434,7 @@
           </div>
         </div>
         <div class="ai-composer-footer" :class="{ 'ai-composer-footer--page': isPageLayout }">
-          <span class="ai-composer-hint" v-if="state.pendingCalls.length">先处理上方等待确认的删除操作</span>
+          <span class="ai-composer-hint" v-if="state.pendingCalls.length">请在对话中完成上方确认卡片后再继续</span>
           <span class="ai-composer-hint" v-else>Enter 换行 · {{ sendShortcutHint }} 发送</span>
           <ModelSettingsPopover
             v-if="isPageLayout"
@@ -477,10 +484,11 @@ import {
   Plus,
   Promotion,
   Setting,
-  Warning,
 } from '@element-plus/icons-vue'
 import MarkdownView from './MarkdownView.vue'
 import AIToolCallConfirm from './AIToolCallConfirm.vue'
+import AIScenarioGenConfirm from './AIScenarioGenConfirm.vue'
+import AIScenarioGenProgress from './AIScenarioGenProgress.vue'
 import AIUsageDebugPanel from './AIUsageDebugPanel.vue'
 import AISessionDetailDrawer from './AISessionDetailDrawer.vue'
 import ModelSettingsPopover from './ModelSettingsPopover.vue'
@@ -503,6 +511,7 @@ import {
   isWorkspacePaneId,
   removeWorkspacePane,
   workspacePaneLabel,
+  parseAssistantToolCalls,
 } from '../stores/aiAssistant'
 import { authState } from '../auth'
 import { projectState } from '../utils/currentProject'
@@ -537,6 +546,8 @@ export default {
   components: {
     MarkdownView,
     AIToolCallConfirm,
+    AIScenarioGenConfirm,
+    AIScenarioGenProgress,
     AIUsageDebugPanel,
     AISessionDetailDrawer,
     ModelSettingsPopover,
@@ -569,8 +580,16 @@ export default {
       type: Boolean,
       default: false,
     },
+    variant: {
+      type: String,
+      default: 'default',
+    },
+    promptSuggestions: {
+      type: Array,
+      default: null,
+    },
   },
-  emits: ['add-pane'],
+  emits: ['add-pane', 'prompt-action'],
   data() {
     return {
       draft: '',
@@ -607,7 +626,24 @@ export default {
         debugEnabled: pane.debugEnabled,
         remoteModelList: pane.remoteModelList,
         modelsWarning: pane.modelsWarning,
+        genJobProgress: pane.genJobProgress,
       }
+    },
+    isHomeVariant() {
+      return this.variant === 'home'
+    },
+    emptyTitle() {
+      if (this.isHomeVariant || this.isPageLayout) return '今天有什么可以帮你？'
+      return 'AI 助理'
+    },
+    emptyDesc() {
+      if (this.isHomeVariant) {
+        return '我可以生成并验证测试场景、查询接口与编排步骤；写操作与真实环境执行会先请你确认。'
+      }
+      if (this.isPageLayout) {
+        return '我可以查询接口与场景、生成编排步骤、调整断言；写操作会先请你确认。'
+      }
+      return '我可以帮你查询用例、场景、接口定义，并按需调整测试断言。'
     },
     isPageLayout() {
       return this.layout === 'page'
@@ -653,6 +689,9 @@ export default {
       }
     },
     pagePromptSuggestions() {
+      if (Array.isArray(this.promptSuggestions) && this.promptSuggestions.length) {
+        return this.promptSuggestions
+      }
       return PAGE_PROMPT_SUGGESTIONS
     },
     composerPlaceholder() {
@@ -669,6 +708,9 @@ export default {
       if (this.paneTitle) return this.paneTitle
       if (isWorkspacePaneId(this.paneId)) return workspacePaneLabel(this.paneId)
       return ''
+    },
+    showPaneBar() {
+      return this.isPageLayout && !!this.paneBarLabel && !this.isHomeVariant
     },
     canRemoveThisPane() {
       return canRemoveWorkspacePane(this.paneId)
@@ -816,6 +858,9 @@ export default {
     'state.messages'() {
       this.$nextTick(() => this.scrollToBottom())
     },
+    'state.pendingCalls'() {
+      this.$nextTick(() => this.scrollToBottom())
+    },
     'state.streaming'(value) {
       if (!value) this.$nextTick(() => this.scrollToBottom())
     },
@@ -884,12 +929,40 @@ export default {
       if (!this.canAddPane) return
       this.$emit('add-pane')
     },
-    applyPrompt(text) {
-      this.draft = text
+    applyPrompt(prompt) {
+      if (prompt && typeof prompt === 'object' && prompt.action) {
+        this.$emit('prompt-action', prompt.action)
+        return
+      }
+      this.draft = String(prompt || '')
       this.$nextTick(() => {
         this.autoResize()
         this.$refs.composerInput?.focus()
       })
+    },
+    promptLabel(prompt) {
+      if (prompt && typeof prompt === 'object' && prompt.label) return prompt.label
+      return String(prompt || '')
+    },
+    promptKey(prompt, idx) {
+      if (prompt && typeof prompt === 'object') return prompt.action || prompt.label || idx
+      return String(prompt || idx)
+    },
+    pendingCallsForMessage(msg) {
+      if (!msg || msg.role !== 'assistant' || msg.status !== 'pending_confirm') return []
+      const fromMsg = parseAssistantToolCalls(msg.toolCalls).filter(
+        (c) => (c.requiresConfirm ?? c.mutating) && !this.isToolCallResolved(c.id)
+      )
+      const byId = Object.fromEntries(this.state.pendingCalls.map((c) => [c.id, c]))
+      return fromMsg.map((c) => byId[c.id] || c)
+    },
+    isToolCallResolved(callId) {
+      if (!callId) return false
+      return this.pane.messages.some((m) => m.role === 'tool' && m.toolCallId === callId)
+    },
+    isGenToolCall(call) {
+      const name = String(call?.name || '')
+      return name === 'generate_and_verify_scenarios' || name === 'generate_coverage_scenarios'
     },
     async onSend() {
       const text = this.draft.trim()
@@ -964,8 +1037,8 @@ export default {
       }
       await removeSession(session.id)
     },
-    async onDecide({ callId, approve, reason }) {
-      await resolvePendingCall(callId, { approve, reason }, this.paneId)
+    async onDecide(decision) {
+      await resolvePendingCall(decision.callId, decision, this.paneId)
     },
     onToggleThinking() {
       setPaneThinking(this.paneId, !this.state.thinkingEnabled)
@@ -1266,6 +1339,23 @@ export default {
   top: 10px;
   right: 10px;
   z-index: 20;
+}
+
+.ai-panel--home .ai-chat-stage {
+  background: var(--app-surface-subtle);
+}
+
+.ai-panel--home .ai-body {
+  max-width: 760px;
+}
+
+.ai-panel--home.ai-panel--page .ai-composer-box {
+  max-width: 760px;
+}
+
+.ai-panel--home .ai-empty--page {
+  min-height: min(420px, calc(100vh - 220px));
+  justify-content: center;
 }
 
 .ai-panel--page .ai-body {
@@ -1883,8 +1973,21 @@ export default {
 }
 
 .ai-message--pending {
-  border-left: 3px solid var(--el-color-warning, #e6a23c);
-  padding-left: 12px;
+  /* inline confirm card carries its own accent */
+}
+
+.ai-inline-confirms {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ai-inline-confirms__label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--app-secondary-text);
+  letter-spacing: 0.02em;
 }
 
 .ai-user-bubble {
@@ -2079,26 +2182,6 @@ export default {
 
 .ai-tool-row--standalone .ai-tool-row-head {
   padding-left: 10px;
-}
-
-/* Pending block */
-.ai-pending-block {
-  background: rgba(230, 162, 60, 0.06);
-  border: 1px solid rgba(230, 162, 60, 0.3);
-  border-radius: 10px;
-  padding: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.ai-pending-title {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--el-color-warning, #b88230);
-  font-weight: 600;
-  font-size: 13px;
 }
 
 /* Error */

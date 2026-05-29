@@ -51,7 +51,7 @@ export default {
       try {
         const user = await loadCurrentUser()
         if (user?.active) {
-          this.$router.replace('/dashboard')
+          this.$router.replace('/')
         } else {
           this.$message.info('账号仍处于待审核状态')
         }

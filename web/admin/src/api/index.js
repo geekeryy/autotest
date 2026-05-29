@@ -163,6 +163,13 @@ export const listAIProviderModels = (providerId) =>
   request.get(`/ai-providers/${providerId}/models`, { timeout: 30000 })
 export const discoverAIProviderModels = (data) =>
   request.post('/ai-providers/models/discover', data, { timeout: 30000 })
+
+export const getAIAssistantSettings = () => request.get('/ai-assistant-settings')
+export const updateAIAssistantSettings = (data) => request.put('/ai-assistant-settings', data)
+export const getScenarioLoginHints = (projectId, serviceId, environmentId) =>
+  request.get(`/projects/${projectId}/services/${serviceId}/scenario-login-hints`, {
+    params: environmentId ? { environmentId } : undefined,
+  })
 export const aiChat = (projectId, data) =>
   request.post(`/projects/${projectId}/ai/chat`, data, { timeout: 120000 })
 

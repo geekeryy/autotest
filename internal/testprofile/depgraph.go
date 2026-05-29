@@ -213,13 +213,13 @@ func matchedResponseField(param string, responseKeys []string) string {
 		parts := strings.Split(strings.ToLower(key), ".")
 		lastPart := parts[len(parts)-1]
 		if lastPart == normalizedParam {
-			return "response.body." + key
+			return "body." + key
 		}
 		if normalizedParam == "id" && lastPart == "id" {
-			return "response.body." + key
+			return "body." + key
 		}
 	}
-	return "response.body." + param
+	return "body." + param
 }
 
 func isSameResource(a, b string) bool {

@@ -98,6 +98,38 @@ func TestTokenizeStepToken(t *testing.T) {
 	}
 }
 
+func TestTokenizeStepTokenByName(t *testing.T) {
+	t.Parallel()
+
+	var nameTok *Token
+	for _, tok := range Tokenize(`Bearer {{$steps["用户登录"].response.body.data.token}}`) {
+		if tok.Kind == KindStep {
+			nameTok = &tok
+			break
+		}
+	}
+	if nameTok == nil {
+		t.Fatal("expected step token by name")
+	}
+	if nameTok.Step.Name != "用户登录" || nameTok.Step.Path != "response.body.data.token" {
+		t.Fatalf("unexpected name token: %#v", nameTok.Step)
+	}
+
+	var slugTok *Token
+	for _, tok := range Tokenize(`{{$steps.login.response.body.token}}`) {
+		if tok.Kind == KindStep {
+			slugTok = &tok
+			break
+		}
+	}
+	if slugTok == nil {
+		t.Fatal("expected slug step token")
+	}
+	if slugTok.Step.Name != "login" || slugTok.Step.Path != "response.body.token" {
+		t.Fatalf("unexpected slug token: %#v", slugTok.Step)
+	}
+}
+
 func TestTokenizeStepTokenLenientBraces(t *testing.T) {
 	t.Parallel()
 

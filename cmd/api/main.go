@@ -8,8 +8,10 @@ import (
 	"time"
 
 	"autotest/internal/aianalysis"
+	"autotest/internal/aiconfig"
 	"autotest/internal/aiprovider"
 	"autotest/internal/aisession"
+	"autotest/internal/aitools"
 	"autotest/internal/aitools/builtin"
 	"autotest/internal/apikey"
 	"autotest/internal/auditlog"
@@ -18,6 +20,7 @@ import (
 	testcase "autotest/internal/case"
 	"autotest/internal/config"
 	"autotest/internal/generator"
+	"autotest/internal/genagent"
 	"autotest/internal/httpx"
 	"autotest/internal/logx"
 	"autotest/internal/mockserver"
@@ -29,6 +32,7 @@ import (
 	"autotest/internal/report"
 	"autotest/internal/runner"
 	"autotest/internal/scenario"
+	"autotest/internal/scenariogen"
 	"autotest/internal/scriptlibrary"
 	"autotest/internal/spec"
 	"autotest/internal/store"
@@ -124,6 +128,38 @@ func main() {
 	caseRunner := runner.New(nil, nil, reportRepo)
 	runSvc := runner.NewService(caseSvc, projectSvc, reportRepo, caseRunner, paramSourceSvc, testDataSvc, mockSetSvc)
 
+	scenarioGen := scenariogen.NewGenerator(scenariogen.Deps{
+		Cases:     caseSvc,
+		Scenarios: scenarioSvc,
+		Specs:     specRepo,
+		Generator: generator.NewDefault(),
+	})
+	genAgentRepo := genagent.NewPGRepository(repo)
+	genAgent := &genagent.Agent{
+		Jobs:      genAgentRepo,
+		Generator: scenarioGen,
+		Runner: &genagent.RunnerAdapter{
+			Svc:  runSvc,
+			Repo: scenarioRepo,
+		},
+		Scenarios:    scenarioSvc,
+		ScenarioRepo: scenarioRepo,
+		Repairer: &genagent.Repairer{
+			Scenarios: scenarioSvc,
+			AI:        genagent.NewAIClassifier(aiProviderSvc),
+		},
+	}
+	if aiconfig.ScenarioAutorunEnabled() {
+		logx.Info("ai scenario autorun enabled")
+	}
+
+	aiSettingsStore := aiconfig.NewStore()
+	aiconfig.SetGlobalStore(aiSettingsStore)
+	aiConfigSvc := aiconfig.NewService(aiconfig.NewRepository(repo), aiSettingsStore)
+	if err := aiConfigSvc.Load(ctx); err != nil {
+		logx.Warn("load ai assistant settings", "err", err)
+	}
+
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
@@ -178,6 +214,12 @@ func main() {
 		mockserver.NewHandler(mockServerSvc, projectHandler).Register(r)
 		mockset.NewHandler(mockSetSvc, projectHandler).Register(r)
 		projectprompt.NewHandler(projectPromptSvc, authSvc).Register(r)
+		aiconfig.NewHandler(aiConfigSvc, authSvc).Register(r)
+		scenariogen.NewHandler(scenariogen.Deps{
+			Cases:     caseSvc,
+			Scenarios: scenarioSvc,
+			Specs:     specRepo,
+		}, projectSvc, projectHandler).Register(r)
 
 		// 全局 AI 助理与智能分析共用一份内置工具配置：智能分析仅注入只读
 		// 工具，浮窗会话再额外挂载写工具。delete_* 类工具（RequiresConfirm）
@@ -195,9 +237,36 @@ func main() {
 			MockSets:     mockSetSvc,
 			Scripts:      scriptLibrarySvc,
 			Runs:         runSvc,
+			GenAgent:     genAgent,
 		}
 		aiReadOnly := builtin.ReadOnly(toolDeps)
-		aiAllTools := builtin.All(toolDeps)
+		mutatingTools := builtin.Mutating(toolDeps)
+		if genAgent != nil {
+			mutatingTools = append(mutatingTools, builtin.GatedScenarioGenTools(toolDeps)...)
+		}
+		// 按需工具表面：Catalog 索引全部领域工具，find_tools/describe_tools
+		// 元工具基于该 Catalog 构建，并加入执行用全量工具集（既进 catalog
+		// 的 wire 执行 map，也作为 Router/Planner 的目录底座）。
+		domainTools := append(aiReadOnly, mutatingTools...)
+		aiCatalog := aitools.NewCatalog(domainTools)
+		if embIdx, err := aitools.LoadEmbeddedToolEmbeddings(); err != nil {
+			logx.Warn("load tool catalog embeddings", "err", err)
+		} else if embIdx != nil {
+			aiCatalog = aiCatalog.WithEmbeddings(embIdx)
+			logx.Info("tool catalog embeddings loaded", "model", embIdx.Model, "tools", len(embIdx.Vectors), "dim", embIdx.Dimensions)
+		}
+		aiAllTools := append(domainTools,
+			aitools.FindToolsTool(aiCatalog),
+			aitools.DescribeToolsTool(aiCatalog),
+		)
+		aiRoutingMode := aiprovider.ParseRoutingMode(aiconfig.Get().ToolRoutingMode)
+		aiProviderSvc.WithRouting(
+			aiprovider.NewPlanner(aiCatalog),
+			aiprovider.NewRouter(),
+			aiCatalog,
+			aiRoutingMode,
+		)
+		logx.Info("ai tool routing", "mode", string(aiRoutingMode), "tools", len(aiAllTools))
 
 		aiprovider.NewHandler(aiProviderSvc, projectHandler, projectPromptSvc, authSvc).
 			WithAssistant(aisession.NewStoreAdapter(aiSessionSvc), aiAllTools).

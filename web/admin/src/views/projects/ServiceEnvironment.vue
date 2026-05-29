@@ -3,7 +3,6 @@
     <div v-if="!embedded" class="page-header service-env-header">
       <h2 class="page-title">服务与环境管理</h2>
       <div class="service-env-actions">
-        <el-button @click="$router.push({ path: '/projects', query: { tab: 'dataSources' } })">业务数据源</el-button>
         <el-button @click="$router.push('/sql-parameter-sources')">SQL 参数源</el-button>
       </div>
     </div>

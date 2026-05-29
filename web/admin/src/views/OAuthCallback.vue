@@ -34,7 +34,7 @@ export default {
         return
       }
       if (authState.user?.active) {
-        const redirect = this.$route.query.redirect || '/dashboard'
+        const redirect = this.$route.query.redirect || '/'
         await this.$router.replace(redirect)
       } else {
         await this.$router.replace('/pending-approval')

@@ -393,6 +393,20 @@
                     </div>
                     <AssertionEditor v-model="stepForm.stepAssertions" />
                   </el-tab-pane>
+                  <el-tab-pane label="变量提取" name="extracts">
+                    <div class="step-assertion-tip">
+                      本步成功后将字段写入场景变量，后续步骤使用 <code>{{ '{' }}{{ '{' }}变量名{{ '}' }}{{ '}' }}</code> 引用（如登录 token 提取为 <code>authToken</code>，下游写 <code>Bearer {{ '{' }}{{ '{' }}authToken{{ '}' }}{{ '}' }}</code>）。
+                      路径相对于本步输出，规范写法为 <code>response.body.data.token</code>。
+                    </div>
+                    <div v-if="!stepForm.stepExtracts.length" class="extraction-hint">暂无提取规则，可点击下方添加。</div>
+                    <div v-for="(row, idx) in stepForm.stepExtracts" :key="'ex-' + idx" class="step-extract-row">
+                      <el-input v-model="row.name" placeholder="变量名 authToken" style="width: 140px" />
+                      <span class="step-extract-arrow">←</span>
+                      <el-input v-model="row.from" placeholder="response.body.data.token" style="flex: 1" />
+                      <el-button type="danger" link @click="stepForm.stepExtracts.splice(idx, 1)">删除</el-button>
+                    </div>
+                    <el-button size="small" style="margin-top: 8px" @click="addStepExtractRow">添加提取</el-button>
+                  </el-tab-pane>
                 </el-tabs>
             </template>
 
@@ -2319,7 +2333,14 @@ export default {
     },
     stepsRefSnippet(stepSeq, pathAfterBracket) {
       const n = stepSeq != null ? String(stepSeq) : '?'
-      return `{{$steps[${n}]${pathAfterBracket}}}`
+      const path = pathAfterBracket || ''
+      if (path && !path.startsWith('.response.') && !path.startsWith('.request.')) {
+        const legacy = path.startsWith('.body.') || path === '.body' || path.startsWith('.headers.') || path === '.status'
+        if (legacy) {
+          return `{{$steps[${n}]${path}}}`
+        }
+      }
+      return `{{$steps[${n}]${path}}}`
     },
 
     leafRowClass(depth) {
@@ -2604,6 +2625,7 @@ export default {
         bodyText: '',
         requestSecurity: undefined,
         stepAssertions: [],
+        stepExtracts: [],
         forMode: 'count',
         forCountExpression: '1',
         forItemsExpression: '[]',
@@ -2682,7 +2704,13 @@ export default {
       const cfg = this.cloneEditableConfig(this.parseMaybeJSON(rawConfig))
       if (this.stepForm.stepType === 'api') {
         this.stepForm.stepAssertions = Array.isArray(cfg.assertions) ? cfg.assertions : []
+        this.stepForm.stepExtracts = Array.isArray(cfg.extracts)
+          ? cfg.extracts.map((e) => ({ name: e?.name || '', from: e?.from || '' }))
+          : []
       } else if (this.stepForm.stepType === 'database') {
+        this.stepForm.stepExtracts = Array.isArray(cfg.extracts)
+          ? cfg.extracts.map((e) => ({ name: e?.name || '', from: e?.from || '' }))
+          : []
         this.stepForm.dbDataSourceId = cfg.dataSourceId || ''
         this.stepForm.dbSQL = cfg.sql || ''
         this.stepForm.dbInputParamsText = this.formatJSON(cfg.inputParams || [])
@@ -2690,6 +2718,9 @@ export default {
       } else if (this.stepForm.stepType === 'script') {
         this.stepForm.scriptSource = cfg.script || cfg.command || ''
         this.stepForm.scriptTimeoutMillis = cfg.timeoutMillis || 10000
+        this.stepForm.stepExtracts = Array.isArray(cfg.extracts)
+          ? cfg.extracts.map((e) => ({ name: e?.name || '', from: e?.from || '' }))
+          : []
       } else if (this.stepForm.stepType === 'for') {
         this.stepForm.forMode = cfg.mode || 'count'
         this.stepForm.forCountExpression = cfg.countExpression || String(cfg.count ?? 1)
@@ -3998,9 +4029,20 @@ export default {
       this.appendScenarioScriptTemplate(code)
     },
 
+    addStepExtractRow() {
+      this.stepForm.stepExtracts.push({ name: '', from: '' })
+    },
+
+    buildExtractsConfig() {
+      const rows = (this.stepForm.stepExtracts || []).filter((r) => (r.name || '').trim() && (r.from || '').trim())
+      return rows.length ? { extracts: rows.map((r) => ({ name: r.name.trim(), from: r.from.trim() })) } : {}
+    },
+
     buildAPIStepConfig() {
       const assertions = Array.isArray(this.stepForm.stepAssertions) ? this.stepForm.stepAssertions : []
-      return assertions.length ? { assertions } : {}
+      const out = { ...this.buildExtractsConfig() }
+      if (assertions.length) out.assertions = assertions
+      return Object.keys(out).length ? out : {}
     },
 
     buildDatabaseStepConfig() {
@@ -4011,6 +4053,7 @@ export default {
         throw new Error('请输入数据库步骤 SQL')
       }
       return {
+        ...this.buildExtractsConfig(),
         dataSourceId: this.stepForm.dbDataSourceId,
         sql: this.stepForm.dbSQL,
         inputParams: this.parseJSONText(this.stepForm.dbInputParamsText, [], '入参 JSON'),
@@ -4023,6 +4066,7 @@ export default {
         throw new Error('请输入脚本内容')
       }
       return {
+        ...this.buildExtractsConfig(),
         script: this.stepForm.scriptSource,
         timeoutMillis: this.stepForm.scriptTimeoutMillis || 10000
       }
@@ -6193,6 +6237,18 @@ export default {
   margin-bottom: 10px;
   font-size: var(--app-font-size-small, 13px);
   color: var(--app-secondary-text, #909399);
+}
+
+.step-extract-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.step-extract-arrow {
+  color: var(--app-secondary-text, #909399);
+  font-size: var(--app-font-size-small, 13px);
 }
 
 .assertion-result-table {

@@ -491,6 +491,7 @@ export default {
 }
 
 .brand {
+  flex-shrink: 0;
   height: 60px;
   display: flex;
   align-items: center;
@@ -554,9 +555,17 @@ export default {
 
 .sidebar-menu {
   border-right: 0;
-  flex: 1;
+  flex: 1 1 auto;
   min-height: 0;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.sidebar-menu::-webkit-scrollbar {
+  display: none;
 }
 
 .sidebar-menu :deep(.el-menu-item),

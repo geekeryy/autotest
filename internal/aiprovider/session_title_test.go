@@ -238,3 +238,4 @@ func (f *fakeSessionStore) UpdateSessionTitle(_ context.Context, _, _, _ uuid.UU
 	f.session.Title = title
 	return &f.session, nil
 }
+func (f *fakeSessionStore) AppendRoutingLog(context.Context, RoutingLogInput) error { return nil }

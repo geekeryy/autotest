@@ -12,18 +12,20 @@ func TestEvaluateConditionRendersVariablesAndStepRefs(t *testing.T) {
 
 	stepOutputs := map[int]any{
 		1: map[string]any{
-			"status": 201,
-			"body": map[string]any{
-				"count": 3,
+			"response": map[string]any{
+				"status": 201,
+				"body": map[string]any{
+					"count": 3,
+				},
 			},
 		},
 	}
 
 	matched, detail, err := evaluateCondition(conditionStepConfig{
-		Left:     "{{$steps[1].status}}",
+		Left:     "{{$steps[1].response.status}}",
 		Operator: "greater_or_equal",
 		Right:    "{{minStatus}}",
-	}, map[string]string{"minStatus": "200"}, stepOutputs, nil)
+	}, map[string]string{"minStatus": "200"}, nil, stepOutputs, nil)
 	if err != nil {
 		t.Fatalf("evaluate condition: %v", err)
 	}
@@ -32,10 +34,10 @@ func TestEvaluateConditionRendersVariablesAndStepRefs(t *testing.T) {
 	}
 
 	matched, _, err = evaluateCondition(conditionStepConfig{
-		Left:     "{{$steps[1].body.count}}",
+		Left:     "{{$steps[1].response.body.count}}",
 		Operator: "less_than",
 		Right:    "3",
-	}, nil, stepOutputs, nil)
+	}, nil, nil, stepOutputs, nil)
 	if err != nil {
 		t.Fatalf("evaluate numeric condition: %v", err)
 	}
@@ -67,7 +69,7 @@ func TestConditionConfigSupportsOrderedBranches(t *testing.T) {
 			Left:     br.Left,
 			Operator: br.Operator,
 			Right:    br.Right,
-		}, map[string]string{"status": "200"}, nil, nil)
+		}, map[string]string{"status": "200"}, nil, nil, nil)
 		if err != nil {
 			t.Fatalf("evaluate branch %d: %v", i, err)
 		}
@@ -94,7 +96,7 @@ func TestBuildLoopItemsSupportsCountAndArrayExpressions(t *testing.T) {
 		Mode:            "count",
 		CountExpression: "{{count}}",
 		MaxIterations:   5,
-	}, map[string]string{"count": "3"}, nil, nil)
+	}, map[string]string{"count": "3"}, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("build count loop: %v", err)
 	}
@@ -104,19 +106,21 @@ func TestBuildLoopItemsSupportsCountAndArrayExpressions(t *testing.T) {
 
 	stepOutputs := map[int]any{
 		1: map[string]any{
-			"body": map[string]any{
-				"items": []any{
-					map[string]any{"id": "u1"},
-					map[string]any{"id": "u2"},
+			"response": map[string]any{
+				"body": map[string]any{
+					"items": []any{
+						map[string]any{"id": "u1"},
+						map[string]any{"id": "u2"},
+					},
 				},
 			},
 		},
 	}
 	items, mode, err = buildLoopItems(forStepConfig{
 		Mode:            "array",
-		ItemsExpression: "{{$steps[1].body.items}}",
+		ItemsExpression: "{{$steps[1].response.body.items}}",
 		MaxIterations:   5,
-	}, nil, stepOutputs, nil)
+	}, nil, nil, stepOutputs, nil)
 	if err != nil {
 		t.Fatalf("build array loop: %v", err)
 	}
@@ -136,7 +140,7 @@ func TestBuildLoopItemsUnwrapsCommonObjectArrayFields(t *testing.T) {
 		Mode:            "array",
 		ItemsExpression: `{"data":[{"id":"u1"},{"id":"u2"}],"total":2}`,
 		MaxIterations:   5,
-	}, nil, nil, nil)
+	}, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("build wrapped array loop: %v", err)
 	}
@@ -156,7 +160,7 @@ func TestBuildLoopItemsRejectsTooManyIterations(t *testing.T) {
 		Mode:          "count",
 		Count:         3,
 		MaxIterations: 2,
-	}, nil, nil, nil)
+	}, nil, nil, nil, nil)
 	if err == nil {
 		t.Fatalf("expected loop limit error")
 	}

@@ -15,6 +15,9 @@ export const AI_TOOL_DISPLAY_NAMES = {
   update_scenario_step: '更新场景步骤',
   delete_scenario_step: '删除场景步骤',
   reorder_scenario_steps: '重排场景步骤',
+  generate_and_verify_scenarios: '生成并验证场景',
+  generate_coverage_scenarios: '生成覆盖场景',
+  list_scenario_login_hints: '发现场景登录凭据',
 }
 
 /**

@@ -39,6 +39,13 @@ import (
 // that must pause the SSE stream until the user approves via
 // /tool-calls/{id}/confirm. Non-destructive mutating tools (create/update)
 // execute immediately in the tool loop.
+//
+// Domain / Summary / Prerequisites / RelatedTools / AntiPatterns are
+// platform-internal routing metadata used by the on-demand tool surface
+// (Router selection + find_tools retrieval). They are intentionally
+// optional and MUST NOT be shipped to the LLM: ToDefinition / Describe
+// only expose name/description/parameters. Treat these fields as private
+// to the platform.
 type Tool struct {
 	Name            string
 	Description     string
@@ -46,6 +53,39 @@ type Tool struct {
 	Mutating        bool
 	RequiresConfirm bool
 	Run             func(ctx context.Context, args json.RawMessage) (any, error)
+
+	// Domain is the coarse grouping used by the Router to pick a tool
+	// package. One of: meta, cases, scenarios, mock, mockset, testdata,
+	// paramsource, scripts, runs, spec.
+	Domain string
+	// Summary is a short (≤40 字) Chinese one-liner used for Router /
+	// find_tools retrieval, kept independent of the verbose Description.
+	Summary string
+	// Prerequisites lists tool names that typically must run first.
+	Prerequisites []string
+	// RelatedTools lists tool names commonly used alongside this one.
+	RelatedTools []string
+	// AntiPatterns lists usage mistakes the Router/assistant should avoid.
+	AntiPatterns []string
+}
+
+// WithMeta returns a copy of the tool with the platform-internal routing
+// metadata (Domain + Summary) populated. These fields never reach the LLM
+// wire definition; they exist only for the Router / find_tools catalog.
+func (t Tool) WithMeta(domain, summary string) Tool {
+	t.Domain = domain
+	t.Summary = summary
+	return t
+}
+
+// WithRelations returns a copy of the tool with the optional relational
+// routing hints populated. Like WithMeta these are platform-internal and
+// never shipped to the LLM.
+func (t Tool) WithRelations(prerequisites, relatedTools, antiPatterns []string) Tool {
+	t.Prerequisites = prerequisites
+	t.RelatedTools = relatedTools
+	t.AntiPatterns = antiPatterns
+	return t
 }
 
 // ToDefinition converts the tool into a client-facing definition that can be

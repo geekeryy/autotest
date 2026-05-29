@@ -1,0 +1,91 @@
+# AI 助理按需工具路由 Golden Set
+#
+# 每条用例描述一次用户请求与期望的「首轮工具表面」。评测 harness
+# (internal/aiprovider/eval) 默认以规则方式运行：用例直接提供 planner
+# 输出（mock），跑真实 Router 规则选包，再比对：
+#   - expectToolsFirstHop：首轮必须出现的工具（Tool Recall@Hop1）
+#   - forbidTools：首轮绝不应出现的工具（Mis-route）
+#   - expectDomains：首轮工具应覆盖的域
+#   - expectFinish：完整对话期望的 finish（仅真实 LLM 模式校验，规则模式记录不评判）
+#
+# 字段：
+#   name                 用例名（唯一）
+#   user                 用户消息
+#   pageContext          前端页面快照（可选，用于 Router 域推断）
+#   planner              直接提供的 planner 输出（mock，规则模式必填）
+#   expectToolsFirstHop  期望首轮出现的工具名
+#   forbidTools          期望首轮不出现的工具名
+#   expectDomains        期望覆盖的域
+#   expectFinish         期望 finish（success / pending_confirm / hop_exhausted）
+
+cases:
+  # 覆盖「生成全部功能场景」跨域用例：scenarios + cases + meta
+  - name: coverage-all-scenarios
+    user: "帮我把这个服务的全部接口都生成可运行的测试场景，我只想点运行"
+    pageContext:
+      path: "/scenarios"
+      serviceId: "11111111-1111-1111-1111-111111111111"
+    planner:
+      intent: "为服务生成覆盖全部接口的测试场景"
+      domains: ["scenarios", "cases", "meta"]
+      workflow: ["列接口", "补模板", "一键生成覆盖场景"]
+      needsWrite: true
+      ambiguities: []
+    expectToolsFirstHop:
+      - list_services
+      - get_scenario
+      - generate_coverage_scenarios
+      - create_scenario_with_steps
+      - find_tools
+      - describe_tools
+    forbidTools:
+      - delete_data_source
+      - create_mock_route
+    expectDomains: ["scenarios", "cases", "meta"]
+    expectFinish: pending_confirm
+
+  # 失败分析 → 改断言 跨域用例：runs + cases
+  - name: failure-to-assertion
+    user: "上次这个场景运行失败了，帮我分析原因并把断言改对"
+    pageContext:
+      path: "/runs/abc"
+      scenarioId: "22222222-2222-2222-2222-222222222222"
+    planner:
+      intent: "分析运行失败并修正断言"
+      domains: ["runs", "cases", "scenarios"]
+      workflow: ["查运行结果", "定位失败步骤", "更新用例断言"]
+      needsWrite: true
+      ambiguities: []
+    expectToolsFirstHop:
+      - get_run_result
+      - get_case
+      - update_case_assertions
+      - find_tools
+      - describe_tools
+    forbidTools:
+      - create_mock_server
+      - create_data_source
+    expectDomains: ["runs", "cases"]
+    expectFinish: pending_confirm
+
+  # 纯只读查询用例：低写入，验证不误纳写工具域
+  - name: view-scenario-readonly
+    user: "看看当前这个场景有哪些步骤"
+    pageContext:
+      path: "/scenarios/333"
+      scenarioId: "33333333-3333-3333-3333-333333333333"
+    planner:
+      intent: "查看场景步骤"
+      domains: ["scenarios"]
+      workflow: ["查询场景详情"]
+      needsWrite: false
+      ambiguities: []
+    expectToolsFirstHop:
+      - get_scenario
+      - find_tools
+      - describe_tools
+    forbidTools:
+      - create_mock_server
+      - create_data_source
+    expectDomains: ["scenarios"]
+    expectFinish: success

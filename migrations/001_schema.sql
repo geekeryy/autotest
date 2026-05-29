@@ -571,9 +571,9 @@ insert into script_library_templates (
 select null,
        '从上一步结果取字段',
        '场景脚本',
-       '配合 {{$steps[N].body.xxx}} 占位；将 N 改为实际步骤序号',
+       '配合 {{$steps[N].response.body.xxx}} 或 config.extracts；N 为 step_seq',
        $c6$// 假设上一步 API 已将 body 写入变量 token（或通过模板引用解析）
-// 若上游步骤号为 1，可在 SQL/路径中使用 {{$steps[1].body.data.id}}
+// 若上游步骤号为 1，可在 SQL/路径中使用 {{$steps[1].response.body.data.id}} 或 {{extractedVar}}
 
 const raw = pm.variables.get('upstreamPayload'); // 若上游 pm.variables.set 过
 if (raw) {

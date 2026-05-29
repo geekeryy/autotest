@@ -11,7 +11,7 @@
   proposed change reviewable, not to second-guess the model.
 -->
 <template>
-  <div class="tool-call-confirm">
+  <div class="tool-call-confirm" :class="{ 'tool-call-confirm--inline': inline }">
     <button
       type="button"
       class="tool-call-confirm-head"
@@ -58,6 +58,7 @@ export default {
     /** @type {{ id: string, name: string, arguments: any, mutating?: boolean }} */
     call: { type: Object, required: true },
     disabled: { type: Boolean, default: false },
+    inline: { type: Boolean, default: false },
   },
   emits: ['decide'],
   data() {
@@ -126,6 +127,11 @@ export default {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+.tool-call-confirm--inline {
+  border-color: var(--app-border-color);
+  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.04);
 }
 
 .tool-call-confirm-head {

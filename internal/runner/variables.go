@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"autotest/internal/scenario"
 	"autotest/internal/templating"
 )
 
@@ -244,12 +245,16 @@ func parseBareTemplateScalar(input string) (any, bool) {
 //
 // API step output fields:
 //
-//	{{$steps[1].status}}                     → HTTP status code (int → string)
-//	{{$steps[1].headers.X-Request-Id}}       → response header value
-//	{{$steps[1].body.data.token}}            → response JSON body field
+//	{{$steps[1].response.status}}            → HTTP status code (int → string)
+//	{{$steps[1].response.headers.X-Request-Id}} → response header value
+//	{{$steps[1].response.body.data.token}}   → response JSON body field
+//	{{$steps["用户登录"].response.body.data.token}} → same, by step name
+//	{{$steps.login.response.body.data.token}}     → same, by slugified step name
 //	{{$steps[1].request.query.userId}}       → request query parameter
 //	{{$steps[1].request.pathvar.id}}         → request path variable value
 //	{{$steps[1].request.body.data.field}}    → request body field
+//
+// Legacy flat paths (status / headers / body at top level) are still accepted.
 //
 // Database step output fields:
 //
@@ -268,13 +273,12 @@ func parseBareTemplateScalar(input string) (any, bool) {
 // Callers must create a per-step copy of the vars map before calling this
 // function so the injected keys do not leak into subsequent steps.
 
-func injectStepRefs(text string, stepOutputs map[int]any, vars map[string]string) {
+func injectStepRefs(text string, stepOutputs map[int]any, steps []scenario.Step, vars map[string]string) {
 	if len(stepOutputs) == 0 {
 		return
 	}
-	templating.StepRefs(text, vars, func(seq int, path string) (string, bool) {
-		return resolveStepRef(seq, path, stepOutputs)
-	})
+	idx := newStepRefIndex(stepOutputs, steps)
+	templating.StepRefs(text, vars, idx.resolve)
 }
 
 func resolveStepRef(seq int, path string, stepOutputs map[int]any) (string, bool) {
@@ -286,11 +290,53 @@ func resolveStepRef(seq int, path string, stepOutputs map[int]any) (string, bool
 		b, _ := json.Marshal(output)
 		return string(b), true
 	}
+	path = normalizeStepRefPath(path)
 	val, err := traverseOutputPath(output, path)
+	if err != nil {
+		if alt := tokenPathFallback(path); alt != "" {
+			val, err = traverseOutputPath(output, alt)
+		}
+	}
 	if err != nil {
 		return "", false
 	}
 	return stepOutputStr(val), true
+}
+
+// normalizeStepRefPath maps legacy paths onto the canonical step output schema.
+// API steps expose response.{status,headers,body} and request.*; DB/script fields stay top-level.
+func normalizeStepRefPath(path string) string {
+	if path == "" {
+		return path
+	}
+	if strings.HasPrefix(path, "response.") || strings.HasPrefix(path, "request.") {
+		if path == "response.statusCode" {
+			return "response.status"
+		}
+		return path
+	}
+	switch {
+	case path == "status", path == "statusCode":
+		return "response.status"
+	case strings.HasPrefix(path, "headers."):
+		return "response." + path
+	case strings.HasPrefix(path, "body."):
+		return "response." + path
+	case path == "body":
+		return "response.body"
+	default:
+		return path
+	}
+}
+
+// tokenPathFallback retries response.body.data.token when response.body.token is missing.
+func tokenPathFallback(path string) string {
+	switch path {
+	case "response.body.token", "body.token":
+		return "response.body.data.token"
+	default:
+		return ""
+	}
 }
 
 // traverseOutputPath walks a dot-separated JSONPath into a decoded JSON value.

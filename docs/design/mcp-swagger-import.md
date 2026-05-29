@@ -37,15 +37,20 @@ go run ./cmd/mcp
 
 ## Cursor 配置示例
 
-在项目或用户 MCP 配置中加入（路径按本机仓库调整）：
+先构建 MCP 二进制（推荐，不依赖 `go run` 与工作目录）：
+
+```bash
+make build-mcp
+```
+
+在项目或用户 MCP 配置中加入：
 
 ```json
 {
   "mcpServers": {
     "autotest": {
-      "command": "go",
-      "args": ["run", "./cmd/mcp"],
-      "cwd": "/path/to/autotest",
+      "type": "stdio",
+      "command": "/path/to/autotest/bin/autotest-mcp",
       "env": {
         "AUTOTEST_API_BASE_URL": "http://localhost:8080/api/v1",
         "AUTOTEST_API_KEY": "at-xxxxxxxx",
@@ -57,7 +62,9 @@ go run ./cmd/mcp
 }
 ```
 
-构建二进制后可将 `command` 改为 `"/path/to/autotest-mcp"`（`make build-mcp`）。
+项目级配置（`.cursor/mcp.json`）可用 `${workspaceFolder}/bin/autotest-mcp` 代替绝对路径。
+
+**注意**：Cursor 当前 MCP 配置不支持可靠的 `cwd` 字段；勿使用 `go run ./cmd/mcp` 这类依赖工作目录的启动方式。
 
 ## 工具参数摘要
 

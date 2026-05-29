@@ -28,7 +28,7 @@
 │  ┌────┴────────────┴────────────┴─────────────┴────────────┐ │
 │  │              Shared Services & Utils                    │ │
 │  │  httpx · assertion · sampler · generator · paramsource  │ │
-│  │  aiprovider · scriptlibrary · projectprompt · report    │ │
+│  │  aiprovider · scenariogen/depgraph · genagent · report  │ │
 │  └──────────────────────────┬──────────────────────────────┘ │
 │                             │                                │
 │  ┌──────────────────────────┴──────────────────────────────┐ │
@@ -175,6 +175,14 @@ CORS 由 `auth.CORSMiddleware` 统一处理（`cmd/api/main.go`）：
 | `CORS_ALLOWED_ORIGINS` | 生产部署必填 | 空 | 逗号分隔的前端 Origin，作为浏览器跨域 API 的 CORS 白名单（与登录方式「可信前端域名」无关） |
 | `LOG_LEVEL` | 否 | 按环境 | debug / info / warn / error |
 | `LOG_FORMAT` | 否 | 按环境 | text / json |
+| `AI_SCENARIO_AUTORUN` | 否 | off | **已推荐在后台「AI 助理配置」维护**；设为 `on`/`1`/`true` 时作为未入库默认值启用场景真实环境验证 |
+| `AI_MAX_TOOL_HOPS` | 否 | 6 | 未入库时默认工具调用轮次上限 |
+| `AI_SCENARIO_GEN_MAX_ROUNDS` | 否 | 3 | 未入库时 genagent 默认最大轮次 |
+| `AI_ROUTER_CONFIDENCE_THRESHOLD` | 否 | 0.7 | 未入库时 Router 置信度阈值 |
+| `AI_TOOL_ROUTING_MODE` | 否 | shadow | **已推荐在后台维护**；AI 助理按需工具表面灰度模式（见 [ai-capabilities.md](ai-capabilities.md)） |
+| `AI_TOOL_EMBED_BASE_URL` | 否 | 空 | **已推荐在后台维护**；`find_tools` 查询向量的 OpenAI 兼容 `/embeddings` Base URL（…/v1）；未设时尝试复用对话 Provider（Anthropic 对话需单独配置） |
+| `AI_TOOL_EMBED_API_KEY` | 否 | 空 | 与 `AI_TOOL_EMBED_BASE_URL` 配套的 API Key |
+| `AI_TOOL_EMBED_MODEL` | 否 | text-embedding-3-small | 工具目录与查询 embedding 模型；须与 `make gen-tool-embeddings` 生成文件中的 model 一致 |
 
 OAuth 登录方式、回调 URL、`trustedFrontendOrigins` 在管理后台 **用户管理 → 登录方式** 配置，不进 Go 环境变量。详见 [管理后台与访问控制 — 登录方式](admin-and-access.md)。
 

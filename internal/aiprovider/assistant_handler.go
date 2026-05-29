@@ -137,11 +137,12 @@ func (h *Handler) confirmToolCall(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body struct {
-		SessionID       uuid.UUID       `json:"sessionId"`
-		Approve         bool            `json:"approve"`
-		Reason          string          `json:"reason"`
-		ProviderID      uuid.UUID       `json:"providerId"`
-		Model           string          `json:"model,omitempty"`
+		SessionID        uuid.UUID       `json:"sessionId"`
+		Approve          bool            `json:"approve"`
+		Reason           string          `json:"reason"`
+		ToolArguments    json.RawMessage `json:"toolArguments"`
+		ProviderID       uuid.UUID       `json:"providerId"`
+		Model            string          `json:"model,omitempty"`
 		ThinkingEnabled  *bool           `json:"thinkingEnabled,omitempty"`
 		ReasoningEffort  string          `json:"reasoningEffort,omitempty"`
 		WebSearchEnabled *bool           `json:"webSearchEnabled,omitempty"`
@@ -167,7 +168,7 @@ func (h *Handler) confirmToolCall(w http.ResponseWriter, r *http.Request) {
 	sink, stop := buildSSESink(w, flusher, callerCtx)
 	defer stop()
 
-	decision := AssistantConfirmDecision{Approve: body.Approve, Reason: body.Reason}
+	decision := AssistantConfirmDecision{Approve: body.Approve, Reason: body.Reason, ToolArguments: body.ToolArguments}
 	if err := h.service.ContinueAfterConfirm(
 		callerCtx, projectID, principal.UserID,
 		body.SessionID, callID, decision,

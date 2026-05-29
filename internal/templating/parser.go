@@ -87,7 +87,7 @@ func HasMockToken(s string) bool {
 // HasStepToken reports whether s contains at least one `{{$steps[N]...}}`
 // reference. Backwards-compatible with the legacy single-brace shape.
 func HasStepToken(s string) bool {
-	return strings.Contains(s, "$steps[")
+	return strings.Contains(s, "$steps[") || strings.Contains(s, "$steps.")
 }
 
 // HasSQLToken reports whether s contains at least one `{{sql.*}}` or
@@ -134,6 +134,10 @@ var (
 
 	// $steps[N]<rest> — `rest` may start with `.field` or `[idx]` or be empty.
 	stepBodyRE = regexp.MustCompile(`^\s*\$steps\[(\d+)\]([^{}]*?)\s*$`)
+	// $steps["name"] or $steps['name']
+	stepNameQuotedRE = regexp.MustCompile(`^\s*\$steps\[(?:"([^"]*)"|'([^']*)')\]([^{}]*?)\s*$`)
+	// $steps.slug.path
+	stepNameDotRE = regexp.MustCompile(`^\s*\$steps\.([A-Za-z][A-Za-z0-9_-]*)(\.[^{}]+)?\s*$`)
 
 	// sql.<source>[<f=v>].<col>
 	// Both the legacy `sql.` form and the `$sql.` alias are accepted; the
@@ -272,6 +276,47 @@ func classify(raw, body string, openCount, closeCount int) (Token, bool) {
 				Body:      expression,
 				Step: StepToken{
 					Seq:  seq,
+					Path: path,
+				},
+			}, true
+		}
+		if m := stepNameQuotedRE.FindStringSubmatch(body); m != nil {
+			name := strings.TrimSpace(m[1])
+			if name == "" {
+				name = strings.TrimSpace(m[2])
+			}
+			if name == "" {
+				return Token{}, false
+			}
+			suffix := strings.TrimSpace(m[3])
+			path := strings.TrimPrefix(suffix, ".")
+			expression := `$steps["` + name + `"]` + suffix
+			return Token{
+				Kind:      KindStep,
+				Raw:       raw,
+				Namespace: "$steps",
+				Body:      expression,
+				Step: StepToken{
+					Name: name,
+					Path: path,
+				},
+			}, true
+		}
+		if m := stepNameDotRE.FindStringSubmatch(body); m != nil {
+			name := strings.TrimSpace(m[1])
+			if name == "" {
+				return Token{}, false
+			}
+			suffix := strings.TrimSpace(m[2])
+			path := strings.TrimPrefix(suffix, ".")
+			expression := "$steps." + name + suffix
+			return Token{
+				Kind:      KindStep,
+				Raw:       raw,
+				Namespace: "$steps",
+				Body:      expression,
+				Step: StepToken{
+					Name: name,
 					Path: path,
 				},
 			}, true

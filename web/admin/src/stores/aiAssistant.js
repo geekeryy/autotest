@@ -69,6 +69,7 @@ function createPaneState() {
     debugEnabled: false,
     remoteModelList: [],
     modelsWarning: '',
+    genJobProgress: null,
   }
 }
 
@@ -365,6 +366,7 @@ function resetPane(pane) {
   pane.messages = []
   pane.pendingCalls = []
   pane.error = ''
+  pane.genJobProgress = null
 }
 
 function cancelStreamingPane(pane) {
@@ -652,6 +654,22 @@ export async function sendMessage(text, paneId = 'panel', images = []) {
   }
   if (!pane.activeSessionId) return
 
+  const optimisticId = `optimistic-user-${Date.now()}`
+  if (message || imgs.length) {
+    pane.messages = [
+      ...pane.messages.filter((m) => !m.optimistic),
+      {
+        id: optimisticId,
+        seq: Number.MAX_SAFE_INTEGER - 2,
+        role: 'user',
+        content: message,
+        attachments: imgs.length ? imgs : undefined,
+        status: 'final',
+        optimistic: true,
+      },
+    ]
+  }
+
   await streamWith(
     `/projects/${assistantState.projectId}/ai/chat/stream`,
     {
@@ -670,28 +688,54 @@ export async function sendMessage(text, paneId = 'panel', images = []) {
   )
 }
 
+export function clearGenJobProgress(paneId = 'panel') {
+  const pane = getPane(paneId)
+  pane.genJobProgress = null
+}
+
+function normalizeGenJobProgress(raw) {
+  if (!raw || typeof raw !== 'object') return null
+  const src = raw.genJob || raw.gen_job || raw.progress || raw
+  if (!src || typeof src !== 'object') return null
+  return {
+    jobId: src.jobId || src.job_id || src.id || '',
+    status: src.status || 'running',
+    round: src.round ?? src.currentRound ?? src.current_round,
+    maxRounds: src.maxRounds ?? src.max_rounds,
+    passRate: src.passRate ?? src.pass_rate,
+    totalScenarios: src.totalScenarios ?? src.total_scenarios,
+    passedScenarios: src.passedScenarios ?? src.passed_scenarios,
+    repairSummary: src.repairSummary ?? src.repair_summary ?? src.summary ?? '',
+    repairDetails: src.repairDetails ?? src.repair_details ?? src.details,
+    phase: src.phase || src.message || '',
+  }
+}
+
 export async function resolvePendingCall(callId, decision, paneId = 'panel') {
   const pane = getPane(paneId)
   if (!assistantState.projectId || !pane.activeSessionId) return
   if (pane.streaming) return
   if (!callId || inFlightCallIds.has(`${paneId}:${callId}`)) return
   inFlightCallIds.add(`${paneId}:${callId}`)
-  pane.pendingCalls = pane.pendingCalls.filter((c) => c.id !== callId)
   try {
+    const body = {
+      sessionId: pane.activeSessionId,
+      approve: !!decision?.approve,
+      reason: decision?.reason || '',
+      providerId: pane.selectedProviderId || undefined,
+      model: pane.selectedModel || undefined,
+      thinkingEnabled: pane.thinkingEnabled,
+      reasoningEffort: pane.thinkingEnabled ? 'high' : undefined,
+      webSearchEnabled: pane.webSearchEnabled,
+      debugEnabled: pane.debugEnabled,
+      pageContext: assistantState.pageContext || undefined,
+    }
+    if (decision?.argumentOverrides && typeof decision.argumentOverrides === 'object') {
+      body.toolArguments = decision.argumentOverrides
+    }
     await streamWith(
       `/projects/${assistantState.projectId}/ai/tool-calls/${callId}/confirm`,
-      {
-        sessionId: pane.activeSessionId,
-        approve: !!decision?.approve,
-        reason: decision?.reason || '',
-        providerId: pane.selectedProviderId || undefined,
-        model: pane.selectedModel || undefined,
-        thinkingEnabled: pane.thinkingEnabled,
-        reasoningEffort: pane.thinkingEnabled ? 'high' : undefined,
-        webSearchEnabled: pane.webSearchEnabled,
-        debugEnabled: pane.debugEnabled,
-        pageContext: assistantState.pageContext || undefined,
-      },
+      body,
       paneId
     )
   } finally {
@@ -750,6 +794,11 @@ function parseCalls(raw) {
   }
 }
 
+/** Parse tool_calls JSON from an assistant message (for inline confirm UI). */
+export function parseAssistantToolCalls(raw) {
+  return parseCalls(raw)
+}
+
 function isPlaceholderSessionTitle(title) {
   const t = String(title || '').trim()
   if (!t) return true
@@ -763,8 +812,7 @@ async function streamWith(url, body, paneId = 'panel') {
   pane.streaming = true
   pane.error = ''
   const requestSeq = ++pane.requestSeq
-  const selectedProvider = assistantState.providers.find((p) => p.id === pane.selectedProviderId) || null
-  const showThinking = !!body?.thinkingEnabled && providerSupportsThinking(selectedProvider)
+  const showThinking = !!body?.thinkingEnabled
 
   let placeholderId = `streaming-${paneId}-${requestSeq}`
   let placeholder = null
@@ -846,6 +894,13 @@ async function streamWith(url, body, paneId = 'panel') {
               if (!exists) pane.pendingCalls = [...pane.pendingCalls, event.toolCall]
             }
             break
+          case 'gen_job_progress': {
+            const progress = normalizeGenJobProgress(event)
+            if (progress) {
+              pane.genJobProgress = progress
+            }
+            break
+          }
           case 'error':
             pane.error = event.error || '对话发生未知错误'
             break
@@ -867,6 +922,12 @@ async function streamWith(url, body, paneId = 'panel') {
             if (placeholder) {
               setPlaceholderThinking(placeholder, false)
               pane.messages = [...pane.messages]
+            }
+            if (pane.genJobProgress) {
+              const st = String(pane.genJobProgress.status || '').toLowerCase()
+              if (st === 'running' || !st) {
+                pane.genJobProgress = { ...pane.genJobProgress, status: 'completed' }
+              }
             }
             break
         }
@@ -910,7 +971,9 @@ function handleMessage(pane, msg, placeholderId) {
   const prior = pane.messages.find((m) => m.id === placeholderId)
   const usageDetails = normalizeUsageDetails(msg.usageDetails) || prior?.usageDetails || null
   const merged = { ...msg, usageDetails }
-  const filtered = pane.messages.filter((m) => m.id !== placeholderId && m.id !== msg.id)
+  const filtered = pane.messages.filter(
+    (m) => m.id !== placeholderId && m.id !== msg.id && !m.optimistic
+  )
   filtered.push(merged)
   filtered.sort(compareMessages)
   pane.messages = filtered
@@ -918,7 +981,10 @@ function handleMessage(pane, msg, placeholderId) {
   if (msg.role === 'tool' && msg.toolCallId) {
     pane.pendingCalls = pane.pendingCalls.filter((c) => c.id !== msg.toolCallId)
   }
-  if (msg.role === 'assistant' && msg.status === 'final') {
+  if (
+    msg.role === 'assistant'
+    && (msg.status === 'final' || msg.status === 'pending_confirm' || msg.status === 'rejected')
+  ) {
     rebuildPendingFromMessages(pane)
   }
 }

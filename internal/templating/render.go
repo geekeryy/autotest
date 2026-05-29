@@ -358,7 +358,7 @@ func VarsResolver(vars map[string]string) func(Token) (string, bool) {
 // `runner.injectStepRefs` function: tokens that are already keys in out are
 // skipped, and tokens that fail to resolve are simply not written so the
 // caller can decide whether to fail loudly or render-through.
-func StepRefs(input string, out map[string]string, resolveStep func(seq int, path string) (string, bool)) {
+func StepRefs(input string, out map[string]string, resolveStep func(StepToken) (string, bool)) {
 	if out == nil || resolveStep == nil {
 		return
 	}
@@ -373,7 +373,7 @@ func StepRefs(input string, out map[string]string, resolveStep func(seq int, pat
 		if _, exists := out[key]; exists {
 			return true
 		}
-		v, ok := resolveStep(t.Step.Seq, t.Step.Path)
+		v, ok := resolveStep(t.Step)
 		if ok {
 			out[key] = v
 		}

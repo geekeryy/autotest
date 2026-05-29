@@ -256,6 +256,47 @@ func (r *Repository) AppendMessage(ctx context.Context, sessionID uuid.UUID, inp
 	return scanMessage(row)
 }
 
+// AppendRoutingLog inserts one routing observation row tied to a session.
+// This is write-only telemetry (Shadow compare / offline eval) and never
+// participates in the live conversation flow. Optional jsonb / int columns
+// are passed as nil when empty so PostgreSQL stores SQL NULL rather than an
+// empty payload.
+func (r *Repository) AppendRoutingLog(ctx context.Context, sessionID uuid.UUID, input RoutingLogInput) error {
+	if r.DB == nil {
+		return fmt.Errorf("database unavailable")
+	}
+	var messageSeq any
+	if input.MessageSeq > 0 {
+		messageSeq = input.MessageSeq
+	}
+	var plannerOutput any
+	if len(input.PlannerOutput) > 0 {
+		plannerOutput = input.PlannerOutput
+	}
+	var routerOutput any
+	if len(input.RouterOutput) > 0 {
+		routerOutput = input.RouterOutput
+	}
+	var perHop any
+	if len(input.PerHop) > 0 {
+		perHop = input.PerHop
+	}
+	var outcome any
+	if input.Outcome != "" {
+		outcome = input.Outcome
+	}
+	_, err := r.DB.Exec(ctx, `
+		insert into ai_routing_logs (
+			session_id, message_seq, planner_output, router_output, per_hop, outcome
+		)
+		values ($1, $2, $3, $4, $5, $6)
+	`, sessionID, messageSeq, plannerOutput, routerOutput, perHop, outcome)
+	if err != nil {
+		return fmt.Errorf("append ai routing log: %w", err)
+	}
+	return nil
+}
+
 // MarkMessageFinal flips a pending_confirm message to final and updates
 // its tool_calls payload (the latter is rewritten so the persisted history
 // can drop the "pending" tool call entry once the user has decided).

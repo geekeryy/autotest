@@ -113,6 +113,20 @@ func (a *StoreAdapter) UpdateSessionTitle(ctx context.Context, projectID, userID
 	return &aiprovider.StoredSession{ID: s.ID, Title: s.Title}, nil
 }
 
+// AppendRoutingLog persists one routing observation row, mapping the
+// aiprovider-level input onto the aisession repository. Telemetry only —
+// failures here must not be allowed to break the live conversation flow,
+// but the adapter simply surfaces the error and lets the caller decide.
+func (a *StoreAdapter) AppendRoutingLog(ctx context.Context, input aiprovider.RoutingLogInput) error {
+	return a.svc.repo.AppendRoutingLog(ctx, input.SessionID, RoutingLogInput{
+		MessageSeq:    input.MessageSeq,
+		PlannerOutput: input.PlannerOutput,
+		RouterOutput:  input.RouterOutput,
+		PerHop:        input.PerHop,
+		Outcome:       input.Outcome,
+	})
+}
+
 func toStored(m Message) aiprovider.StoredMessage {
 	return aiprovider.StoredMessage{
 		ID:               m.ID,

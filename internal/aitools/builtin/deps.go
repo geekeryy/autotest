@@ -5,6 +5,7 @@ import (
 
 	testcase "autotest/internal/case"
 	"autotest/internal/generator"
+	"autotest/internal/genagent"
 	"autotest/internal/mockserver"
 	"autotest/internal/mockset"
 	"autotest/internal/paramsource"
@@ -40,6 +41,7 @@ type Deps struct {
 	MockSets     MockSetService
 	Scripts      ScriptLibraryService
 	Runs         RunsService
+	GenAgent     GenAgentService
 }
 
 // CaseService is the slice of `internal/case.Service` we depend on.
@@ -170,4 +172,9 @@ type ScriptLibraryService interface {
 type RunsService interface {
 	ListProjectRuns(ctx context.Context, filter report.ListRunsFilter) ([]report.RunListEntry, int, int, int, error)
 	GetRunResult(ctx context.Context, runID uuid.UUID) (*runner.RunResultOutput, error)
+}
+
+// GenAgentService runs async generate-and-verify jobs (gated by AI_SCENARIO_AUTORUN).
+type GenAgentService interface {
+	RunAsync(ctx context.Context, cfg genagent.RunConfig) (*genagent.Job, error)
 }

@@ -95,6 +95,20 @@ type AppendMessageInput struct {
 	UsageDetails     json.RawMessage
 }
 
+// RoutingLogInput is the internal projection used to persist one routing
+// observation row (ai_routing_logs). It is write-only telemetry for Shadow
+// comparison and offline evaluation; it does not affect the SSE schema or
+// session isolation. PlannerOutput / RouterOutput / PerHop are stored as
+// jsonb; MessageSeq optionally links the user message that triggered the
+// route and may be zero when unknown.
+type RoutingLogInput struct {
+	MessageSeq    int
+	PlannerOutput json.RawMessage
+	RouterOutput  json.RawMessage
+	PerHop        json.RawMessage
+	Outcome       string
+}
+
 // ConfirmDecision captures the user's choice for a pending mutating tool
 // call. Reason is optional and surfaces in the tool result fed back to the
 // model.

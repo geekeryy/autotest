@@ -62,12 +62,15 @@ export const mockSetSyntax = [
 ]
 
 export const stepRefFields = [
-  { name: 'status', example: '{{$steps[1].status}}', description: 'API 步骤的 HTTP 响应状态码（数字）' },
-  { name: 'headers.<Name>', example: '{{$steps[1].headers.X-Request-Id}}', description: 'API 步骤的响应头取值' },
-  { name: 'body.<path>', example: '{{$steps[1].body.data.token}}', description: 'API 步骤响应 JSON 字段，支持 a.b[0].c 形式' },
-  { name: 'request.query.<name>', example: '{{$steps[1].request.query.userId}}', description: 'API 步骤实际发出的查询参数值' },
-  { name: 'request.pathvar.<name>', example: '{{$steps[1].request.pathvar.id}}', description: 'API 步骤实际发出的路径参数值（兼容历史 pathvar 语法）' },
+  { name: 'response.status', example: '{{$steps[1].response.status}}', description: 'API 步骤 HTTP 状态码' },
+  { name: 'response.headers.<Name>', example: '{{$steps[1].response.headers.X-Request-Id}}', description: 'API 步骤响应头' },
+  { name: 'response.body.<path>', example: '{{$steps[1].response.body.data.token}}', description: 'API 步骤响应 JSON，支持 a.b[0].c' },
+  { name: '按步骤名', example: '{{$steps["用户登录"].response.body.data.token}}', description: '用步骤 name 代替序号（名称需唯一）' },
+  { name: '按 slug', example: '{{$steps.login.response.body.data.token}}', description: '步骤名 slug 引用（小写、空格等变下划线）' },
+  { name: 'request.query.<name>', example: '{{$steps[1].request.query.userId}}', description: 'API 步骤实际发出的查询参数' },
+  { name: 'request.pathvar.<name>', example: '{{$steps[1].request.pathvar.id}}', description: 'API 步骤实际发出的路径参数' },
   { name: 'request.body.<path>', example: '{{$steps[1].request.body.user.email}}', description: 'API 步骤实际发出的请求体字段' },
+  { name: 'extracts → {{var}}', example: '{{authToken}}', description: '在步骤 config.extracts 中从本步输出提取后，用场景变量名引用' },
   { name: 'firstRow.<column>', example: '{{$steps[2].firstRow.user_id}}', description: '数据库步骤结果首行字段' },
   { name: 'rows[<index>].<column>', example: '{{$steps[2].rows[0].name}}', description: '数据库步骤指定行字段' },
   { name: 'stdout', example: '{{$steps[3].stdout}}', description: '脚本步骤的标准输出（按 console.log 累计）' },
@@ -113,7 +116,7 @@ export const mockResponseFields = [
 
 export const renderingPipeline = [
   { stage: '1', label: '$mock.* 模拟标签', detail: '每次请求实时生成新值；多次出现互不相同；未识别 helper 保留字面量。' },
-  { stage: '2', label: '$steps[N].* 场景步骤引用', detail: '仅在场景编排中生效；按上一步输出按 JSONPath 解析。' },
+  { stage: '2', label: '$steps[...].* / extracts', detail: '场景编排：$steps 按 step_seq/名称/slug 解析 response.* 与 request.*；步骤 extracts 写入场景变量。' },
   { stage: '3', label: '$ds.* / $sql.* 测试数据与 SQL 引用', detail: 'Runner 在发请求前解析测试数据表引用，并自动执行对应 SQL 参数源，按列名取值；继续兼容历史 `{{sql.*}}`。' },
   { stage: '4', label: '{{varName}} 普通变量', detail: '从环境变量、场景变量、运行覆盖变量、模板默认变量合并取值。' }
 ]

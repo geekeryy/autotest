@@ -58,7 +58,7 @@
 ### 场景编排
 
 - [场景步骤模型](design/scenario-orchestration.md)：涉及 API、数据库、脚本、For 循环、条件分支等步骤新增/配置/执行的请求，先判断是否改变步骤类型契约、`config` 结构或运行器执行顺序；API 步骤引用的是接口请求模板。
-- [变量提取与脚本步骤](design/scenario-orchestration.md)：涉及 `{{$steps[N].*}}`、响应/请求字段引用、变量提取、goja 脚本、Postman 风格 `pm.*`、console 输出或变量写回的请求，先判断渲染顺序和变量作用域是否受影响。
+- [变量提取与脚本步骤](design/scenario-orchestration.md)、[步骤引用 v2](design/scenario-step-refs-v2.md)：涉及 `{{$steps[...].response.*}}` / `{{$steps["名称"].*}}`、config `extracts`、响应/请求字段引用、goja 脚本、Postman 风格 `pm.*`、console 输出或变量写回的请求，先判断渲染顺序和变量作用域是否受影响。
 - [步骤编辑与列表交互](design/scenario-orchestration.md)：涉及步骤级 Tab、未保存草稿、拖拽排序、启停、删除按钮、列表宽度或本地恢复的请求，先区分内存草稿、本地持久化和服务端数据；刷新后表单应重新装载服务端最新数据。
 - [步骤删除与历史槽位](design/scenario-orchestration.md)：涉及删除、恢复、排序、保存丢失或刷新后查不到步骤的请求，优先检查软删除与 `(scenario_id, step_order)` 槽位释放；同槽位新保存必须创建全新记录。
 - [控制流](design/scenario-orchestration.md)：涉及 For 循环、条件分支、子步骤展示、`step_seq` 引用、嵌套、跳过分支或失败传播的请求，先判断是否会破坏控制步骤到子步骤的稳定引用和最大嵌套限制。
@@ -77,6 +77,7 @@
 ### AI 能力
 
 - [AI 提供商](design/ai-capabilities.md)：涉及 provider 类型、Base URL、API Key 脱敏、文本/多模态默认模型（`modalityModels`）、模型能力标签、extraConfig、thinking/reasoning、启用状态或默认提供商的请求，先判断配置为**全局平台资源**（`/ai-providers`，不按项目隔离）；API 不应返回明文 Key。模型列表应通过上游 list-models 动态获取；`capabilities` 仅来自上游元数据（无则空），多模态路由依赖用户配置的 `modalityModels`，不按模型 id 推断能力。`/ai-provider-types` 仅保留类型元数据与离线 fallback。
+- [AI 助理平台配置](design/ai-capabilities.md)：涉及工具调用最大轮次、按需工具路由模式、路由置信度阈值、场景生成真实环境验证开关、场景闭环默认轮次、`find_tools` 向量检索端点等运行时参数的请求，先判断是否为**全局平台资源**（`/platform/ai-assistant-settings`）；**登录凭据不在此配置**，应通过 `generate_*` 场景工具挂起确认卡片收集，而非在对话中逐条追问。
 - [平台 Prompt](design/ai-capabilities.md)：涉及 action 级 System Prompt、默认模型、provider 绑定或回退逻辑的请求，先判断 providerId 为空是否应跟随**平台**默认提供商；绑定 provider 须为未删除的全局提供商；每个 action 全局至多一条有效配置。
 - [AI 生成请求参数](design/ai-capabilities.md)：涉及 `generate_params`、上下文构造、pathVarNames、currentRequest 保留、Mock Value Sets 注入或模型输出格式的请求，先区分非 LLM 的 `GET /cases/{id}/generate-params` 采样接口与 LLM `/ai/chat` action，并注意下方覆盖范围冲突仍待决策。
 - [AI 生成断言与测试数据](design/ai-capabilities.md)：涉及 `generate_assertion` 或 `generate_case_data` 的请求，先判断是否需要非空测试意图、平台 Prompt/provider 配置和明确中文错误；生成结果应由用户预览或追加，不应静默覆盖已有内容。
@@ -84,7 +85,8 @@
 - [AI Tool Calling 框架](design/ai-capabilities.md)：涉及让 AI 通过内置工具拉系统状态、扩展工具集、改变工具权限边界或写工具确认机制的请求，先判断目标是否落在 `internal/aitools` Registry；分析类 action 仅允许只读工具；浮窗对话中 **create/update/import 类写工具自动执行**，**delete_* 类工具**须经用户 confirm；不暴露用户/角色/权限/登录方式/API Key 等系统管理写工具。
 - [全局 AI 助理浮窗](design/ai-capabilities.md)：涉及登录后管理后台 AI 助理浮窗、provider/model 选择、深度思考/联网搜索开关、Token 用量持久化与汇总（仪表盘/会话详情）、Debug 开关下浮窗每轮 token/缓存详情展示、会话列表查看会话详情（对话统计与 Token 汇总）、Xiaomi 图片上传与多模态消息、SSE 对话流、会话/消息持久化、空会话时「新对话」静默复用（不重复创建）、跨用户隔离或 mutating 工具人在回路确认的请求，先判断需求是否会改变 `ai_sessions`/`ai_messages` 表结构、SSE 事件 schema 或会话隔离边界；浮窗会话按 `(project_id, user_id)` 严格隔离，分析类 action 不暴露写工具。
 - [AI 助理工作区分屏](design/ai-capabilities.md)：涉及工作区最多 6 屏、横向并排、每屏独立 provider/model、工作区主区域 +/各屏 X 增删分屏、同会话不可多屏重复打开或 pane 级设置持久化的请求，先确认是否仅影响前端 `aiAssistant` store 与 `/ai-assistant` 页，不改变 SSE 或表结构。
-- [AI 场景生成与编排](design/ai-capabilities.md)：涉及让 AI 帮用户生成测试场景、追加/修改/删除/重排步骤、生成接口请求模板或一键运行的请求，先判断是工具集扩展还是运行触发；AI 通过 `list_* / get_*` 探查后调用 `create_scenario_with_steps`（API/Script/For/Condition 四种步骤）一次性创建完整场景，控制流子步骤引用使用 `stepOrder`，由平台转换为内部 `step_seq`；运行触发始终由用户在场景页手动点击，AI 不暴露任何"运行"工具。服务和环境的 create/update 不通过 AI 工具暴露——平台基础结构由用户手工维护，AI 只读相关元信息。
+- [AI 场景生成与编排](design/ai-capabilities.md)：涉及让 AI 帮用户生成测试场景、追加/修改/删除/重排步骤、生成接口请求模板或一键运行的请求，先判断是工具集扩展还是运行触发；覆盖生成应优先 `generate_coverage_scenarios` / `generate_and_verify_scenarios` 并在对话内嵌确认卡片收集登录凭据（**禁止**在聊天里逐条追问）；手工编排仍可用 `create_scenario_with_steps`（API/Script/For/Condition 四种步骤），控制流子步骤引用使用 `stepOrder`，由平台转换为内部 `step_seq`；**常规**对话不暴露「运行」工具；平台 **AI 助理配置** 中开启「场景生成真实环境验证」后，`generate_and_verify_scenarios` 可在真实环境异步执行生成验证闭环（见 ai-capabilities 依赖图与 genagent 章节）。服务和环境的 create/update 不通过 AI 工具暴露——平台基础结构由用户手工维护，AI 只读相关元信息。
+- [AI 优先入口页](design/ai-capabilities.md)：登录后默认 `/` 为 AI 对话首页（`AIHome.vue`），提供「进入控制台」进入 `/dashboard` 手工管理后台；生成场景时可选择目标环境、自动修复与最大轮次，进度经 SSE `gen_job_progress` 展示。
 - [AI 会话权限与项目隔离](design/ai-capabilities.md)：涉及 AI 工具调用是否能跨项目、是否能越用户访问数据的请求，先确认每个 SSE 会话由 `(projectId, userId)` 绑定；任何接受 `projectId` 的工具均通过 `aitools.ResolveProjectID` 校验，按 `caseId/scenarioId/stepId` 操作的工具在查到对象后反向校验其 `projectId` 必须等于会话项目，违反时直接拒绝执行。
 - [AI 助理页面上下文](design/ai-capabilities.md)：涉及 AI 浮窗感知用户当前页面、把 `scenarioId/caseId/serviceId` 等当作默认对象的请求，先确认前端按路由切换调 `bindPage` 写入 `assistantState.pageContext`，每次 `POST /ai/chat/stream` 与 `/tool-calls/{id}/confirm` 都附带这份快照；后端把它作为额外 system 消息注入 LLM 上下文，但工具仍以参数为权威，页面上下文不参与权限判定。
 - [项目测试画像](design/ai-capabilities.md)：平台从项目历史运行数据中自动学习项目特征（响应约定、字段枚举、接口依赖、认证模式），形成「项目测试画像」（`project_test_profiles` 表），并注入到 AI 助理 prompt 和测试用例生成器中，使生成结果适配项目差异。画像通过 `POST /projects/{id}/test-profile/build` 触发构建，`GET /projects/{id}/test-profile/` 查看，`GET /projects/{id}/test-profile/prompt-context` 获取格式化上下文。
@@ -92,7 +94,7 @@
 ### 管理后台与访问控制
 
 - [登录与后台基础](design/admin-and-access.md)：涉及登录、路由守卫、默认管理员账号密码对齐、首次改密或后台技术栈的请求，先判断是认证流程、权限导航还是启动初始化；默认管理员为 `admin`/`admin`（代码内 bootstrap），首次本地密码登录须改密后重新登录；`APP_ENV=production` 启动时校验 JWT 与数据库密码强度。支持本地用户名密码登录（bootstrap，不可关闭）与可配置 OAuth（GitHub/GitLab/Google，**用户管理 → 登录方式** Tab CRUD，`users:manage`）并存；OAuth 统一回调页 `/login/oauth/callback`（旧 `/login/github/callback` 重定向）；回跳前端地址由登录请求 `frontendUrl`（signed state）与**各登录方式**配置的 `trustedFrontendOrigins` 校验（**仅 OAuth 回跳，不用于 CORS**）。前后端分离部署时 CORS 白名单由环境变量 `CORS_ALLOWED_ORIGINS` 配置（逗号分隔）。`GET /auth/login-providers` 动态展示已启用且 `callbackUrl` 域名与当前 API 请求域名一致的 IdP。
-- [全局项目上下文](design/admin-and-access.md)：涉及顶部项目选择、页面间项目复用、上次项目/环境恢复或未选择项目提示的请求，先判断是否应依赖全局项目，避免在页面内重复选择项目；项目管理页承载服务与环境管理；业务数据源、AI 提供商、Prompt 管理已归入「平台资源」菜单。
+- [全局项目上下文](design/admin-and-access.md)：涉及顶部项目选择、页面间项目复用、上次项目/环境恢复或未选择项目提示的请求，先判断是否应依赖全局项目，避免在页面内重复选择项目；项目管理页承载服务与环境管理；业务数据源、AI 提供商、AI 助理配置、Prompt 管理已归入「平台资源」菜单。
 - [服务与环境管理](design/admin-and-access.md)：涉及服务/环境树、环境变量 JSON、认证 JSON、编辑弹窗、提示图标或失焦格式化的请求，先判断变更是否影响运行控制台的环境编辑复用。
 - [菜单、布局与视觉品牌](design/admin-and-access.md)：涉及侧边栏菜单、收起、滚动区域、字体、配色、头像、退出登录或 logo 的请求，先判断是全局布局约束还是单页样式调整；左侧导航不应单独滚动。
 - [脚本库](design/admin-and-access.md)：涉及断言编辑器、场景脚本步骤、内置模板、项目自定义模板或 AI 生成脚本入口的请求，先判断模板作用域是全平台共享还是当前项目。

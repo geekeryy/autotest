@@ -120,16 +120,17 @@ func (s *Service) executeScenarioStep(
 	step scenario.Step,
 	env project.Environment,
 	baseVars map[string]string,
+	steps []scenario.Step,
 	stepOutputs map[int]any,
 	mockCfg *templating.MockExpanderConfig,
 ) (*report.Result, map[string]any, error) {
 	switch step.StepType {
 	case "", scenario.StepTypeAPI:
-		return s.executeAPIScenarioStep(ctx, runID, step, env, baseVars, stepOutputs, mockCfg)
+		return s.executeAPIScenarioStep(ctx, runID, step, env, baseVars, steps, stepOutputs, mockCfg)
 	case scenario.StepTypeDatabase:
-		return s.executeDatabaseScenarioStep(ctx, runID, step, env, baseVars, stepOutputs, mockCfg)
+		return s.executeDatabaseScenarioStep(ctx, runID, step, env, baseVars, steps, stepOutputs, mockCfg)
 	case scenario.StepTypeScript:
-		return s.executeScriptScenarioStep(ctx, runID, step, baseVars, stepOutputs, mockCfg)
+		return s.executeScriptScenarioStep(ctx, runID, step, baseVars, steps, stepOutputs, mockCfg)
 	default:
 		return nil, nil, fmt.Errorf("step %d: unsupported step type %q", step.StepOrder, step.StepType)
 	}
@@ -138,7 +139,8 @@ func (s *Service) executeScenarioStep(
 // apiStepConfig holds the optional step-level configuration for API steps.
 // When non-empty, Assertions are appended to the test case's base assertions.
 type apiStepConfig struct {
-	Assertions json.RawMessage `json:"assertions"`
+	Assertions json.RawMessage   `json:"assertions"`
+	Extracts   []stepExtractRule `json:"extracts"`
 }
 
 func (s *Service) executeAPIScenarioStep(
@@ -147,6 +149,7 @@ func (s *Service) executeAPIScenarioStep(
 	step scenario.Step,
 	env project.Environment,
 	baseVars map[string]string,
+	steps []scenario.Step,
 	stepOutputs map[int]any,
 	mockCfg *templating.MockExpanderConfig,
 ) (*report.Result, map[string]any, error) {
@@ -175,7 +178,7 @@ func (s *Service) executeAPIScenarioStep(
 	// Build a per-step vars map and inject any $steps[N].* references that
 	// appear in the effective request JSON so renderVariables can resolve them.
 	stepVars := copyVars(baseVars)
-	injectStepRefs(string(effectiveRequest), stepOutputs, stepVars)
+	injectStepRefs(string(effectiveRequest), stepOutputs, steps, stepVars)
 
 	// Collect and resolve SQL + test data inline references.
 	var inlineRefs []paramsource.InlineReference
@@ -261,9 +264,11 @@ func buildAPIStepOutput(result *report.Result, reqParams map[string]any) map[str
 	}
 
 	out := map[string]any{
-		"status":  snap.StatusCode,
-		"headers": flatHeaders,
-		"body":    bodyValue,
+		"response": map[string]any{
+			"status":  snap.StatusCode,
+			"headers": flatHeaders,
+			"body":    bodyValue,
+		},
 	}
 	if reqParams != nil {
 		out["request"] = reqParams

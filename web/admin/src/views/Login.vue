@@ -110,7 +110,7 @@ export default {
             this.$router.replace('/change-password')
             return
           }
-          const redirect = this.$route.query.redirect || '/dashboard'
+          const redirect = this.$route.query.redirect || '/'
           this.$router.replace(redirect)
         } catch {
           // 错误已在全局请求拦截器中提示

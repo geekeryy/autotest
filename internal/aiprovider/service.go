@@ -8,17 +8,15 @@ import (
 	"strings"
 	"time"
 
+	"autotest/internal/aiconfig"
 	"autotest/internal/aiprovider/client"
 	"autotest/internal/aitools"
 
 	"github.com/google/uuid"
 )
 
-// MaxToolHops caps how many round-trips the tool-calling loop will perform
-// for a single AI call. Each hop is one LLM round-trip; after the cap the
-// loop returns whatever text the model produced last (or a clear warning if
-// the model still wanted to call tools).
-const MaxToolHops = 6
+// DefaultMaxToolHops is the code default when no platform setting is present.
+const DefaultMaxToolHops = aiconfig.DefaultMaxToolHops
 
 // MockSetSummaryProvider 是 aiprovider 用来为 `generate_params` 注入项目级
 // 命名值集合摘要的可选依赖。返回的 summary 仅供模型参考；任何错误都被静默
@@ -48,6 +46,14 @@ type Service struct {
 	repo           *Repository
 	mockSets       MockSetSummaryProvider
 	profileContext ProfileContextProvider
+
+	// On-demand tool surface (Planner/Router/Catalog) + gray-rollout mode.
+	// All three must be set for the on-demand surface to engage; otherwise
+	// the assistant ships the full tool set (legacy behaviour).
+	planner     *Planner
+	router      *Router
+	catalog     *aitools.Catalog
+	routingMode RoutingMode
 }
 
 // NewService constructs a Service.
@@ -67,6 +73,31 @@ func (s *Service) WithMockSets(provider MockSetSummaryProvider) *Service {
 func (s *Service) WithProfileContext(provider ProfileContextProvider) *Service {
 	s.profileContext = provider
 	return s
+}
+
+// WithRouting 注入按需工具表面所需的 Planner / Router / Catalog 与灰度模式。
+// 三者齐备时，浮窗对话会在主循环前计算 Planner→Router 并写 ai_routing_logs；
+// 是否真正收窄发给 LLM 的工具，由 mode 决定（默认 shadow：全量 + 影子记录）。
+func (s *Service) WithRouting(planner *Planner, router *Router, catalog *aitools.Catalog, mode RoutingMode) *Service {
+	s.planner = planner
+	s.router = router
+	s.catalog = catalog
+	if mode == "" {
+		mode = RoutingModeShadow
+	}
+	s.routingMode = mode
+	return s
+}
+
+func (s *Service) routingModeEffective() RoutingMode {
+	return ParseRoutingMode(aiconfig.Get().ToolRoutingMode)
+}
+
+// routingConfigured reports whether the on-demand tool surface is fully
+// wired. When false the assistant uses the legacy full-tools behaviour and
+// never touches ai_routing_logs.
+func (s *Service) routingConfigured() bool {
+	return s.planner != nil && s.router != nil && s.catalog != nil
 }
 
 // SupportedTypes returns metadata about each provider type for the frontend create form.
@@ -243,6 +274,16 @@ func (s *Service) Chat(ctx context.Context, projectID uuid.UUID, req ChatRequest
 	return resp, nil
 }
 
+// ResolveDefaultChatProvider returns the platform default provider ID and text model
+// for headless agent calls that do not receive an explicit provider from the client.
+func (s *Service) ResolveDefaultChatProvider(ctx context.Context) (uuid.UUID, string, error) {
+	row, err := s.pickProvider(ctx, uuid.Nil)
+	if err != nil {
+		return uuid.Nil, "", err
+	}
+	return row.ID, row.DefaultModel, nil
+}
+
 // ChatWithTools is the multi-hop version of Chat. When the configured model
 // returns tool_calls, each non-mutating tool is executed locally and the
 // result is fed back to the model; the loop continues until the model
@@ -311,7 +352,7 @@ func (s *Service) ChatWithTools(ctx context.Context, projectID uuid.UUID, req Ch
 		lastResult *client.Result
 	)
 
-	for hop := 0; hop < MaxToolHops; hop++ {
+	for hop := 0; hop < aiconfig.MaxToolHops(); hop++ {
 		start := time.Now()
 		result, err := cli.Chat(timeoutCtx, messages, baseOpts)
 		totalMs += time.Since(start).Milliseconds()
@@ -347,7 +388,7 @@ func (s *Service) ChatWithTools(ctx context.Context, projectID uuid.UUID, req Ch
 
 	if finalText == "" {
 		if lastResult != nil && len(lastResult.ToolCalls) > 0 {
-			finalText = fmt.Sprintf("AI 在 %d 轮工具调用后仍未给出结论，已停止。请缩小问题范围或在 Prompt 中给出更明确的指令。", MaxToolHops)
+			finalText = fmt.Sprintf("AI 在 %d 轮工具调用后仍未给出结论，已停止。请缩小问题范围或在 Prompt 中给出更明确的指令。", aiconfig.MaxToolHops())
 		} else {
 			finalText = ""
 		}

@@ -9,6 +9,7 @@ import (
 	testcase "autotest/internal/case"
 	"autotest/internal/paramsource"
 	"autotest/internal/project"
+	"autotest/internal/scenario"
 	"autotest/internal/report"
 
 	"github.com/google/uuid"
@@ -163,8 +164,10 @@ func TestBuildAPIRequestParamsRendersStepRefPathVariables(t *testing.T) {
 
 	stepOutputs := map[int]any{
 		11: map[string]any{
-			"body": map[string]any{
-				"data": map[string]any{"id": "site-42"},
+			"response": map[string]any{
+				"body": map[string]any{
+					"data": map[string]any{"id": "site-42"},
+				},
 			},
 		},
 	}
@@ -174,7 +177,7 @@ func TestBuildAPIRequestParamsRendersStepRefPathVariables(t *testing.T) {
 		`{"variables":{"id":"{$steps[11].body.data.id}"}}`,
 	} {
 		vars := map[string]string{}
-		injectStepRefs(expr, stepOutputs, vars)
+		injectStepRefs(expr, stepOutputs, nil, vars)
 		if vars["$steps[11].body.data.id"] != "site-42" {
 			t.Fatalf("expected step ref from %s to resolve, got %#v", expr, vars)
 		}
@@ -557,43 +560,69 @@ func TestApplyInlineSQLReferencesDoesNotRequireCaseBinding(t *testing.T) {
 func TestInjectStepRefsResolvesPathsFromStepOutputs(t *testing.T) {
 	t.Parallel()
 
-	stepOutputs := map[int]any{
-		1: map[string]any{
+	apiOut := map[string]any{
+		"response": map[string]any{
 			"status": float64(200),
 			"body": map[string]any{
 				"data": map[string]any{"token": "abc123"},
 			},
 		},
+	}
+	stepOutputs := map[int]any{
+		1: apiOut,
 		2: map[string]any{
 			"firstRow": map[string]any{"user_id": "42"},
 			"rows":     []any{map[string]any{"name": "Alice"}},
 		},
 	}
+	steps := []scenario.Step{
+		{StepSeq: 1, Name: "User Login"},
+		{StepSeq: 2, Name: "查用户"},
+	}
 
 	vars := map[string]string{}
-	injectStepRefs("Bearer {{$steps[1].body.data.token}}", stepOutputs, vars)
+	injectStepRefs("Bearer {{$steps[1].response.body.data.token}}", stepOutputs, steps, vars)
+	if vars["$steps[1].response.body.data.token"] != "abc123" {
+		t.Fatalf("expected canonical response path resolved, got %#v", vars)
+	}
+
+	injectStepRefs("Bearer {{$steps[1].body.data.token}}", stepOutputs, steps, vars)
 	if vars["$steps[1].body.data.token"] != "abc123" {
-		t.Fatalf("expected token resolved, got %#v", vars)
+		t.Fatalf("expected legacy body path resolved, got %#v", vars)
 	}
 
-	injectStepRefs("{{$steps[1].status}}", stepOutputs, vars)
+	injectStepRefs("{{$steps[1].status}}", stepOutputs, steps, vars)
 	if vars["$steps[1].status"] != "200" {
-		t.Fatalf("expected status resolved, got %#v", vars)
+		t.Fatalf("expected legacy status resolved, got %#v", vars)
 	}
 
-	injectStepRefs("{{$steps[2].firstRow.user_id}}", stepOutputs, vars)
+	injectStepRefs(`{{$steps["User Login"].response.body.data.token}}`, stepOutputs, steps, vars)
+	if vars[`$steps["User Login"].response.body.data.token`] != "abc123" {
+		t.Fatalf("expected name ref resolved, got %#v", vars)
+	}
+
+	injectStepRefs("Bearer {{$steps.user_login.response.body.data.token}}", stepOutputs, steps, vars)
+	if vars["$steps.user_login.response.body.data.token"] != "abc123" {
+		t.Fatalf("expected slug ref resolved, got %#v", vars)
+	}
+
+	injectStepRefs("{{$steps[2].firstRow.user_id}}", stepOutputs, steps, vars)
 	if vars["$steps[2].firstRow.user_id"] != "42" {
 		t.Fatalf("expected firstRow resolved, got %#v", vars)
 	}
 
-	injectStepRefs("{{$steps[2].rows[0].name}}", stepOutputs, vars)
+	injectStepRefs("{{$steps[2].rows[0].name}}", stepOutputs, steps, vars)
 	if vars["$steps[2].rows[0].name"] != "Alice" {
 		t.Fatalf("expected row field resolved, got %#v", vars)
 	}
 
-	// Missing step ref should not panic and should not add a key.
+	injectStepRefs("Bearer {{$steps[1].response.body.token}}", stepOutputs, steps, vars)
+	if vars["$steps[1].response.body.token"] != "abc123" {
+		t.Fatalf("expected response.body.token fallback to data.token, got %#v", vars)
+	}
+
 	before := len(vars)
-	injectStepRefs("{{$steps[99].body}}", stepOutputs, vars)
+	injectStepRefs("{{$steps[99].body}}", stepOutputs, steps, vars)
 	if len(vars) != before {
 		t.Fatalf("expected missing step ref to be skipped, vars: %#v", vars)
 	}

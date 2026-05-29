@@ -150,11 +150,12 @@ const (
 	MockSetModeSequential = "sequential"
 )
 
-// StepToken carries the parsed `$steps[N].path` reference. Path is the
-// dot-separated sub-path AFTER the bracketed sequence (without a leading
-// dot), e.g. `body.data.token` or `rows[0].name`.
+// StepToken carries a parsed `$steps[...]` reference. Exactly one of Seq or Name
+// identifies the source step; Path is the dot-separated sub-path after the ref
+// (no leading dot), e.g. `response.body.data.token` or `rows[0].name`.
 type StepToken struct {
 	Seq  int
+	Name string
 	Path string
 }
 

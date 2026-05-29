@@ -12,12 +12,14 @@
 
 ## 变量与脚本
 
-- 步骤间通过变量提取传递数据。
-- `{{$steps[N].*}}` 支持响应字段与 API 步骤请求参数引用，包括 `request.query.*`、`request.pathvar.*`、`request.body.*`。
+- 步骤间通过 **extracts**（见 [场景步骤引用 v2](scenario-step-refs-v2.md)）与 `{{$steps[...].*}}` 传递数据。
+- 规范引用：`{{$steps[N].response.body.<path>}}`、`{{$steps["步骤名"].response.*}}`、`{{$steps.slug.response.*}}`；请求侧为 `{{$steps[N].request.query|pathvar|body.*}}`（`N` 为 step_seq）。
+- 步骤 `config.extracts` 将本步输出字段提取为场景变量（如 `authToken`），后续步骤使用 `{{authToken}}`。
+- 历史扁平路径（`body.*`、`status`）与 `response.body.token`→`data.token` 回退仍兼容，见 v2 设计说明。
 - 脚本步骤支持 Postman 风格 `pm.variables` / `pm.environment` / `pm.test` / `console`。
 - 脚本步骤带超时，逻辑错误时失败。
 - console 输出映射为 stdout/stderr 快照。
-- `pm.variables.set` 写回场景变量。
+- `pm.variables.set` 写回场景变量（与 extracts 等效，适合脚本内动态提取）。
 
 ## 步骤覆盖与运行环境
 

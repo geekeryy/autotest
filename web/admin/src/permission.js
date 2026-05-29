@@ -41,11 +41,11 @@ router.beforeEach(async (to) => {
   }
 
   if (user && !user.mustChangePassword && to.path === '/change-password') {
-    return '/dashboard'
+    return '/'
   }
 
   if (user?.active && to.path === '/pending-approval') {
-    return '/dashboard'
+    return '/'
   }
 
   if (!routePermissionAllowed(to.meta)) {

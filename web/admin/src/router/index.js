@@ -4,7 +4,6 @@ import { bindPage } from '../stores/aiAssistant'
 import AdminLayout from '../layout/AdminLayout.vue'
 
 export const menuRoutes = [
-  { path: '/', redirect: '/dashboard' },
   { path: '/dashboard', component: () => import('../views/Dashboard.vue'), meta: { title: '概览' } },
   {
     path: '/ai-assistant',
@@ -77,6 +76,7 @@ export const menuRoutes = [
       { path: '/script-library', component: () => import('../views/scriptlib/ScriptLibraryList.vue'), meta: { title: '脚本库', permission: 'cases:read' } },
       { path: '/platform/data-sources', component: () => import('../views/data/DataSourceList.vue'), meta: { title: '业务数据源', permission: 'projects:read' } },
       { path: '/platform/ai-providers', component: () => import('../views/platform/AIProviderList.vue'), meta: { title: 'AI 提供商', permission: 'projects:read' } },
+      { path: '/platform/ai-assistant-settings', component: () => import('../views/platform/AIAssistantSettings.vue'), meta: { title: 'AI 助理配置', permission: 'projects:read' } },
       { path: '/platform/ai-prompts', component: () => import('../views/projects/ProjectPromptList.vue'), meta: { title: 'Prompt 管理', permission: 'projects:read' } },
       { path: '/mock-value-sets', component: () => import('../views/platform/MockValueSetList.vue'), meta: { title: '命名值集合', permission: 'projects:read' } },
       { path: '/template-reference', component: () => import('../views/platform/TemplateReference.vue'), meta: { title: '模板与变量参考' } }
@@ -128,8 +128,10 @@ const router = createRouter({
     },
     { path: '/pending-approval', component: () => import('../views/PendingApproval.vue'), meta: { title: '待审核' } },
     { path: '/change-password', component: () => import('../views/ChangePassword.vue'), meta: { title: '修改密码' } },
+    { path: '/', component: () => import('../views/AIHome.vue'), meta: { title: 'AI 助理' } },
     {
-      path: '/',
+      // 子路由使用绝对 path（/dashboard 等）。父级必须带非空 path，否则会与上面的 `/`（AIHome）抢匹配。
+      path: '/layout',
       component: AdminLayout,
       children: menuRoutes
     }

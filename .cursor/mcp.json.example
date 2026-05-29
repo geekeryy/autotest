@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "autotest": {
-      "command": "go",
-      "args": ["run", "./cmd/mcp"],
+      "type": "stdio",
+      "command": "${workspaceFolder}/bin/autotest-mcp",
       "env": {
         "AUTOTEST_API_BASE_URL": "http://localhost:8080/api/v1",
         "AUTOTEST_API_KEY": "at-replace-me",

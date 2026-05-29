@@ -31,7 +31,7 @@ export POSTGRES_USER POSTGRES_PASSWORD POSTGRES_HOST POSTGRES_PORT POSTGRES_DB P
 # 按文件名顺序执行数据库迁移脚本。
 MIGRATIONS := $(sort $(wildcard migrations/*.sql))
 
-.PHONY: help init up wait-db migrate run-api run-mcp build-mcp run-e2e-api web-install web-dev web-build web-build-prod firebase-deploy test test-integration docker-buildx docker-buildx-init docker-buildx-push all-in-one-up all-in-one-down
+.PHONY: help init up wait-db migrate run-api run-mcp build-mcp run-e2e-api web-install web-dev web-build web-build-prod firebase-deploy test test-integration ai-eval gen-tool-embeddings docker-buildx docker-buildx-init docker-buildx-push all-in-one-up all-in-one-down
 
 help: ## 显示可用命令。
 	@awk 'BEGIN {FS = ":.*##"; printf "用法: make <目标>\n\n目标:\n"} /^[a-zA-Z0-9_-]+:.*##/ {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -104,6 +104,12 @@ test: ## 运行 Go 单元测试（APP_ENV=test）。
 
 test-integration: ## 集成测试（需 POSTGRES_*，建议使用 autotest_test 库）。
 	APP_ENV=test go test ./internal/spec/... ./internal/scenario/... -count=1
+
+ai-eval: ## AI 助理工具路由 Golden Set 评测（规则版，无需 LLM/DB）。
+	go run ./cmd/ai-eval
+
+gen-tool-embeddings: ## 预计算 find_tools 工具目录 embedding（需 AI_TOOL_EMBED_*）。
+	go run ./cmd/gen-tool-embeddings
 
 
 docker-build-init: ## 初始化 buildx builder（多架构构建需要）。

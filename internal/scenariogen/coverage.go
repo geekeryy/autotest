@@ -10,6 +10,7 @@ import (
 	testcase "autotest/internal/case"
 	"autotest/internal/generator"
 	"autotest/internal/scenario"
+	"autotest/internal/scenariogen/depgraph"
 	"autotest/internal/spec"
 	"autotest/internal/sampler"
 
@@ -21,6 +22,7 @@ type StepPlan struct {
 	Name            string
 	Endpoint        spec.Endpoint
 	CaseID          uuid.UUID
+	Config          json.RawMessage
 	RequestOverride json.RawMessage
 	ExpectStatus    int
 }
@@ -41,9 +43,9 @@ type CoverageResult struct {
 
 // CreatedScenario is one scenario persisted by the generator.
 type CreatedScenario struct {
-	ScenarioID uuid.UUID      `json:"scenarioId"`
-	Name       string         `json:"name"`
-	StepCount  int            `json:"stepCount"`
+	ScenarioID uuid.UUID          `json:"scenarioId"`
+	Name       string             `json:"name"`
+	StepCount  int                `json:"stepCount"`
 	Scenario   *scenario.Scenario `json:"scenario,omitempty"`
 	Steps      []scenario.Step    `json:"steps,omitempty"`
 }
@@ -63,7 +65,7 @@ func NewGenerator(deps Deps) *Generator {
 }
 
 // GenerateCoverage ensures request templates exist, plans scenarios, and creates them.
-func (g *Generator) GenerateCoverage(ctx context.Context, projectID, serviceID uuid.UUID) (*CoverageResult, error) {
+func (g *Generator) GenerateCoverage(ctx context.Context, projectID, serviceID uuid.UUID, opts *CoverageOptions) (*CoverageResult, error) {
 	if g.deps.Specs == nil || g.deps.Cases == nil || g.deps.Scenarios == nil {
 		return nil, fmt.Errorf("scenariogen: 依赖未配置")
 	}
@@ -79,8 +81,12 @@ func (g *Generator) GenerateCoverage(ctx context.Context, projectID, serviceID u
 	if err != nil {
 		return nil, err
 	}
+	listedCases, err := g.deps.Cases.List(ctx, testcase.ListFilter{ProjectID: projectID, ServiceID: serviceID})
+	if err != nil {
+		return nil, err
+	}
 
-	plans := planCoverage(endpoints, caseMap)
+	plans := planCoverage(endpoints, buildPlanContext(caseMap, listedCases, opts))
 	result := &CoverageResult{
 		CasesCreated:   created,
 		EndpointsTotal: len(endpoints),
@@ -193,237 +199,164 @@ func caseName(ep spec.Endpoint) string {
 	return strings.ToUpper(ep.Method) + " " + ep.Path
 }
 
-func planCoverage(endpoints []spec.Endpoint, caseMap map[uuid.UUID]uuid.UUID) []ScenarioPlan {
-	if looksLikeE2EAPI(endpoints) {
-		return planE2ECoverage(endpoints, caseMap)
+func buildPlanContext(caseMap map[uuid.UUID]uuid.UUID, cases []testcase.TestCase, opts *CoverageOptions) planContext {
+	ctx := planContext{caseMap: caseMap, caseRequest: map[uuid.UUID]json.RawMessage{}}
+	for _, tc := range cases {
+		ctx.caseRequest[tc.ID] = tc.Request
 	}
-	return planGenericCoverage(endpoints, caseMap)
+	if opts != nil {
+		ctx.creds = opts.LoginCredentials
+	}
+	return ctx
 }
 
-func looksLikeE2EAPI(endpoints []spec.Endpoint) bool {
-	hasUserLogin, hasAdminLogin, hasHealth := false, false, false
-	for _, ep := range endpoints {
-		p := ep.Path
-		switch {
-		case ep.Method == "POST" && p == "/api/v1/auth/login":
-			hasUserLogin = true
-		case ep.Method == "POST" && p == "/api/v1/admin/auth/login":
-			hasAdminLogin = true
-		case ep.Method == "GET" && p == "/healthz":
-			hasHealth = true
-		}
-	}
-	return hasUserLogin && hasAdminLogin && hasHealth
+type planContext struct {
+	caseMap     map[uuid.UUID]uuid.UUID
+	caseRequest map[uuid.UUID]json.RawMessage
+	creds       *LoginCredentialBundle
 }
 
-func planE2ECoverage(endpoints []spec.Endpoint, caseMap map[uuid.UUID]uuid.UUID) []ScenarioPlan {
-	byPath := indexEndpoints(endpoints)
+func planCoverage(endpoints []spec.Endpoint, pctx planContext) []ScenarioPlan {
+	graph := depgraph.Build(endpoints)
 	var plans []ScenarioPlan
 
-	// 1) Health
-	if ep, ok := byPath["GET /healthz"]; ok {
+	// Public / health endpoints without auth in a dedicated scenario.
+	var publicSteps []StepPlan
+	publicIdx := map[int]bool{}
+	for _, grp := range graph.Groups {
+		if grp.HasAuth {
+			continue
+		}
+		for _, idx := range grp.Endpoint {
+			publicIdx[idx] = true
+			sp := stepFromEndpoint(graph, idx, pctx, map[int]int{})
+			publicSteps = append(publicSteps, sp)
+		}
+	}
+	if len(publicSteps) > 0 {
 		plans = append(plans, ScenarioPlan{
-			Name:        "健康检查",
-			Description: "无鉴权公共接口",
-			Steps: []StepPlan{{
-				Name:         "健康检查",
-				Endpoint:     ep,
-				CaseID:       caseMap[ep.ID],
-				ExpectStatus: 200,
-			}},
+			Name:        "公共接口",
+			Description: "无鉴权接口自动覆盖",
+			Steps:       publicSteps,
 		})
 	}
 
-	// 2) User API flow
-	userSteps := []StepPlan{}
-	userLoginSeq := 1
-	if ep, ok := byPath["POST /api/v1/auth/login"]; ok {
-		userSteps = append(userSteps, StepPlan{
-			Name:            "用户登录",
-			Endpoint:        ep,
-			CaseID:          caseMap[ep.ID],
-			RequestOverride: loginRequestOverride("admin", "admin123"),
-			ExpectStatus:    200,
-		})
-	}
-	if ep, ok := byPath["GET /api/v1/me"]; ok && len(userSteps) > 0 {
-		userSteps = append(userSteps, StepPlan{
-			Name:            "获取当前用户",
-			Endpoint:        ep,
-			CaseID:          caseMap[ep.ID],
-			RequestOverride: bearerAuthOverride(userLoginSeq),
-			ExpectStatus:    200,
-		})
-	}
-	listUsersSeq := len(userSteps) + 1
-	if ep, ok := byPath["GET /api/v1/users"]; ok && len(userSteps) > 0 {
-		userSteps = append(userSteps, StepPlan{
-			Name:            "用户列表",
-			Endpoint:        ep,
-			CaseID:          caseMap[ep.ID],
-			RequestOverride: bearerAuthOverride(userLoginSeq),
-			ExpectStatus:    200,
-		})
-	}
-	if ep, ok := byPath["GET /api/v1/users/{id}"]; ok && len(userSteps) >= 2 {
-		userSteps = append(userSteps, StepPlan{
-			Name:            "用户详情",
-			Endpoint:        ep,
-			CaseID:          caseMap[ep.ID],
-			RequestOverride: mergeOverrides(
-				bearerAuthOverride(userLoginSeq),
-				pathIDOverride(listUsersSeq, "body[0].id"),
-			),
-			ExpectStatus: 200,
-		})
-	}
-	if len(userSteps) > 0 {
-		plans = append(plans, ScenarioPlan{
-			Name:        "用户 API 全流程",
-			Description: "登录后访问用户只读接口",
-			Steps:       userSteps,
-		})
-	}
-
-	// 3) Admin API flow
-	adminSteps := []StepPlan{}
-	adminLoginSeq := 1
-	if ep, ok := byPath["POST /api/v1/admin/auth/login"]; ok {
-		adminSteps = append(adminSteps, StepPlan{
-			Name:            "管理员登录",
-			Endpoint:        ep,
-			CaseID:          caseMap[ep.ID],
-			RequestOverride: loginRequestOverride("admin-root", "admin123"),
-			ExpectStatus:    200,
-		})
-	}
-	for _, item := range []struct {
-		method, path, name string
-	}{
-		{"GET", "/api/v1/admin/stats", "平台统计"},
-		{"GET", "/api/v1/admin/audit-logs", "审计日志"},
-		{"GET", "/api/v1/admin/users", "管理员用户列表"},
-	} {
-		if ep, ok := byPath[item.method+" "+item.path]; ok && len(adminSteps) > 0 {
-			adminSteps = append(adminSteps, StepPlan{
-				Name:            item.name,
-				Endpoint:        ep,
-				CaseID:          caseMap[ep.ID],
-				RequestOverride: bearerAuthOverride(adminLoginSeq),
-				ExpectStatus:    200,
-			})
+	for _, grp := range graph.Groups {
+		if !grp.HasAuth {
+			continue
 		}
-	}
-	createSeq := len(adminSteps) + 1
-	if ep, ok := byPath["POST /api/v1/admin/users"]; ok && len(adminSteps) > 0 {
-		adminSteps = append(adminSteps, StepPlan{
-			Name:     "创建用户",
-			Endpoint: ep,
-			CaseID:   caseMap[ep.ID],
-			RequestOverride: mergeOverrides(
-				bearerAuthOverride(adminLoginSeq),
-				jsonRequestOverride(map[string]any{
-					"body": map[string]any{
-						"name":  "E2E Generated User",
-						"email": "{{$mock.email}}",
-						"role":  "tester",
-					},
-				}),
-			),
-			ExpectStatus: 201,
-		})
-	}
-	for _, item := range []struct {
-		method, path, name string
-		status             int
-	}{
-		{"GET", "/api/v1/admin/users/{id}", "查询新建用户", 200},
-		{"PUT", "/api/v1/admin/users/{id}", "更新新建用户", 200},
-		{"DELETE", "/api/v1/admin/users/{id}", "删除新建用户", 204},
-	} {
-		if ep, ok := byPath[item.method+" "+item.path]; ok && len(adminSteps) >= 2 {
-			adminSteps = append(adminSteps, StepPlan{
-				Name:     item.name,
-				Endpoint: ep,
-				CaseID:   caseMap[ep.ID],
-				RequestOverride: mergeOverrides(
-					bearerAuthOverride(adminLoginSeq),
-					pathIDOverride(createSeq, "body.id"),
-				),
-				ExpectStatus: item.status,
-			})
-		}
-	}
-	if len(adminSteps) > 0 {
-		plans = append(plans, ScenarioPlan{
-			Name:        "管理员 API 全流程",
-			Description: "管理员登录后完成统计、审计与用户 CRUD",
-			Steps:       adminSteps,
-		})
-	}
-
-	return plans
-}
-
-func planGenericCoverage(endpoints []spec.Endpoint, caseMap map[uuid.UUID]uuid.UUID) []ScenarioPlan {
-	groups := map[string][]spec.Endpoint{}
-	for _, ep := range endpoints {
-		tag := "default"
-		if len(ep.Tags) > 0 && strings.TrimSpace(ep.Tags[0]) != "" {
-			tag = ep.Tags[0]
-		}
-		groups[tag] = append(groups[tag], ep)
-	}
-	tags := make([]string, 0, len(groups))
-	for t := range groups {
-		tags = append(tags, t)
-	}
-	sort.Strings(tags)
-
-	var plans []ScenarioPlan
-	for _, tag := range tags {
-		eps := groups[tag]
-		sort.Slice(eps, func(i, j int) bool {
-			a, b := eps[i], eps[j]
-			if priority(a) != priority(b) {
-				return priority(a) < priority(b)
-			}
-			if a.Path == b.Path {
-				return a.Method < b.Method
-			}
-			return a.Path < b.Path
-		})
-
-		steps := make([]StepPlan, 0, len(eps))
-		loginSeq := 0
-		for i, ep := range eps {
-			step := StepPlan{
-				Name:         caseName(ep),
-				Endpoint:     ep,
-				CaseID:       caseMap[ep.ID],
-				ExpectStatus: expectedStatus(ep),
-			}
-			if isLoginEndpoint(ep) {
-				loginSeq = i + 1
-				step.RequestOverride = loginBodyForEndpoint(ep)
-			} else if loginSeq > 0 && needsBearer(ep) {
-				step.RequestOverride = bearerAuthOverride(loginSeq)
-			}
-			steps = append(steps, step)
-		}
+		steps := planGroupSteps(graph, grp, pctx, publicIdx)
 		if len(steps) == 0 {
 			continue
 		}
 		plans = append(plans, ScenarioPlan{
-			Name:        fmt.Sprintf("%s 接口覆盖", tag),
-			Description: fmt.Sprintf("按标签 %s 自动生成，共 %d 个接口步骤", tag, len(steps)),
+			Name:        fmt.Sprintf("%s 接口覆盖", grp.Name),
+			Description: fmt.Sprintf("依赖图驱动，按标签 %s 自动生成 %d 个步骤", grp.Name, len(steps)),
 			Steps:       steps,
 		})
+	}
+	if len(plans) == 0 {
+		// fallback: single scenario in topo order
+		stepSeq := map[int]int{}
+		var steps []StepPlan
+		for i, idx := range graph.TopoOrder {
+			stepSeq[idx] = i + 1
+			steps = append(steps, stepFromEndpoint(graph, idx, pctx, stepSeq))
+		}
+		if len(steps) > 0 {
+			plans = append(plans, ScenarioPlan{
+				Name:        "接口全覆盖",
+				Description: "按依赖拓扑序自动生成",
+				Steps:       steps,
+			})
+		}
 	}
 	return plans
 }
 
-func priority(ep spec.Endpoint) int {
+func planGroupSteps(graph *depgraph.Graph, grp depgraph.ResourceGroup, pctx planContext, skip map[int]bool) []StepPlan {
+	indices := append([]int(nil), grp.Endpoint...)
+	sort.Slice(indices, func(i, j int) bool {
+		return depgraphMethodPriority(graph.Endpoints[indices[i]]) < depgraphMethodPriority(graph.Endpoints[indices[j]])
+	})
+
+	loginIdx := graph.LoginForGroup(grp)
+	stepSeq := map[int]int{}
+	var steps []StepPlan
+	seq := 0
+	if loginIdx >= 0 && !skip[loginIdx] {
+		seq++
+		stepSeq[loginIdx] = seq
+		steps = append(steps, stepFromEndpoint(graph, loginIdx, pctx, stepSeq))
+	}
+	for _, idx := range indices {
+		if skip[idx] || idx == loginIdx {
+			continue
+		}
+		seq++
+		stepSeq[idx] = seq
+		steps = append(steps, stepFromEndpoint(graph, idx, pctx, stepSeq))
+	}
+	return steps
+}
+
+func stepFromEndpoint(graph *depgraph.Graph, idx int, pctx planContext, stepSeq map[int]int) StepPlan {
+	ep := graph.Endpoints[idx]
+	sp := StepPlan{
+		Name:         caseName(ep),
+		Endpoint:     ep,
+		CaseID:       pctx.caseMap[ep.ID],
+		ExpectStatus: expectedStatus(ep),
+	}
+	var parts []json.RawMessage
+	if isLoginEndpoint(ep) {
+		parts = append(parts, loginBodyForEndpoint(ep, pctx))
+		sp.Config = loginStepConfig(ep)
+	} else {
+		if findLoginSeq(graph, idx, stepSeq) > 0 && needsBearer(ep) {
+			parts = append(parts, bearerAuthOverride())
+		}
+		for _, m := range graph.MappingsForConsumer(idx) {
+			prodSeq := stepSeq[m.ProducerIndex]
+			if prodSeq <= 0 {
+				continue
+			}
+			switch m.ConsumerKind {
+			case "path_param":
+				parts = append(parts, pathIDOverride(prodSeq, m.ProducerPath))
+			case "body_field":
+				parts = append(parts, bodyFieldOverride(prodSeq, m.ProducerPath, m.ConsumerTarget))
+			}
+		}
+		if ep.Method == "POST" && strings.Contains(strings.ToLower(ep.Path), "/users") {
+			parts = append(parts, jsonRequestOverride(map[string]any{
+				"body": map[string]any{
+					"name":  "Generated User",
+					"email": "{{$mock.email}}",
+					"role":  "tester",
+				},
+			}))
+		}
+	}
+	sp.RequestOverride = mergeOverrides(parts...)
+	return sp
+}
+
+func findLoginSeq(graph *depgraph.Graph, idx int, stepSeq map[int]int) int {
+	for _, loginIdx := range graph.LoginIndices {
+		if seq, ok := stepSeq[loginIdx]; ok {
+			return seq
+		}
+	}
+	for prodIdx, seq := range stepSeq {
+		if isLoginEndpoint(graph.Endpoints[prodIdx]) && prodIdx < idx {
+			return seq
+		}
+	}
+	return 0
+}
+
+func depgraphMethodPriority(ep spec.Endpoint) int {
 	if isLoginEndpoint(ep) {
 		return 0
 	}
@@ -456,11 +389,22 @@ func needsBearer(ep spec.Endpoint) bool {
 	return len(sec) > 0
 }
 
-func loginBodyForEndpoint(ep spec.Endpoint) json.RawMessage {
-	if strings.Contains(ep.Path, "/admin/") {
-		return loginRequestOverride("admin-root", "admin123")
+func loginBodyForEndpoint(ep spec.Endpoint, pctx planContext) json.RawMessage {
+	admin := strings.Contains(strings.ToLower(ep.Path), "/admin/")
+	var savedCaseRaw json.RawMessage
+	if caseID := pctx.caseMap[ep.ID]; caseID != uuid.Nil {
+		savedCaseRaw = pctx.caseRequest[caseID]
 	}
-	return loginRequestOverride("admin", "admin123")
+	raw, _, _ := BuildLoginRequestBody(ep, savedCaseRaw, pctx.creds, admin)
+	return raw
+}
+
+func loginCredentials(ep spec.Endpoint) (string, string) {
+	user, pass, _ := ResolveLoginCredentials(
+		strings.Contains(strings.ToLower(ep.Path), "/admin/"),
+		nil, "", "",
+	)
+	return user, pass
 }
 
 func expectedStatus(ep spec.Endpoint) int {
@@ -471,67 +415,6 @@ func expectedStatus(ep spec.Endpoint) int {
 		return 204
 	}
 	return 200
-}
-
-func indexEndpoints(endpoints []spec.Endpoint) map[string]spec.Endpoint {
-	out := make(map[string]spec.Endpoint, len(endpoints))
-	for _, ep := range endpoints {
-		out[strings.ToUpper(ep.Method)+" "+ep.Path] = ep
-	}
-	return out
-}
-
-func mergeOverrides(parts ...json.RawMessage) json.RawMessage {
-	headers := map[string]string{}
-	variables := map[string]string{}
-	var body any
-	for _, raw := range parts {
-		if len(raw) == 0 {
-			continue
-		}
-		var chunk map[string]any
-		if json.Unmarshal(raw, &chunk) != nil {
-			continue
-		}
-		if h, ok := chunk["headers"].(map[string]any); ok {
-			for k, v := range h {
-				headers[k] = fmt.Sprint(v)
-			}
-		}
-		if h, ok := chunk["headers"].(map[string]string); ok {
-			for k, v := range h {
-				headers[k] = v
-			}
-		}
-		if v, ok := chunk["variables"].(map[string]any); ok {
-			for k, val := range v {
-				variables[k] = fmt.Sprint(val)
-			}
-		}
-		if v, ok := chunk["variables"].(map[string]string); ok {
-			for k, val := range v {
-				variables[k] = val
-			}
-		}
-		if b, ok := chunk["body"]; ok {
-			body = b
-		}
-	}
-	out := map[string]any{}
-	if len(headers) > 0 {
-		out["headers"] = headers
-	}
-	if len(variables) > 0 {
-		out["variables"] = variables
-	}
-	if body != nil {
-		out["body"] = body
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	raw, _ := json.Marshal(out)
-	return raw
 }
 
 func (g *Generator) createScenario(ctx context.Context, projectID, serviceID uuid.UUID, plan ScenarioPlan) (*CreatedScenario, error) {
@@ -547,12 +430,7 @@ func (g *Generator) createScenario(ctx context.Context, projectID, serviceID uui
 
 	created := make([]scenario.Step, 0, len(plan.Steps))
 	for i, sp := range plan.Steps {
-		var cfg json.RawMessage
-		if sp.ExpectStatus != 0 && sp.ExpectStatus != 200 {
-			cfg, _ = json.Marshal(map[string]any{
-				"assertions": []map[string]any{{"type": "status_code", "expected": sp.ExpectStatus}},
-			})
-		}
+		cfg := mergeStepConfig(sp.Config, statusAssertionConfig(sp.ExpectStatus))
 		input := scenario.UpsertStepInput{
 			StepOrder:  i + 1,
 			StepType:   scenario.StepTypeAPI,

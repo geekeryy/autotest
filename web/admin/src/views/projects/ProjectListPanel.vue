@@ -6,7 +6,7 @@
         <span>新建项目</span>
       </el-button>
     </div>
-    <p class="sidebar-hint">点击项目即设为当前全局项目；可用快捷入口打开右侧「服务与环境」或「业务数据源」。</p>
+    <p class="sidebar-hint">点击项目即设为当前全局项目，右侧将同步展示该项目的服务与环境。</p>
 
     <el-scrollbar class="sidebar-scroll">
       <div v-loading="loading" class="sidebar-list">
@@ -31,8 +31,6 @@
           <p v-if="row.description" class="sidebar-item-desc" :title="row.description">{{ row.description }}</p>
           <div class="sidebar-item-meta">{{ formatDateTime(row.createdAt) }}</div>
           <div class="sidebar-item-actions" @click.stop>
-            <el-button link type="primary" size="small" @click="openServices(row)">环境</el-button>
-            <el-button link type="primary" size="small" @click="openDataSources(row)">数据源</el-button>
             <el-button link type="primary" size="small" @click="openMembers(row)">成员</el-button>
             <el-popconfirm
               title="删除后项目及关联数据将被软删除，确认删除？"
@@ -212,14 +210,6 @@ export default {
       } finally {
         this.loading = false
       }
-    },
-    openServices(row) {
-      setCurrentProjectId(row.id)
-      this.$router.replace({ path: '/projects', query: { tab: 'services' } })
-    },
-    openDataSources(row) {
-      setCurrentProjectId(row.id)
-      this.$router.replace({ path: '/projects', query: { tab: 'dataSources' } })
     },
     async openMembers(row) {
       this.currentProject = row

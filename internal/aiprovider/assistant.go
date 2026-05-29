@@ -32,6 +32,7 @@ import (
 	"strings"
 	"time"
 
+	"autotest/internal/aiconfig"
 	"autotest/internal/aiprovider/client"
 	"autotest/internal/aitools"
 
@@ -77,6 +78,7 @@ const (
 	StreamEventError          StreamEventKind = "error"           // 致命错误（流提前结束）
 	StreamEventSession        StreamEventKind = "session"         // 会话元数据更新（如 AI 生成标题）
 	StreamEventUsage          StreamEventKind = "usage"           // 单轮 LLM 调用的 token / 缓存明细（debug）
+	StreamEventGenJobProgress StreamEventKind = "gen_job_progress" // 场景生成/验证任务进度
 )
 
 // AssistantStreamEvent is the high-level event that the SSE handler
@@ -103,6 +105,29 @@ type AssistantStreamEvent struct {
 	Session *StoredSession `json:"session,omitempty"`
 	// Usage is set when Kind == StreamEventUsage (debug mode).
 	Usage *AssistantUsageDetail `json:"usage,omitempty"`
+	// GenJobProgress is set when Kind == StreamEventGenJobProgress.
+	GenJobProgress *AssistantGenJobProgress `json:"genJobProgress,omitempty"`
+}
+
+// AssistantGenJobProgress reports async scenario generation job state.
+type AssistantGenJobProgress struct {
+	JobID     string  `json:"jobId"`
+	Status    string  `json:"status"`
+	Round     int     `json:"round"`
+	MaxRounds int     `json:"maxRounds"`
+	Phase     string  `json:"phase"`
+	PassRate  float64 `json:"passRate"`
+	Message   string  `json:"message,omitempty"`
+	Repairs   []AssistantGenRepairSummary `json:"repairs,omitempty"`
+}
+
+// AssistantGenRepairSummary is one auto-repair action in a gen job round.
+type AssistantGenRepairSummary struct {
+	ScenarioID string `json:"scenarioId"`
+	StepID     string `json:"stepId,omitempty"`
+	Category   string `json:"category"`
+	Action     string `json:"action"`
+	Detail     string `json:"detail,omitempty"`
 }
 
 // AssistantThinkingState reports reasoning activity without exposing the
@@ -170,6 +195,23 @@ type SessionStore interface {
 	GetSession(ctx context.Context, projectID, userID, sessionID uuid.UUID) (*StoredSession, error)
 	// UpdateSessionTitle renames a session owned by the user.
 	UpdateSessionTitle(ctx context.Context, projectID, userID, sessionID uuid.UUID, title string) (*StoredSession, error)
+	// AppendRoutingLog persists one routing observation row for the session.
+	// This is write-only telemetry (Shadow compare / offline eval) and does
+	// not affect the SSE schema or session isolation boundary.
+	AppendRoutingLog(ctx context.Context, input RoutingLogInput) error
+}
+
+// RoutingLogInput is the projection forwarded to the session store when
+// recording routing telemetry for a user message. planner / router / per-hop
+// payloads are carried as json.RawMessage so aiprovider stays decoupled from
+// the concrete planner/router types and the aisession package.
+type RoutingLogInput struct {
+	SessionID     uuid.UUID
+	MessageSeq    int
+	PlannerOutput json.RawMessage
+	RouterOutput  json.RawMessage
+	PerHop        json.RawMessage
+	Outcome       string
 }
 
 // StoredMessage is the abstract record returned by the session store.
@@ -253,6 +295,24 @@ type streamConfig struct {
 	// (set before runStreamLoop even if history reload lags).
 	TurnHasImages bool
 	DebugEnabled  bool
+
+	// --- On-demand tool surface (Planner/Router/meta) ---
+	// Catalog indexes the full tool set for find_tools / describe_tools and
+	// for per-hop narrowing. Nil disables the on-demand surface entirely
+	// (legacy full-tools behaviour).
+	Catalog *aitools.Catalog
+	// ActiveTools is the Router's initial tool package (names). Folded into
+	// the per-hop active set when narrowing is enabled.
+	ActiveTools map[string]bool
+	// DescribedTools accumulates names the model expanded via describe_tools;
+	// each becomes mountable on subsequent hops.
+	DescribedTools map[string]bool
+	// WebSearchEnabled is retained so per-hop narrowing can re-merge the
+	// Xiaomi web_search definition the same way prepareStreamConfig did.
+	WebSearchEnabled *bool
+	// Routing accumulates planner/router/per-hop telemetry for
+	// ai_routing_logs and carries the gray-rollout mode + confidence.
+	Routing *routingState
 }
 
 // ChatStreamWithTools is the entry point for SSE assistant chats. The
@@ -337,6 +397,13 @@ func (s *Service) ChatStreamWithTools(
 	}
 	cfg.TurnHasImages = len(imageAtts) > 0
 
+	// On-demand tool surface: run Planner→Router before the loop. Always
+	// computed (and logged) when configured; whether the LLM actually sees
+	// a narrowed package is governed by the gray-rollout RoutingMode.
+	if s.routingConfigured() {
+		s.applyRouting(ctx, cfg, cli, provider, userText, req.PageContext, userMsg.Seq)
+	}
+
 	titleDone := closedDoneChan()
 	if session, err := store.GetSession(ctx, projectID, userID, req.SessionID); err == nil {
 		userCount, _ := userMessageSnapshot(ctx, store, req.SessionID, 2)
@@ -345,6 +412,9 @@ func (s *Service) ChatStreamWithTools(
 		}
 	}
 	streamErr := s.runStreamLoop(ctx, cfg)
+	// Persist routing telemetry (shadow compare / offline eval). Best-effort:
+	// failures are logged, never surfaced.
+	s.finalizeRoutingLog(ctx, cfg, store, streamErr)
 	// Title generation runs in parallel with the main stream but must finish
 	// (or time out) before the handler returns; otherwise the SSE connection
 	// closes and the client never receives StreamEventSession.
@@ -424,6 +494,16 @@ func (s *Service) ContinueAfterConfirm(
 		return s.streamFail(sink, err)
 	}
 
+	// On resume we do NOT re-run the Planner; recover a tool package from
+	// page context via the Router so confirm-time tool availability holds.
+	if s.routingConfigured() {
+		seq := 0
+		if pendingMsg != nil {
+			seq = pendingMsg.Seq
+		}
+		s.recoverRouting(cfg, pageContext, seq)
+	}
+
 	// Execute (or skip) the mutating tool and persist a corresponding tool
 	// message regardless of outcome — both the model and the user need a
 	// record that the call was decided.
@@ -482,14 +562,17 @@ func (s *Service) ContinueAfterConfirm(
 		}
 	}
 
-	return s.runStreamLoop(ctx, cfg)
+	streamErr := s.runStreamLoop(ctx, cfg)
+	s.finalizeRoutingLog(ctx, cfg, store, streamErr)
+	return streamErr
 }
 
 // AssistantConfirmDecision captures the user's resolution of a mutating
 // tool call.
 type AssistantConfirmDecision struct {
-	Approve bool
-	Reason  string
+	Approve        bool
+	Reason         string
+	ToolArguments  json.RawMessage
 }
 
 // prepareStreamConfig wires together everything the loop needs.
@@ -520,7 +603,7 @@ func (s *Service) prepareStreamConfig(
 		Tools:       toolDefs,
 	}
 	baseOpts.CollectUsage = true
-	return &streamConfig{
+	cfg := &streamConfig{
 		ProjectID: projectID,
 		SessionID: req.SessionID,
 		UserID:    userID,
@@ -531,11 +614,23 @@ func (s *Service) prepareStreamConfig(
 		Tools:     toolMap,
 		ToolDefs:  toolDefs,
 		BaseOpts:       baseOpts,
-		HopBudget:      MaxToolHops,
-		PageContext:    req.PageContext,
-		VisionEnabled:  false,
-		DebugEnabled:   debugEnabled,
-	}, nil
+		HopBudget:        aiconfig.MaxToolHops(),
+		PageContext:      req.PageContext,
+		VisionEnabled:    false,
+		DebugEnabled:     debugEnabled,
+		WebSearchEnabled: req.WebSearchEnabled,
+	}
+	// Engage the on-demand tool surface when fully configured. ActiveTools
+	// is filled later by the Router (ChatStreamWithTools) or recovered from
+	// page context (ContinueAfterConfirm). Routing telemetry is always
+	// recorded in this case, even in shadow mode.
+	if s.routingConfigured() {
+		cfg.Catalog = s.catalog
+		cfg.ActiveTools = map[string]bool{}
+		cfg.DescribedTools = map[string]bool{}
+		cfg.Routing = &routingState{Enabled: true, Mode: s.routingModeEffective()}
+	}
+	return cfg, nil
 }
 
 func assistantThinkingOverride(provider *providerRow, enabled *bool, effort string) *client.OpenAIThinkingConfig {
@@ -577,9 +672,20 @@ func (s *Service) runStreamLoop(ctx context.Context, cfg *streamConfig) error {
 	messages := buildClientMessages(history, cfg.PageContext, cfg.ProfileContext, cfg.VisionEnabled)
 	initialHopBudget := cfg.HopBudget
 
+	// Stamp a per-stream describe collector so describe_tools can report
+	// expanded tool names back to this loop (see meta_tools.go). Each hop
+	// folds the accumulated names into cfg.DescribedTools before computing
+	// the next hop's tool surface.
+	describeCollector := aitools.NewDescribeCollector()
+	ctx = aitools.WithDescribeCollector(ctx, describeCollector)
+
 	for cfg.HopBudget > 0 {
 		cfg.HopBudget--
 		hopIndex := initialHopBudget - cfg.HopBudget
+
+		// Fold any tools the model expanded via describe_tools on a prior
+		// hop into the active set so they are mounted from now on.
+		cfg.mergeDescribedNames(describeCollector.Names())
 
 		streamingCli, ok := cfg.Cli.(client.StreamingClient)
 		if !ok {
@@ -614,8 +720,12 @@ func (s *Service) runStreamLoop(ctx context.Context, cfg *streamConfig) error {
 		// Compose options for this hop: the base options plus the running
 		// conversation. We deliberately reuse cfg.BaseOpts (rather than
 		// mutating it) so a future caller can run multiple hops with the
-		// same config.
+		// same config. The tool definitions shipped to the LLM are
+		// (re)computed every hop so on-demand narrowing + describe_tools
+		// expansion take effect; cfg.Tools (the execution map) stays full.
 		opts := cfg.BaseOpts
+		hopDefs, offeredNames, hopNarrowed := cfg.hopToolDefs()
+		opts.Tools = hopDefs
 
 		if err := streamingCli.ChatStream(ctx, messages, opts, func(ev client.StreamEvent) error {
 			switch ev.Kind {
@@ -662,6 +772,11 @@ func (s *Service) runStreamLoop(ctx context.Context, cfg *streamConfig) error {
 		// Xiaomi web_search is executed by the provider; strip it before our loop.
 		toolCalls = filterProviderNativeToolCalls(toolCalls)
 
+		// Record this hop's tool exposure for offline routing metrics
+		// (Tool Recall@Hop1 / Mis-route Rate / Token per Task ...). This is
+		// telemetry only and never affects the conversation flow.
+		cfg.Routing.recordHop(hopIndex, offeredNames, toolCalls, hopUsage.PromptTokens, hopNarrowed)
+
 		// 1) No tool calls -> final assistant message, end of stream.
 		if len(toolCalls) == 0 {
 			msg, err := cfg.Store.AppendMessage(ctx, cfg.SessionID, StoredMessageInput{
@@ -682,6 +797,7 @@ func (s *Service) runStreamLoop(ctx context.Context, cfg *streamConfig) error {
 			if err := cfg.Sink(AssistantStreamEvent{Kind: StreamEventMessage, Message: toPersisted(msg)}); err != nil {
 				return err
 			}
+			cfg.setOutcome("success")
 			return cfg.Sink(AssistantStreamEvent{Kind: StreamEventDone, Model: model, Finish: finish})
 		}
 
@@ -691,7 +807,11 @@ func (s *Service) runStreamLoop(ctx context.Context, cfg *streamConfig) error {
 		autoCalls := pickAutoExecute(toolCalls, cfg.Tools)
 
 		if len(autoCalls) > 0 {
-			storedCalls := toStoredCalls(toolCalls, cfg.Tools)
+			// Persist only auto-executable calls on the final assistant row.
+			// RequiresConfirm calls are stored separately on a pending_confirm
+			// row so the frontend does not render stale confirm buttons on
+			// this message after auto tools finish in the same hop.
+			storedCalls := toStoredCalls(autoCalls, cfg.Tools)
 			payload, err := json.Marshal(storedCalls)
 			if err != nil {
 				return s.streamFail(cfg.Sink, fmt.Errorf("序列化工具调用失败: %w", err))
@@ -719,14 +839,14 @@ func (s *Service) runStreamLoop(ctx context.Context, cfg *streamConfig) error {
 				Role:             "assistant",
 				Content:          textBuf.String(),
 				ReasoningContent: reasoningBuf.String(),
-				ToolCalls:        toolCalls,
+				ToolCalls:        autoCalls,
 			})
 			for _, call := range autoCalls {
 				ac := toAssistantCall(call, cfg.Tools)
 				if err := cfg.Sink(AssistantStreamEvent{Kind: StreamEventToolCall, ToolCall: &ac}); err != nil {
 					return err
 				}
-				content := executeToolCall(ctx, cfg.Tools, call)
+				content := executeToolCall(toolExecutionContext(ctx, cfg, cfg.Sink), cfg.Tools, call)
 				toolMsg, err := cfg.Store.AppendMessage(ctx, cfg.SessionID, StoredMessageInput{
 					Role:       "tool",
 					Content:    content,
@@ -755,7 +875,8 @@ func (s *Service) runStreamLoop(ctx context.Context, cfg *streamConfig) error {
 		}
 
 		if len(confirmCalls) > 0 {
-			storedCalls := toStoredCalls(toolCalls, cfg.Tools)
+			confirmClient := assistantCallsToClient(confirmCalls)
+			storedCalls := toStoredCalls(confirmClient, cfg.Tools)
 			payload, err := json.Marshal(storedCalls)
 			if err != nil {
 				return s.streamFail(cfg.Sink, fmt.Errorf("序列化工具调用失败: %w", err))
@@ -804,6 +925,7 @@ func (s *Service) runStreamLoop(ctx context.Context, cfg *streamConfig) error {
 					return err
 				}
 			}
+			cfg.setOutcome("pending_confirm")
 			return cfg.Sink(AssistantStreamEvent{Kind: StreamEventDone, Model: model, Finish: "pending_confirm"})
 		}
 
@@ -846,11 +968,14 @@ func (s *Service) runStreamLoop(ctx context.Context, cfg *streamConfig) error {
 		})
 
 		for _, call := range toolCalls {
+			if tool, ok := cfg.Tools[call.Name]; ok && tool.RequiresConfirm {
+				return s.streamFail(cfg.Sink, fmt.Errorf("写工具 %s 需用户确认，不应自动执行", call.Name))
+			}
 			ac := toAssistantCall(call, cfg.Tools)
 			if err := cfg.Sink(AssistantStreamEvent{Kind: StreamEventToolCall, ToolCall: &ac}); err != nil {
 				return err
 			}
-			content := executeToolCall(ctx, cfg.Tools, call)
+			content := executeToolCall(toolExecutionContext(ctx, cfg, cfg.Sink), cfg.Tools, call)
 			toolMsg, err := cfg.Store.AppendMessage(ctx, cfg.SessionID, StoredMessageInput{
 				Role:       "tool",
 				Content:    content,
@@ -879,7 +1004,8 @@ func (s *Service) runStreamLoop(ctx context.Context, cfg *streamConfig) error {
 	}
 
 	// Loop budget exhausted: surface a soft fail to the user and close.
-	if err := cfg.Sink(AssistantStreamEvent{Kind: StreamEventText, Text: fmt.Sprintf("\n\n（AI 在 %d 轮工具调用后仍未给出结论，已停止。请缩小问题范围或在下一轮中给出更明确的指令。）", MaxToolHops)}); err != nil {
+	cfg.setOutcome("hop_exhausted")
+	if err := cfg.Sink(AssistantStreamEvent{Kind: StreamEventText, Text: fmt.Sprintf("\n\n（AI 在 %d 轮工具调用后仍未给出结论，已停止。请缩小问题范围或在下一轮中给出更明确的指令。）", aiconfig.MaxToolHops())}); err != nil {
 		return err
 	}
 	return cfg.Sink(AssistantStreamEvent{Kind: StreamEventDone, Finish: "hop_budget_exhausted"})
@@ -929,7 +1055,11 @@ func (s *Service) applyDecision(ctx context.Context, cfg *streamConfig, call Sto
 	if !tool.RequiresConfirm {
 		return encodeToolError(fmt.Sprintf("工具 %s 不需要人工确认，拒绝通过确认接口执行", call.Name)), true
 	}
-	value, err := tool.Run(ctx, call.Arguments)
+	args := call.Arguments
+	if len(decision.ToolArguments) > 0 && json.Valid(decision.ToolArguments) {
+		args = decision.ToolArguments
+	}
+	value, err := tool.Run(ctx, args)
 	if err != nil {
 		return encodeToolError(err.Error()), true
 	}
@@ -1088,6 +1218,21 @@ func toAssistantCallPtr(c client.ToolCall, tool aitools.Tool) *AssistantToolCall
 	return &ac
 }
 
+func assistantCallsToClient(calls []*AssistantToolCall) []client.ToolCall {
+	out := make([]client.ToolCall, 0, len(calls))
+	for _, c := range calls {
+		if c == nil {
+			continue
+		}
+		out = append(out, client.ToolCall{
+			ID:        c.ID,
+			Name:      c.Name,
+			Arguments: c.Arguments,
+		})
+	}
+	return out
+}
+
 // toStoredCalls produces the JSON-serialisable shape persisted in
 // ai_messages.tool_calls.
 func toStoredCalls(calls []client.ToolCall, tools map[string]aitools.Tool) []StoredToolCall {
@@ -1192,7 +1337,6 @@ func (cfg *streamConfig) emitUsageIfNeeded(detail *AssistantUsageDetail) error {
 	return cfg.Sink(AssistantStreamEvent{Kind: StreamEventUsage, Usage: detail})
 }
 
-// toPersisted is the StoredMessage -> PersistedMessage adapter.
 func toPersisted(m *StoredMessage) *PersistedMessage {
 	if m == nil {
 		return nil
@@ -1210,4 +1354,35 @@ func toPersisted(m *StoredMessage) *PersistedMessage {
 		UsageDetails: m.UsageDetails,
 		CreatedAt:    m.CreatedAt,
 	}
+}
+
+func toolContextWithProgress(ctx context.Context, sink StreamCallback) context.Context {
+	if sink == nil {
+		return ctx
+	}
+	return aitools.WithGenJobProgress(ctx, func(p aitools.GenJobProgress) error {
+		repairs := make([]AssistantGenRepairSummary, 0, len(p.Repairs))
+		for _, r := range p.Repairs {
+			repairs = append(repairs, AssistantGenRepairSummary{
+				ScenarioID: r.ScenarioID,
+				StepID:     r.StepID,
+				Category:   r.Category,
+				Action:     r.Action,
+				Detail:     r.Detail,
+			})
+		}
+		return sink(AssistantStreamEvent{
+			Kind: StreamEventGenJobProgress,
+			GenJobProgress: &AssistantGenJobProgress{
+				JobID:     p.JobID,
+				Status:    p.Status,
+				Round:     p.Round,
+				MaxRounds: p.MaxRounds,
+				Phase:     p.Phase,
+				PassRate:  p.PassRate,
+				Message:   p.Message,
+				Repairs:   repairs,
+			},
+		})
+	})
 }

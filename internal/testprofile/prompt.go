@@ -71,7 +71,7 @@ func FormatProfileForPrompt(profile *Profile) string {
 				strings.ToUpper(dep.SourceMethod), dep.SourcePath, dep.SourceField,
 				strings.ToUpper(dep.TargetMethod), dep.TargetPath, dep.TargetField))
 		}
-		sb.WriteString("场景步骤中应使用 `{{$steps[N].response.body.xxx}}` 传递依赖数据。\n\n")
+		sb.WriteString("场景步骤中应使用 `{{$steps[N].body.xxx}}` 传递依赖数据（N 为 step_seq）。\n\n")
 	}
 
 	return sb.String()

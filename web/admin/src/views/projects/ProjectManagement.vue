@@ -3,7 +3,7 @@
     <div class="page-header project-mgmt-header">
       <div>
         <h2 class="page-title">项目管理</h2>
-        <p class="page-subtitle">左侧选择项目（与顶部全局项目同步）；右侧维护该项目下的服务与环境。业务数据源、AI 提供商与 Prompt 管理已移至「平台资源」。</p>
+        <p class="page-subtitle">左侧选择项目（与顶部全局项目同步）；右侧维护该项目下的服务与环境。</p>
       </div>
     </div>
 

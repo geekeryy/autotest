@@ -43,6 +43,7 @@ func (s *Service) executeDatabaseScenarioStep(
 	step scenario.Step,
 	env project.Environment,
 	baseVars map[string]string,
+	steps []scenario.Step,
 	stepOutputs map[int]any,
 	_ *templating.MockExpanderConfig,
 ) (*report.Result, map[string]any, error) {
@@ -58,8 +59,8 @@ func (s *Service) executeDatabaseScenarioStep(
 
 	// Build per-step vars with step refs injected from SQL and inputParams.
 	stepVars := copyVars(baseVars)
-	injectStepRefs(cfg.SQL, stepOutputs, stepVars)
-	injectStepRefs(string(cfg.InputParams), stepOutputs, stepVars)
+	injectStepRefs(cfg.SQL, stepOutputs, steps, stepVars)
+	injectStepRefs(string(cfg.InputParams), stepOutputs, steps, stepVars)
 
 	sqlResult, err := s.params.ExecuteSQLStep(ctx, env.ProjectID, env.ServiceID, env.ID, paramsource.SQLStepInput{
 		DataSourceID:  cfg.DataSourceID,
@@ -108,6 +109,7 @@ func (s *Service) executeScriptScenarioStep(
 	runID uuid.UUID,
 	step scenario.Step,
 	baseVars map[string]string,
+	steps []scenario.Step,
 	stepOutputs map[int]any,
 	mockCfg *templating.MockExpanderConfig,
 ) (*report.Result, map[string]any, error) {
@@ -128,7 +130,7 @@ func (s *Service) executeScriptScenarioStep(
 
 	// Template pass: step refs and {{var}} in the script source.
 	stepVars := copyVars(baseVars)
-	injectStepRefs(scriptSrc, stepOutputs, stepVars)
+	injectStepRefs(scriptSrc, stepOutputs, steps, stepVars)
 	rendered := renderVariables(scriptSrc, stepVars, mockCfg)
 
 	// JS runtime variables: scenario + run input only (not temporary $steps[] keys).
