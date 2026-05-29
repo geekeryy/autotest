@@ -311,7 +311,7 @@
         <div v-if="state.pendingCalls.length" class="ai-pending-block">
           <div class="ai-pending-title">
             <el-icon><Warning /></el-icon>
-            <span>{{ state.pendingCalls.length }} 项写操作等待确认</span>
+            <span>{{ state.pendingCalls.length }} 项删除操作等待确认</span>
           </div>
           <AIToolCallConfirm
             v-for="call in state.pendingCalls"
@@ -427,7 +427,7 @@
           </div>
         </div>
         <div class="ai-composer-footer" :class="{ 'ai-composer-footer--page': isPageLayout }">
-          <span class="ai-composer-hint" v-if="state.pendingCalls.length">先处理上方等待确认的写操作</span>
+          <span class="ai-composer-hint" v-if="state.pendingCalls.length">先处理上方等待确认的删除操作</span>
           <span class="ai-composer-hint" v-else>Enter 换行 · {{ sendShortcutHint }} 发送</span>
           <ModelSettingsPopover
             v-if="isPageLayout"

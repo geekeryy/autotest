@@ -34,6 +34,27 @@ func (f *fakeProjectService) ListEnvironments(_ context.Context, _ uuid.UUID) ([
 func (f *fakeProjectService) ListServiceEnvironments(_ context.Context, _, _ uuid.UUID) ([]project.Environment, error) {
 	return nil, nil
 }
+func (f *fakeProjectService) CreateService(_ context.Context, _ uuid.UUID, _ project.CreateServiceInput) (*project.Service, error) {
+	return nil, errors.New("not implemented")
+}
+func (f *fakeProjectService) UpdateService(_ context.Context, _, _ uuid.UUID, _ project.UpdateServiceInput) (*project.Service, error) {
+	return nil, errors.New("not implemented")
+}
+func (f *fakeProjectService) DeleteService(_ context.Context, _, _ uuid.UUID) error {
+	return errors.New("not implemented")
+}
+func (f *fakeProjectService) CreateServiceEnvironment(_ context.Context, _, _ uuid.UUID, _ project.CreateEnvironmentInput) (*project.Environment, error) {
+	return nil, errors.New("not implemented")
+}
+func (f *fakeProjectService) UpdateServiceEnvironment(_ context.Context, _, _, _ uuid.UUID, _ project.UpdateEnvironmentInput) (*project.Environment, error) {
+	return nil, errors.New("not implemented")
+}
+func (f *fakeProjectService) DeleteServiceEnvironment(_ context.Context, _, _, _ uuid.UUID) error {
+	return errors.New("not implemented")
+}
+func (f *fakeProjectService) GetServiceEnvironment(_ context.Context, _, _, _ uuid.UUID) (*project.Environment, error) {
+	return nil, errors.New("not implemented")
+}
 
 // listServicesTool ignores any args entirely — the schema no longer
 // exposes projectId, and the implementation always reaches for the
@@ -179,6 +200,10 @@ func (r *recordingCaseService) CreateManual(ctx context.Context, input testcase.
 
 func (r *recordingCaseService) CreateSaved(_ context.Context, _ uuid.UUID, _ testcase.CreateSavedInput) (*testcase.TestCase, error) {
 	return nil, errors.New("recordingCaseService.CreateSaved not configured")
+}
+
+func (r *recordingCaseService) UpsertGenerated(_ context.Context, _ testcase.Draft) (*testcase.TestCase, error) {
+	return nil, errors.New("recordingCaseService.UpsertGenerated not configured")
 }
 
 func (r *recordingCaseService) Patch(ctx context.Context, id uuid.UUID, input testcase.PatchInput) (*testcase.TestCase, error) {

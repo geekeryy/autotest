@@ -295,6 +295,7 @@ func TestAssistantChatSystemContainsScenarioWorkflow(t *testing.T) {
 		"list_endpoints",
 		"list_cases",
 		"create_case_from_endpoint",
+		"generate_coverage_scenarios",
 		"create_scenario_with_steps",
 		"add_scenario_step",
 		"update_scenario_step",

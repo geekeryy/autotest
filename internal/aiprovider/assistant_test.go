@@ -115,24 +115,28 @@ func TestBuildClientMessages_SkipsEmptyPageContext(t *testing.T) {
 	}
 }
 
-// TestPickMutating_FiltersByToolFlag ensures we only treat tools whose
-// registry entry has Mutating=true as confirmation-worthy.
-func TestPickMutating_FiltersByToolFlag(t *testing.T) {
+// TestPickRequiresConfirm_FiltersByToolFlag ensures only delete-style tools suspend the stream.
+func TestPickRequiresConfirm_FiltersByToolFlag(t *testing.T) {
 	tools := map[string]aitools.Tool{
-		"get_case":               {Name: "get_case", Mutating: false, Run: noopRun},
-		"update_case_assertions": {Name: "update_case_assertions", Mutating: true, Run: noopRun},
+		"get_case":            {Name: "get_case", Run: noopRun},
+		"update_case":         {Name: "update_case", Mutating: true, Run: noopRun},
+		"delete_scenario":     {Name: "delete_scenario", Mutating: true, RequiresConfirm: true, Run: noopRun},
 	}
 	calls := []client.ToolCall{
 		{ID: "c1", Name: "get_case", Arguments: json.RawMessage(`{}`)},
-		{ID: "c2", Name: "update_case_assertions", Arguments: json.RawMessage(`{"caseId":"x"}`)},
-		{ID: "c3", Name: "unknown_tool", Arguments: json.RawMessage(`{}`)},
+		{ID: "c2", Name: "update_case", Arguments: json.RawMessage(`{"caseId":"x"}`)},
+		{ID: "c3", Name: "delete_scenario", Arguments: json.RawMessage(`{"scenarioId":"y"}`)},
 	}
-	got := pickMutating(calls, tools)
+	got := pickRequiresConfirm(calls, tools)
 	if len(got) != 1 {
-		t.Fatalf("expected exactly one mutating call, got %d", len(got))
+		t.Fatalf("expected exactly one confirm call, got %d", len(got))
 	}
-	if got[0].ID != "c2" || !got[0].Mutating {
-		t.Fatalf("unexpected mutating projection: %+v", got[0])
+	if got[0].ID != "c3" || !got[0].RequiresConfirm {
+		t.Fatalf("unexpected confirm projection: %+v", got[0])
+	}
+	auto := pickAutoExecute(calls, tools)
+	if len(auto) != 2 {
+		t.Fatalf("expected two auto calls, got %d", len(auto))
 	}
 }
 
@@ -153,8 +157,8 @@ func TestToStoredCalls_TagsMutatingFlag(t *testing.T) {
 	if len(stored) != 2 {
 		t.Fatalf("expected 2 entries, got %d", len(stored))
 	}
-	if stored[0].Mutating || !stored[1].Mutating {
-		t.Fatalf("mutating flag mismatch: %+v", stored)
+	if stored[0].Mutating || !stored[1].Mutating || stored[1].RequiresConfirm {
+		t.Fatalf("tool flag mismatch: %+v", stored)
 	}
 	// 序列化结果可以反序列化回相同的形状。
 	body, err := json.Marshal(stored)

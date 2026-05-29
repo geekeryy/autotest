@@ -89,6 +89,15 @@ func (f *fakeScenarioService) Update(_ context.Context, id uuid.UUID, input scen
 	return sc, nil
 }
 
+func (f *fakeScenarioService) Delete(_ context.Context, id uuid.UUID) error {
+	if _, ok := f.scenarios[id]; !ok {
+		return scenario.ErrScenarioNotFound
+	}
+	delete(f.scenarios, id)
+	delete(f.stepsByOS, id)
+	return nil
+}
+
 func (f *fakeScenarioService) UpsertStep(_ context.Context, scenarioID uuid.UUID, input scenario.UpsertStepInput) (*scenario.Step, error) {
 	if f.upsertErr != nil {
 		return nil, f.upsertErr
@@ -644,6 +653,10 @@ func (c *capturingCaseService) CreateManual(_ context.Context, input testcase.Cr
 
 func (c *capturingCaseService) Patch(_ context.Context, _ uuid.UUID, _ testcase.PatchInput) (*testcase.TestCase, error) {
 	return nil, errors.New("capturingCaseService.Patch not implemented in test")
+}
+
+func (c *capturingCaseService) UpsertGenerated(_ context.Context, _ testcase.Draft) (*testcase.TestCase, error) {
+	return nil, errors.New("capturingCaseService.UpsertGenerated not implemented in test")
 }
 
 func mustJSON(t *testing.T, v any) json.RawMessage {

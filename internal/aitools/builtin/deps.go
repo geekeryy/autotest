@@ -4,10 +4,12 @@ import (
 	"context"
 
 	testcase "autotest/internal/case"
+	"autotest/internal/generator"
 	"autotest/internal/mockserver"
 	"autotest/internal/mockset"
 	"autotest/internal/paramsource"
 	"autotest/internal/project"
+	"autotest/internal/report"
 	"autotest/internal/runner"
 	"autotest/internal/scenario"
 	"autotest/internal/scriptlibrary"
@@ -26,16 +28,18 @@ import (
 // lets the AI surface the missing capability back to the user instead of
 // crashing the request.
 type Deps struct {
-	Cases       CaseService
-	Scenarios   ScenarioService
-	Specs       SpecRepository
-	Projects    ProjectService
-	ParamSource ParamSourceService
-	TestData    TestDataService
-	MockServers MockServerService
-	MockSets    MockSetService
-	Scripts     ScriptLibraryService
-	Runs        RunsService
+	Cases        CaseService
+	Scenarios    ScenarioService
+	Specs        SpecRepository
+	Generator    *generator.Generator
+	SpecImporter SpecImporter
+	Projects     ProjectService
+	ParamSource  ParamSourceService
+	TestData     TestDataService
+	MockServers  MockServerService
+	MockSets     MockSetService
+	Scripts      ScriptLibraryService
+	Runs         RunsService
 }
 
 // CaseService is the slice of `internal/case.Service` we depend on.
@@ -46,6 +50,7 @@ type CaseService interface {
 	CreateManual(ctx context.Context, input testcase.CreateManualInput) (*testcase.TestCase, error)
 	CreateSaved(ctx context.Context, parentCaseID uuid.UUID, input testcase.CreateSavedInput) (*testcase.TestCase, error)
 	Patch(ctx context.Context, testCaseID uuid.UUID, input testcase.PatchInput) (*testcase.TestCase, error)
+	UpsertGenerated(ctx context.Context, draft testcase.Draft) (*testcase.TestCase, error)
 }
 
 // ScenarioService is the slice of `internal/scenario.Service` we depend on.
@@ -56,6 +61,7 @@ type ScenarioService interface {
 	List(ctx context.Context, filter scenario.ListFilter) ([]scenario.Scenario, error)
 	Create(ctx context.Context, input scenario.CreateScenarioInput) (*scenario.Scenario, error)
 	Update(ctx context.Context, id uuid.UUID, input scenario.UpdateScenarioInput) (*scenario.Scenario, error)
+	Delete(ctx context.Context, id uuid.UUID) error
 	UpsertStep(ctx context.Context, scenarioID uuid.UUID, input scenario.UpsertStepInput) (*scenario.Step, error)
 	DeleteStep(ctx context.Context, stepID uuid.UUID) error
 	ListSteps(ctx context.Context, scenarioID uuid.UUID) ([]scenario.Step, error)
@@ -72,16 +78,23 @@ type SpecRepository interface {
 	GetEndpointByID(ctx context.Context, endpointID uuid.UUID) (*spec.Endpoint, error)
 }
 
-// ProjectService is the slice of `internal/project.ServiceLayer` we depend
-// on. Service and environment writes are intentionally excluded: project
-// structure (services / environments) is treated as platform-management
-// surface that the user maintains by hand. Only read access is exposed
-// so the AI can answer "what services / environments are configured"
-// without ever mutating them.
+// SpecImporter is the slice of `internal/spec.Service` used for OpenAPI import.
+type SpecImporter interface {
+	Import(ctx context.Context, projectID, serviceID uuid.UUID, data []byte) (*spec.ImportSummary, error)
+}
+
+// ProjectService is the slice of `internal/project.ServiceLayer` we depend on.
 type ProjectService interface {
 	ListServices(ctx context.Context, projectID uuid.UUID) ([]project.Service, error)
 	ListEnvironments(ctx context.Context, projectID uuid.UUID) ([]project.Environment, error)
 	ListServiceEnvironments(ctx context.Context, projectID, serviceID uuid.UUID) ([]project.Environment, error)
+	CreateService(ctx context.Context, projectID uuid.UUID, input project.CreateServiceInput) (*project.Service, error)
+	UpdateService(ctx context.Context, projectID, serviceID uuid.UUID, input project.UpdateServiceInput) (*project.Service, error)
+	DeleteService(ctx context.Context, projectID, serviceID uuid.UUID) error
+	CreateServiceEnvironment(ctx context.Context, projectID, serviceID uuid.UUID, input project.CreateEnvironmentInput) (*project.Environment, error)
+	UpdateServiceEnvironment(ctx context.Context, projectID, serviceID, environmentID uuid.UUID, input project.UpdateEnvironmentInput) (*project.Environment, error)
+	DeleteServiceEnvironment(ctx context.Context, projectID, serviceID, environmentID uuid.UUID) error
+	GetServiceEnvironment(ctx context.Context, projectID, serviceID, environmentID uuid.UUID) (*project.Environment, error)
 }
 
 // ParamSourceService is the slice of `internal/paramsource.Service` we
@@ -98,6 +111,8 @@ type ParamSourceService interface {
 	ListSQLParameterSources(ctx context.Context, projectID, serviceID uuid.UUID) ([]paramsource.SQLParameterSource, error)
 	CreateSQLParameterSource(ctx context.Context, input paramsource.SQLParameterSourceInput) (*paramsource.SQLParameterSource, error)
 	UpdateSQLParameterSource(ctx context.Context, id uuid.UUID, input paramsource.SQLParameterSourceInput) (*paramsource.SQLParameterSource, error)
+	DeleteSQLParameterSource(ctx context.Context, id uuid.UUID) error
+	DeleteDataSource(ctx context.Context, id uuid.UUID) error
 	PreviewSQLParameterSource(ctx context.Context, id uuid.UUID, input paramsource.PreviewInput) (*paramsource.PreviewOutput, error)
 }
 
@@ -111,6 +126,7 @@ type TestDataService interface {
 	UpdateTable(ctx context.Context, projectID, tableID uuid.UUID, input testdata.TableInput) (*testdata.Table, error)
 	ListRows(ctx context.Context, projectID, tableID uuid.UUID) ([]testdata.Row, error)
 	ReplaceRows(ctx context.Context, projectID, tableID uuid.UUID, input testdata.RowsReplaceInput) ([]testdata.Row, error)
+	DeleteTable(ctx context.Context, projectID, tableID uuid.UUID) error
 	GenerateRows(ctx context.Context, projectID, tableID uuid.UUID, input testdata.GenerateRowsInput) (*testdata.GenerateRowsOutput, error)
 }
 
@@ -122,10 +138,12 @@ type MockServerService interface {
 	GetStatus(ctx context.Context, projectID, serverID uuid.UUID) (mockserver.ServerStatus, error)
 	CreateServer(ctx context.Context, projectID uuid.UUID, input mockserver.MockServerInput) (*mockserver.ServerWithStatus, error)
 	UpdateServer(ctx context.Context, projectID, serverID uuid.UUID, input mockserver.MockServerInput) (*mockserver.ServerWithStatus, error)
+	DeleteServer(ctx context.Context, projectID, serverID uuid.UUID) error
 
 	ListRoutes(ctx context.Context, projectID, serverID uuid.UUID) ([]mockserver.MockRoute, error)
 	CreateRoute(ctx context.Context, projectID, serverID uuid.UUID, input mockserver.MockRouteInput) (*mockserver.MockRoute, error)
 	UpdateRoute(ctx context.Context, projectID, serverID, routeID uuid.UUID, input mockserver.MockRouteInput) (*mockserver.MockRoute, error)
+	DeleteRoute(ctx context.Context, projectID, serverID, routeID uuid.UUID) error
 }
 
 // MockSetService is the slice of `internal/mockset.Service` we depend on.
@@ -133,6 +151,7 @@ type MockSetService interface {
 	List(ctx context.Context, projectID uuid.UUID) ([]mockset.ValueSet, error)
 	Create(ctx context.Context, projectID uuid.UUID, input mockset.CreateInput) (*mockset.ValueSet, error)
 	Update(ctx context.Context, projectID, setID uuid.UUID, input mockset.UpdateInput) (*mockset.ValueSet, error)
+	Delete(ctx context.Context, projectID, setID uuid.UUID) error
 }
 
 // ScriptLibraryService is the slice of `internal/scriptlibrary.Service`
@@ -142,11 +161,13 @@ type ScriptLibraryService interface {
 	List(ctx context.Context, projectID uuid.UUID) ([]scriptlibrary.Template, error)
 	Create(ctx context.Context, input scriptlibrary.CreateInput) (*scriptlibrary.Template, error)
 	Update(ctx context.Context, id uuid.UUID, input scriptlibrary.UpdateInput) (*scriptlibrary.Template, error)
+	Delete(ctx context.Context, id uuid.UUID) error
 }
 
 // RunsService is the slice of `internal/runner.Service` we expose for
 // read-only inspection of historical runs. Triggering runs is a user-only
 // action and never exposed.
 type RunsService interface {
+	ListProjectRuns(ctx context.Context, filter report.ListRunsFilter) ([]report.RunListEntry, int, int, int, error)
 	GetRunResult(ctx context.Context, runID uuid.UUID) (*runner.RunResultOutput, error)
 }

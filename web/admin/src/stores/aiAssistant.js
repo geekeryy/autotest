@@ -733,7 +733,7 @@ function rebuildPendingFromMessages(pane) {
     if (msg.status !== 'pending_confirm') continue
     const calls = parseCalls(msg.toolCalls)
     for (const call of calls) {
-      if (call.mutating) pending.push(call)
+      if (call.requiresConfirm ?? call.mutating) pending.push(call)
     }
   }
   pane.pendingCalls = pending

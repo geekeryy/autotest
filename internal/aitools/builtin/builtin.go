@@ -3,11 +3,9 @@
 //
 // Tools are grouped along two axes:
 //
-//   - Read-only vs. Mutating. Read-only tools (`get_*`, `list_*`) are also
-//     served to the smart-analysis flow. Mutating tools (`create_*`,
-//     `add_*`, `update_*`, `delete_*`, `reorder_*`) are reserved for the
-//     conversational assistant and only execute after the user approves
-//     them through the human-in-the-loop confirmation flow.
+//   - Read-only vs. mutating vs. RequiresConfirm. Read-only tools are also
+//     served to smart-analysis. Mutating create/update tools run immediately
+//     in the assistant stream; delete_* tools require user confirmation.
 //   - Domain. `builtin_meta.go` covers project/service/environment/endpoint
 //     introspection. `builtin_cases.go` covers API request templates.
 //     `builtin_scenarios.go` covers scenarios and their steps — which is
@@ -30,18 +28,39 @@ func ReadOnly(deps Deps) []aitools.Tool {
 		listEndpointsTool(deps),
 		listEnvironmentsTool(deps),
 		getEndpointTool(deps),
+		getEnvironmentTool(deps),
+		// specs
+		listSpecsTool(deps),
 		// cases
 		listCasesTool(deps),
 		getCaseTool(deps),
 		// scenarios
 		listScenariosTool(deps),
 		getScenarioTool(deps),
+		// mock servers
+		listMockServersTool(deps),
+		getMockServerStatusTool(deps),
+		listMockRoutesTool(deps),
+		// mock value sets
+		listMockValueSetsTool(deps),
+		// test data
+		listTestDataTablesTool(deps),
+		getTestDataTableTool(deps),
+		listTestDataRowsTool(deps),
+		// param sources
+		listDataSourcesTool(deps),
+		listSQLParameterSourcesTool(deps),
+		previewSQLParameterSourceTool(deps),
+		// scripts
+		listScriptTemplatesTool(deps),
+		// runs
+		listRunsTool(deps),
+		getRunResultTool(deps),
 	}
 }
 
-// Mutating returns the human-in-the-loop tools that may modify platform
-// data. Only the conversational assistant exposes these to the model, and
-// every call must be confirmed by the user before it actually runs.
+// Mutating returns write tools for the conversational assistant. Delete
+// tools set RequiresConfirm and pause the stream until the user approves.
 //
 // The deliberate omission here is anything that "runs" a scenario or
 // triggers a test execution: by product decision, the user always pushes
@@ -49,15 +68,55 @@ func ReadOnly(deps Deps) []aitools.Tool {
 // scenario ready to run.
 func Mutating(deps Deps) []aitools.Tool {
 	return []aitools.Tool{
+		// projects / services / environments
+		createServiceTool(deps),
+		updateServiceTool(deps),
+		deleteServiceTool(deps),
+		createServiceEnvironmentTool(deps),
+		updateServiceEnvironmentTool(deps),
+		deleteServiceEnvironmentTool(deps),
+		// specs
+		importOpenAPITool(deps),
 		// cases
 		createCaseFromEndpointTool(deps),
 		updateCaseAssertionsTool(deps),
+		updateCaseTool(deps),
 		// scenarios
+		generateCoverageScenariosTool(deps),
 		createScenarioWithStepsTool(deps),
 		addScenarioStepTool(deps),
 		updateScenarioStepTool(deps),
 		deleteScenarioStepTool(deps),
 		reorderScenarioStepsTool(deps),
+		updateScenarioTool(deps),
+		deleteScenarioTool(deps),
+		// mock servers
+		createMockServerTool(deps),
+		updateMockServerTool(deps),
+		deleteMockServerTool(deps),
+		createMockRouteTool(deps),
+		updateMockRouteTool(deps),
+		deleteMockRouteTool(deps),
+		// mock value sets
+		createMockValueSetTool(deps),
+		updateMockValueSetTool(deps),
+		deleteMockValueSetTool(deps),
+		// test data
+		createTestDataTableTool(deps),
+		updateTestDataTableTool(deps),
+		deleteTestDataTableTool(deps),
+		replaceTestDataRowsTool(deps),
+		// param sources
+		createDataSourceTool(deps),
+		updateDataSourceTool(deps),
+		deleteDataSourceTool(deps),
+		createSQLParameterSourceTool(deps),
+		updateSQLParameterSourceTool(deps),
+		deleteSQLParameterSourceTool(deps),
+		// scripts
+		createScriptTemplateTool(deps),
+		updateScriptTemplateTool(deps),
+		deleteScriptTemplateTool(deps),
 	}
 }
 

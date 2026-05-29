@@ -517,7 +517,8 @@ func deleteScenarioStepTool(deps Deps) aitools.Tool {
 		Name: "delete_scenario_step",
 		Description: "按 stepId 删除场景步骤（软删除，stepOrder 槽位会被释放）。" +
 			"scenarioId 必填以便平台校验权限并确认 step 属于该场景；删除控制流步骤前请先 update_scenario_step 把引用它的父步骤的 stepOrders 清理掉。",
-		Mutating: true,
+		Mutating:        true,
+		RequiresConfirm: true,
 		Parameters: rawSchema(`{
             "type": "object",
             "properties": {

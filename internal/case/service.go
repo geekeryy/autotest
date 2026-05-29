@@ -113,6 +113,11 @@ func (s *Service) Patch(ctx context.Context, testCaseID uuid.UUID, input PatchIn
 	return s.repo.Get(ctx, testCaseID)
 }
 
+// UpsertGenerated creates or updates an auto-generated request template from a draft.
+func (s *Service) UpsertGenerated(ctx context.Context, draft Draft) (*TestCase, error) {
+	return s.repo.UpsertGenerated(ctx, draft)
+}
+
 // GenerateParams generates default request parameter values for a test case based on its
 // associated endpoint's OpenAPI request schema.
 func (s *Service) GenerateParams(ctx context.Context, testCaseID uuid.UUID) (*GeneratedParams, error) {

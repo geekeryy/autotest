@@ -180,13 +180,21 @@ func main() {
 		projectprompt.NewHandler(projectPromptSvc, authSvc).Register(r)
 
 		// 全局 AI 助理与智能分析共用一份内置工具配置：智能分析仅注入只读
-		// 工具，浮窗会话再额外挂载受控写工具。任何写工具调用都会被 SSE 流
-		// 程挂起，等待用户在前端确认后才真正执行。
+		// 工具，浮窗会话再额外挂载写工具。delete_* 类工具（RequiresConfirm）
+		// 会挂起 SSE 等待用户确认；create/update 类写工具在流内自动执行。
 		toolDeps := builtin.Deps{
-			Cases:     caseSvc,
-			Scenarios: scenarioSvc,
-			Specs:     specRepo,
-			Projects:  projectSvc,
+			Cases:        caseSvc,
+			Scenarios:    scenarioSvc,
+			Specs:        specRepo,
+			Generator:    generator.NewDefault(),
+			SpecImporter: specSvc,
+			Projects:     projectSvc,
+			ParamSource:  paramSourceSvc,
+			TestData:     testDataSvc,
+			MockServers:  mockServerSvc,
+			MockSets:     mockSetSvc,
+			Scripts:      scriptLibrarySvc,
+			Runs:         runSvc,
 		}
 		aiReadOnly := builtin.ReadOnly(toolDeps)
 		aiAllTools := builtin.All(toolDeps)
