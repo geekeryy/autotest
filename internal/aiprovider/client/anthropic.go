@@ -271,7 +271,7 @@ func (c *AnthropicClient) ChatStream(ctx context.Context, messages []Message, op
 
 	httpClient := c.HTTPClient
 	if httpClient == nil {
-		httpClient = defaultHTTPClient
+		httpClient = streamHTTPClient
 	}
 
 	resp, err := httpClient.Do(req)
@@ -329,7 +329,7 @@ func parseAnthropicStream(r io.Reader, fallbackModel string, onEvent StreamCallb
 		}
 		if st.Kind == "tool_use" {
 			args := strings.TrimSpace(st.ToolInput.String())
-			if args == "" {
+			if args == "" || !json.Valid([]byte(args)) {
 				args = "{}"
 			}
 			tc := ToolCall{ID: st.ToolID, Name: st.ToolName, Arguments: json.RawMessage(args)}

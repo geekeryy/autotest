@@ -9,8 +9,11 @@ import (
 
 	"autotest/internal/aianalysis"
 	"autotest/internal/aiconfig"
+	"autotest/internal/aifeedback"
+	"autotest/internal/aimemory"
 	"autotest/internal/aiprovider"
 	"autotest/internal/aisession"
+	"autotest/internal/aiskill"
 	"autotest/internal/aitools"
 	"autotest/internal/aitools/builtin"
 	"autotest/internal/apikey"
@@ -19,6 +22,7 @@ import (
 	"autotest/internal/authprovider"
 	testcase "autotest/internal/case"
 	"autotest/internal/config"
+	"autotest/internal/evalagent"
 	"autotest/internal/generator"
 	"autotest/internal/genagent"
 	"autotest/internal/httpx"
@@ -29,6 +33,8 @@ import (
 	"autotest/internal/paramsource"
 	"autotest/internal/project"
 	"autotest/internal/projectprompt"
+	"autotest/internal/promptlayer"
+	"autotest/internal/ratelimit"
 	"autotest/internal/report"
 	"autotest/internal/runner"
 	"autotest/internal/scenario"
@@ -88,8 +94,11 @@ func main() {
 
 	caseRepo := testcase.NewRepository(repo)
 	specRepo := spec.NewRepository(repo)
+	testProfileRepo := testprofile.NewPGRepository(repo)
+	testProfileDS := testprofile.NewPGDataSource(repo)
+	testProfileSvc := testprofile.NewService(testProfileRepo, testProfileDS)
 
-	caseSvc := testcase.NewService(caseRepo, specRepo)
+	caseSvc := testcase.NewService(caseRepo, specRepo).WithProfileGetter(testProfileSvc)
 	specSvc := spec.NewService(specRepo, caseRepo, spec.NewImporter(), generator.NewDefault())
 	notificationRepo := notification.NewRepository(repo)
 	notificationSvc := notification.NewService(notificationRepo)
@@ -121,10 +130,34 @@ func main() {
 	authSvc.WithAPIKey(apiKeySvc)
 	aiSessionRepo := aisession.NewRepository(repo)
 	aiSessionSvc := aisession.NewService(aiSessionRepo)
-	testProfileRepo := testprofile.NewPGRepository(repo)
-	testProfileDS := testprofile.NewPGDataSource(repo)
-	testProfileSvc := testprofile.NewService(testProfileRepo, testProfileDS)
 	aiProviderSvc.WithProfileContext(testProfileSvc)
+	aiProviderSvc.WithEndpointSchema(endpointSchemaAdapter{repo: specRepo})
+	aiProviderSvc.WithConvention(conventionAdapter{svc: testProfileSvc})
+
+	// Phase 2+ services: Memory, Skills, Prompt Layers, Rate Limits
+	aiMemoryRepo := aimemory.NewRepository(repo)
+	aiMemorySvc := aimemory.NewService(aiMemoryRepo)
+	aiSkillRepo := aiskill.NewRepository(repo)
+	aiSkillCandidateRepo := aiskill.NewCandidateRepository(repo)
+	aiSkillSvc := aiskill.NewService(aiSkillRepo).WithCandidateRepo(aiSkillCandidateRepo)
+	promptLayerRepo := promptlayer.NewRepository(repo)
+	promptLayerSvc := promptlayer.NewService(promptLayerRepo)
+	rateLimitRepo := ratelimit.NewRepository(repo)
+	rateLimitSvc := ratelimit.NewService(rateLimitRepo)
+
+	// Self-evolution services: Feedback, Eval Agent
+	aiFeedbackRepo := aifeedback.NewRepository(repo)
+	aiFeedbackSvc := aifeedback.NewService(aiFeedbackRepo)
+	evalAgentRepo := evalagent.NewRepository(repo)
+	evalAgentEvaluator := evalagent.NewEvaluator(evalAgentRepo)
+
+	// Configure skill discovery with routing log and outcome queriers
+	aiSkillSvc.WithDiscovery(&aiskill.DiscoveryDeps{
+		RoutingLogQuerier:  &routingLogQuerierAdapter{repo: aiSessionRepo},
+		ToolOutcomeQuerier: &toolOutcomeQuerierAdapter{repo: evalAgentRepo},
+		CandidateRepo:      aiSkillCandidateRepo,
+		SkillRepo:          aiSkillRepo,
+	})
 	caseRunner := runner.New(nil, nil, reportRepo)
 	runSvc := runner.NewService(caseSvc, projectSvc, reportRepo, caseRunner, paramSourceSvc, testDataSvc, mockSetSvc)
 
@@ -266,6 +299,8 @@ func main() {
 			aiCatalog,
 			aiRoutingMode,
 		)
+		// Inject skill matcher so Router considers matched skills
+		aiProviderSvc.WithSkillMatcher(aiskill.NewServiceAdapter(aiSkillSvc))
 		logx.Info("ai tool routing", "mode", string(aiRoutingMode), "tools", len(aiAllTools))
 
 		aiprovider.NewHandler(aiProviderSvc, projectHandler, projectPromptSvc, authSvc).
@@ -285,6 +320,16 @@ func main() {
 			WithTools(aiReadOnly).
 			Register(r)
 		testprofile.NewHandler(testProfileSvc).Register(r)
+
+		// Phase 2+ handlers
+		aimemory.NewHandler(aiMemorySvc).Register(r)
+		aiskill.NewHandler(aiSkillSvc).Register(r)
+		promptlayer.NewHandler(promptLayerSvc).Register(r)
+		ratelimit.NewHandler(rateLimitSvc).Register(r)
+
+		// Self-evolution handlers
+		aifeedback.NewHandler(aiFeedbackSvc, authSvc).Register(r)
+		evalagent.NewHandler(evalAgentEvaluator, evalAgentRepo).Register(r)
 	})
 
 	// API Key 白名单组：当前仅 OpenAPI/Swagger 导入接口允许 API Key 调用，
@@ -299,6 +344,28 @@ func main() {
 
 	r.Mount("/api/v1", api)
 	registerAdminUI(r)
+
+	// Background jobs: skill discovery (daily) and self-evaluation (weekly)
+	go func() {
+		ticker := time.NewTicker(24 * time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			since := time.Now().Add(-7 * 24 * time.Hour)
+			if _, err := aiSkillSvc.DiscoverCandidates(context.Background(), since); err != nil {
+				logx.Warn("skill discovery failed", "err", err)
+			}
+		}
+	}()
+	go func() {
+		ticker := time.NewTicker(7 * 24 * time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			since := time.Now().Add(-7 * 24 * time.Hour)
+			if _, err := evalAgentEvaluator.RunEvaluation(context.Background(), since); err != nil {
+				logx.Warn("self-evaluation failed", "err", err)
+			}
+		}
+	}()
 
 	logx.Info("api listening", "addr", cfg.Addr)
 	if err := http.ListenAndServe(cfg.Addr, r); err != nil {
@@ -331,6 +398,67 @@ func (a mockSetSummaryAdapter) SummariesForProject(ctx context.Context, projectI
 		})
 	}
 	return out
+}
+
+// endpointSchemaAdapter bridges spec.Repository.GetEndpointByID to
+// aiprovider.EndpointSchemaProvider. It converts spec.Endpoint to
+// aiprovider.EndpointBrief without creating an import cycle.
+type endpointSchemaAdapter struct {
+	repo *spec.Repository
+}
+
+func (a endpointSchemaAdapter) GetEndpointByID(ctx context.Context, endpointID uuid.UUID) (*aiprovider.EndpointBrief, error) {
+	ep, err := a.repo.GetEndpointByID(ctx, endpointID)
+	if err != nil {
+		return nil, err
+	}
+	return &aiprovider.EndpointBrief{
+		ID:             ep.ID,
+		Method:         ep.Method,
+		Path:           ep.Path,
+		OperationID:    ep.OperationID,
+		Summary:        ep.Summary,
+		Tags:           ep.Tags,
+		RequestSchema:  ep.RequestSchema,
+		ResponseSchema: ep.ResponseSchema,
+	}, nil
+}
+
+// conventionAdapter bridges testprofile.Service.GetConvention to
+// aiprovider.ProfileConventionProvider.
+type conventionAdapter struct {
+	svc *testprofile.Service
+}
+
+func (a conventionAdapter) GetConvention(ctx context.Context, projectID uuid.UUID) (*aiprovider.ConventionBrief, error) {
+	brief, err := a.svc.GetConvention(ctx, projectID)
+	if err != nil || brief == nil {
+		return nil, err
+	}
+	return &aiprovider.ConventionBrief{
+		Convention: brief.Convention,
+		Enums:      brief.Enums,
+	}, nil
+}
+
+// routingLogQuerierAdapter bridges aisession.Repository to aiskill.RoutingLogQuerier.
+type routingLogQuerierAdapter struct {
+	repo *aisession.Repository
+}
+
+func (a *routingLogQuerierAdapter) AggregateToolSequences(ctx context.Context, since time.Time) ([]aiskill.ToolSequenceAgg, error) {
+	// Placeholder: aggregate from ai_routing_logs
+	return nil, nil
+}
+
+// toolOutcomeQuerierAdapter bridges evalagent.Repository to aiskill.ToolOutcomeQuerier.
+type toolOutcomeQuerierAdapter struct {
+	repo *evalagent.Repository
+}
+
+func (a *toolOutcomeQuerierAdapter) AggregateSuccessByToolSequence(ctx context.Context, since time.Time) ([]aiskill.ToolSequenceSuccess, error) {
+	// Placeholder: aggregate from ai_tool_outcomes
+	return nil, nil
 }
 
 // timeoutExceptStream wraps the standard chi Timeout middleware but lets

@@ -127,6 +127,20 @@ func (a *StoreAdapter) AppendRoutingLog(ctx context.Context, input aiprovider.Ro
 	})
 }
 
+// AppendToolOutcome persists one tool call outcome row for analytics.
+func (a *StoreAdapter) AppendToolOutcome(ctx context.Context, input aiprovider.ToolOutcomeInput) error {
+	return a.svc.repo.AppendToolOutcome(ctx, input.SessionID, ToolOutcomeInput{
+		MessageSeq: input.MessageSeq,
+		ToolName:   input.ToolName,
+		Domain:     input.Domain,
+		Intent:     input.Intent,
+		Success:    input.Success,
+		ErrorType:  input.ErrorType,
+		HopIndex:   input.HopIndex,
+		DurationMs: input.DurationMs,
+	})
+}
+
 func toStored(m Message) aiprovider.StoredMessage {
 	return aiprovider.StoredMessage{
 		ID:               m.ID,

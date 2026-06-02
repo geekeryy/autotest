@@ -703,10 +703,10 @@ export default {
 .api-sidebar,
 .run-console {
   min-height: 0;
-  border: 1px solid color-mix(in srgb, var(--app-border-color) 72%, #64748b);
+  border: 1px solid var(--el-border-color-lighter);
   border-radius: 12px;
   background: var(--app-card-bg);
-  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.06);
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.04);
   overflow: hidden;
 }
 
@@ -786,7 +786,7 @@ export default {
 }
 
 .tree-search {
-  margin: 10px 0;
+  margin: 6px 0;
 }
 
 .api-tree {
@@ -794,7 +794,7 @@ export default {
   min-height: 0;
   overflow: auto;
   padding: 6px;
-  border: 1px solid color-mix(in srgb, var(--app-border-color) 78%, #94a3b8);
+  border: 1px solid var(--el-border-color-lighter);
   border-radius: 10px;
   background: rgba(248, 250, 252, 0.72);
 }
@@ -880,7 +880,7 @@ export default {
   min-width: 0;
   flex: 1 1 auto;
   flex-direction: column;
-  padding: 14px 14px 16px;
+  padding: 10px 12px;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.92)),
     var(--app-card-bg);
@@ -892,9 +892,9 @@ export default {
 
 .console-tabs {
   flex: 0 0 auto;
-  margin-top: 12px;
-  padding: 8px 8px 0;
-  border: 1px solid color-mix(in srgb, var(--app-border-color) 76%, #94a3b8);
+  margin-top: 8px;
+  padding: 6px 6px 0;
+  border: 1px solid var(--el-border-color-lighter);
   border-bottom: 0;
   border-radius: 12px 12px 0 0;
   background: rgba(241, 245, 249, 0.82);
@@ -905,7 +905,7 @@ export default {
 }
 
 .console-tabs :deep(.el-tabs__item) {
-  border-color: color-mix(in srgb, var(--app-border-color) 68%, #94a3b8);
+  border-color: var(--el-border-color-lighter);
   background: rgba(255, 255, 255, 0.76);
 }
 
@@ -931,17 +931,17 @@ export default {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
-  padding: 12px;
-  border: 1px solid color-mix(in srgb, var(--app-border-color) 76%, #94a3b8);
+  padding: 10px;
+  border: 1px solid var(--el-border-color-lighter);
   border-radius: 0 0 12px 12px;
   background: #ffffff;
-  box-shadow: inset 0 1px 0 rgba(15, 23, 42, 0.04);
+  box-shadow: inset 0 1px 0 rgba(15, 23, 42, 0.02);
 }
 
 .console-panels :deep(.request-card),
 .console-panels :deep(.result-card) {
-  border: 1px solid color-mix(in srgb, var(--app-border-color) 70%, #64748b);
-  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.05);
+  border: 1px solid var(--el-border-color-lighter);
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.03);
 }
 
 .console-panels :deep(.result-card) {

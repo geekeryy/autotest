@@ -278,15 +278,15 @@
                   <span class="ai-streaming-cursor" />
                 </span>
               </div>
-              <div v-if="item.msg.role === 'assistant' && item.msg.thinking" class="ai-thinking-state">
-                <span class="ai-thinking-orb" />
-                <span class="ai-thinking-label">正在深度思考</span>
-                <span v-if="formatThinkingElapsed(item.msg)" class="ai-thinking-elapsed">
-                  {{ formatThinkingElapsed(item.msg) }}
-                </span>
-              </div>
+              <AIThinkingBlock
+                v-if="item.msg.role === 'assistant' && hasThinkingContent(item.msg)"
+                :active="!!item.msg.thinking"
+                :content="item.msg.thinkingContent || item.msg.reasoningContent || ''"
+                :elapsed-millis="item.msg.thinkingElapsedMillis"
+                :started-at="item.msg.thinkingStartedAt"
+              />
               <div
-                v-else-if="item.msg.role === 'assistant' && item.msg.streaming && !item.msg.content"
+                v-else-if="item.msg.role === 'assistant' && item.msg.streaming && !item.msg.content && !hasThinkingContent(item.msg)"
                 class="ai-replying-state"
               >
                 <span class="ai-streaming-dot" />
@@ -295,25 +295,10 @@
               <MarkdownView v-if="item.msg.role === 'assistant' && item.msg.content" :source="item.msg.content" />
               <div
                 v-if="item.msg.role === 'assistant' && pendingCallsForMessage(item.msg).length"
-                class="ai-inline-confirms"
+                class="ai-pending-hint"
               >
-                <div class="ai-inline-confirms__label">需要你确认或补充以下信息</div>
-                <template v-for="call in pendingCallsForMessage(item.msg)" :key="call.id">
-                  <AIScenarioGenConfirm
-                    v-if="isGenToolCall(call)"
-                    inline
-                    :call="call"
-                    :disabled="state.streaming"
-                    @decide="onDecide"
-                  />
-                  <AIToolCallConfirm
-                    v-else
-                    inline
-                    :call="call"
-                    :disabled="state.streaming"
-                    @decide="onDecide"
-                  />
-                </template>
+                <span class="ai-pending-hint__dot"></span>
+                <span class="ai-pending-hint__text">等待确认操作…</span>
               </div>
               <AIUsageDebugPanel
                 v-if="item.msg.role === 'assistant' && state.debugEnabled && item.msg.usageDetails"
@@ -334,6 +319,16 @@
           <span>{{ state.error }}</span>
         </div>
       </section>
+
+      <!-- Action bar for pending tool calls -->
+      <AIActionBar
+        v-if="state.pendingCalls.length"
+        ref="actionBar"
+        :pending-calls="state.pendingCalls"
+        :disabled="state.streaming"
+        @decide="onDecide"
+        @batch-decide="onBatchDecide"
+      />
 
       <!-- Composer -->
       <footer class="ai-composer">
@@ -418,14 +413,14 @@
               v-model="draft"
               class="ai-composer-input"
               :placeholder="composerPlaceholder"
-              :disabled="state.streaming || state.pendingCalls.length > 0"
+              :disabled="state.streaming"
               @keydown.enter.meta.exact.prevent="onEnter"
               @input="autoResize"
               rows="2"
             />
             <button
               class="ai-send-btn"
-              :disabled="!canSend || state.streaming || state.pendingCalls.length > 0"
+              :disabled="!canSend || state.streaming"
               @click="onSend"
             >
               <el-icon v-if="state.streaming"><Loading /></el-icon>
@@ -434,7 +429,7 @@
           </div>
         </div>
         <div class="ai-composer-footer" :class="{ 'ai-composer-footer--page': isPageLayout }">
-          <span class="ai-composer-hint" v-if="state.pendingCalls.length">请在对话中完成上方确认卡片后再继续</span>
+          <span class="ai-composer-hint" v-if="state.pendingCalls.length">上方操作栏有待确认的操作</span>
           <span class="ai-composer-hint" v-else>Enter 换行 · {{ sendShortcutHint }} 发送</span>
           <ModelSettingsPopover
             v-if="isPageLayout"
@@ -486,8 +481,10 @@ import {
   Setting,
 } from '@element-plus/icons-vue'
 import MarkdownView from './MarkdownView.vue'
+import AIThinkingBlock from './AIThinkingBlock.vue'
 import AIToolCallConfirm from './AIToolCallConfirm.vue'
 import AIScenarioGenConfirm from './AIScenarioGenConfirm.vue'
+import AIActionBar from './AIActionBar.vue'
 import AIScenarioGenProgress from './AIScenarioGenProgress.vue'
 import AIUsageDebugPanel from './AIUsageDebugPanel.vue'
 import AISessionDetailDrawer from './AISessionDetailDrawer.vue'
@@ -545,8 +542,10 @@ export default {
   name: 'GlobalAIAssistant',
   components: {
     MarkdownView,
+    AIThinkingBlock,
     AIToolCallConfirm,
     AIScenarioGenConfirm,
+    AIActionBar,
     AIScenarioGenProgress,
     AIUsageDebugPanel,
     AISessionDetailDrawer,
@@ -1040,6 +1039,16 @@ export default {
     async onDecide(decision) {
       await resolvePendingCall(decision.callId, decision, this.paneId)
     },
+    async onBatchDecide({ callIds, approve }) {
+      const reason = ''
+      for (const callId of callIds) {
+        // Check if this call is still pending (backend may have auto-resolved some)
+        const stillPending = this.pane.pendingCalls.some((c) => c.id === callId)
+        if (!stillPending) continue
+        await resolvePendingCall(callId, { approve, reason }, this.paneId)
+      }
+      this.$refs.actionBar?.resetBatchLoading()
+    },
     onToggleThinking() {
       setPaneThinking(this.paneId, !this.state.thinkingEnabled)
     },
@@ -1131,6 +1140,10 @@ export default {
       }
       const seconds = Math.floor(elapsed / 1000)
       return seconds > 0 ? `${seconds}s` : ''
+    },
+    hasThinkingContent(msg) {
+      if (!msg || msg.role !== 'assistant') return false
+      return !!(msg.thinking || msg.thinkingContent || msg.reasoningContent)
     },
     autoResize() {
       const el = this.$refs.composerInput
@@ -1377,6 +1390,15 @@ export default {
   border-top: none;
   background: var(--app-surface-subtle);
   box-shadow: 0 -8px 24px rgba(15, 23, 42, 0.04);
+}
+
+.ai-panel--page .ai-action-bar {
+  max-width: 820px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 10px 20px;
+  background: var(--app-surface-subtle);
+  border-top: none;
 }
 
 .ai-panel--page .ai-composer-box {
@@ -1988,6 +2010,37 @@ export default {
   font-weight: 600;
   color: var(--app-secondary-text);
   letter-spacing: 0.02em;
+}
+
+.ai-pending-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 12px 12px 12px 2px;
+  background: color-mix(in srgb, var(--el-color-warning-light-9) 80%, var(--el-fill-color-light));
+  font-size: 13px;
+  color: var(--el-color-warning-dark-2, #b88230);
+  width: fit-content;
+  max-width: 100%;
+}
+
+.ai-pending-hint__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--el-color-warning, #e6a23c);
+  animation: pending-pulse 1.4s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+@keyframes pending-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.ai-pending-hint__text {
+  font-weight: 500;
 }
 
 .ai-user-bubble {

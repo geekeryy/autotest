@@ -284,3 +284,40 @@ export const listNotifications = (params = {}) => request.get('/notifications', 
 export const markNotificationRead = (id) => request.patch(`/notifications/${id}/read`)
 export const markAllNotificationsRead = () => request.post('/notifications/read-all')
 export const clearAllNotifications = () => request.post('/notifications/clear-all')
+
+// ===================== AI Memory =====================
+export const listAIMemories = (params = {}) => request.get('/ai/memories', { params })
+export const saveAIMemory = (data) => request.post('/ai/memories', data)
+export const recallAIMemory = (data) => request.post('/ai/memories/recall', data)
+export const getAIMemory = (id) => request.get(`/ai/memories/${id}`)
+export const updateAIMemory = (id, data) => request.put(`/ai/memories/${id}`, data)
+export const deleteAIMemory = (id) => request.delete(`/ai/memories/${id}`)
+export const listProjectAIMemories = (projectId, params = {}) =>
+  request.get(`/projects/${projectId}/ai/memories`, { params })
+export const saveProjectAIMemory = (projectId, data) =>
+  request.post(`/projects/${projectId}/ai/memories`, data)
+export const recallProjectAIMemory = (projectId, data) =>
+  request.post(`/projects/${projectId}/ai/memories/recall`, data)
+
+// ===================== AI Skills =====================
+export const listAISkills = (params = {}) => request.get('/ai/skills', { params }).then(asList)
+export const createAISkill = (data) => request.post('/ai/skills', data)
+export const matchAISkills = (data) => request.post('/ai/skills/match', data).then(asList)
+export const getAISkill = (id) => request.get(`/ai/skills/${id}`)
+export const updateAISkill = (id, data) => request.put(`/ai/skills/${id}`, data)
+export const deleteAISkill = (id) => request.delete(`/ai/skills/${id}`)
+
+// ===================== Prompt Layers =====================
+export const listPromptLayers = (params = {}) => request.get('/ai/prompt-layers', { params }).then(asList)
+export const createPromptLayer = (data) => request.post('/ai/prompt-layers', data)
+export const getPromptLayer = (id) => request.get(`/ai/prompt-layers/${id}`)
+export const enablePromptLayerVersion = (id) => request.put(`/ai/prompt-layers/${id}/enable`)
+export const deletePromptLayer = (id) => request.delete(`/ai/prompt-layers/${id}`)
+export const getDomainPrompt = (domain) => request.get(`/ai/prompt-layers/domain/${domain}`)
+export const getLatestPromptLayer = (name) => request.get(`/ai/prompt-layers/by-name/${name}/latest`)
+export const updatePromptLayerByName = (name, data) => request.put(`/ai/prompt-layers/by-name/${name}`, data)
+
+// ===================== Rate Limits =====================
+export const listRateLimitRules = () => request.get('/ai/rate-limits/rules').then(asList)
+export const createRateLimitRule = (data) => request.post('/ai/rate-limits/rules', data)
+export const cleanupRateLimitEntries = () => request.post('/ai/rate-limits/cleanup')

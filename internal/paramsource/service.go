@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 )
 
 var sourceKeyAllowed = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
@@ -164,6 +167,57 @@ func (s *Service) PreviewSQLParameterSource(ctx context.Context, id uuid.UUID, i
 		variables = results[0]
 	}
 	return &PreviewOutput{Variables: variables, Rows: results, Snapshot: snapshot}, nil
+}
+
+func (s *Service) ExecuteReadOnlyQuery(ctx context.Context, dataSourceID uuid.UUID, sql string, params json.RawMessage) ([]map[string]string, error) {
+	if dataSourceID == uuid.Nil {
+		return nil, errors.New("dataSourceId is required")
+	}
+	ds, err := s.repo.GetDataSource(ctx, dataSourceID)
+	if err != nil {
+		return nil, err
+	}
+	if !ds.Enabled {
+		return nil, fmt.Errorf("data source %q is disabled", ds.Name)
+	}
+	sqlText, err := normalizeReadOnlySQL(sql)
+	if err != nil {
+		return nil, err
+	}
+	args, _, err := buildArgs(params, nil)
+	if err != nil {
+		return nil, err
+	}
+	timeout := defaultQueryTimeoutMillis * time.Millisecond
+	queryCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	conn, err := pgx.Connect(queryCtx, postgresURL(*ds))
+	if err != nil {
+		return nil, fmt.Errorf("connect data source %q: %w", ds.Name, err)
+	}
+	defer conn.Close(context.Background())
+
+	query := "select * from (" + sqlText + ") as query_result"
+	rows, err := conn.Query(queryCtx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("execute query on %q: %w", ds.Name, err)
+	}
+	defer rows.Close()
+
+	results := []map[string]string{}
+	fields := rows.FieldDescriptions()
+	for rows.Next() {
+		values, err := rows.Values()
+		if err != nil {
+			return nil, fmt.Errorf("scan query rows: %w", err)
+		}
+		results = append(results, mapColumns(fields, values))
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read query rows: %w", err)
+	}
+	return results, nil
 }
 
 func (s *Service) PreviewSQLParameterSourceDraft(ctx context.Context, input PreviewDraftInput) (*PreviewOutput, error) {

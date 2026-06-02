@@ -49,6 +49,26 @@ type PlannerOutput struct {
 	// Ambiguities lists unresolved questions; a non-empty list lowers the
 	// Router confidence so it falls back to a wider tool package.
 	Ambiguities []string `json:"ambiguities"`
+	// SubTasks describes decomposed sub-tasks for multi-agent orchestration.
+	// Non-empty means the request should be dispatched to multiple sub-agents.
+	SubTasks []SubTaskPlan `json:"subTasks,omitempty"`
+	// Parallel is true when sub-tasks have no inter-dependencies and can
+	// run concurrently. Ignored when SubTasks is empty.
+	Parallel bool `json:"parallel,omitempty"`
+}
+
+// SubTaskPlan describes a single sub-task for agent routing.
+type SubTaskPlan struct {
+	// Name is a short identifier for the sub-task (e.g. "analyze_spec").
+	Name string `json:"name"`
+	// Description is the task instruction for the sub-agent.
+	Description string `json:"description"`
+	// Domains are the tool domains this sub-task needs.
+	Domains []string `json:"domains"`
+	// DependsOn lists sub-task names that must complete before this one starts.
+	DependsOn []string `json:"dependsOn,omitempty"`
+	// Timeout is the suggested timeout in seconds. 0 means default (120s).
+	Timeout int `json:"timeout,omitempty"`
 }
 
 // safePlannerOutput is the degraded result used whenever the planner LLM
@@ -56,7 +76,7 @@ type PlannerOutput struct {
 // Router widen to a safe (full) package, so correctness never depends on
 // the planner succeeding.
 func safePlannerOutput() PlannerOutput {
-	return PlannerOutput{Domains: []string{}, Workflow: []string{}, Ambiguities: []string{}}
+	return PlannerOutput{Domains: []string{}, Workflow: []string{}, Ambiguities: []string{}, SubTasks: nil}
 }
 
 // Planner runs the intent-classification pre-pass. It holds a reference to
@@ -170,6 +190,7 @@ func normalizePlannerOutput(in PlannerOutput) PlannerOutput {
 	out := PlannerOutput{
 		Intent:      strings.TrimSpace(in.Intent),
 		NeedsWrite:  in.NeedsWrite,
+		Parallel:    in.Parallel,
 		Domains:     []string{},
 		Workflow:    []string{},
 		Ambiguities: []string{},
@@ -195,6 +216,41 @@ func normalizePlannerOutput(in PlannerOutput) PlannerOutput {
 		if a = strings.TrimSpace(a); a != "" {
 			out.Ambiguities = append(out.Ambiguities, a)
 		}
+	}
+	// Normalize sub-tasks: validate domains, trim strings, deduplicate names, skip invalid entries.
+	seenNames := map[string]bool{}
+	for _, st := range in.SubTasks {
+		name := strings.TrimSpace(st.Name)
+		desc := strings.TrimSpace(st.Description)
+		if name == "" || desc == "" {
+			continue
+		}
+		// Skip duplicate sub-task names (keep the first occurrence)
+		if seenNames[name] {
+			continue
+		}
+		seenNames[name] = true
+		timeout := st.Timeout
+		if timeout < 0 {
+			timeout = 0
+		}
+		normST := SubTaskPlan{
+			Name:        name,
+			Description: desc,
+			Timeout:     timeout,
+		}
+		for _, d := range st.Domains {
+			d = strings.ToLower(strings.TrimSpace(d))
+			if knownDomain(d) {
+				normST.Domains = append(normST.Domains, d)
+			}
+		}
+		for _, dep := range st.DependsOn {
+			if dep = strings.TrimSpace(dep); dep != "" {
+				normST.DependsOn = append(normST.DependsOn, dep)
+			}
+		}
+		out.SubTasks = append(out.SubTasks, normST)
 	}
 	return out
 }

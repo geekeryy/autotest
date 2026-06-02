@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sync"
 
 	"autotest/internal/aitools"
 	"autotest/internal/report"
@@ -100,6 +99,7 @@ func (a *Agent) run(ctx context.Context, jobID uuid.UUID, cfg RunConfig) error {
 	}
 
 	jobResult := JobResult{Scenarios: len(coverage.Scenarios), CoverageResult: mustJSON(coverage)}
+	repairHistory := map[uuid.UUID][]RepairAttempt{}
 
 	for round := 1; round <= maxRounds; round++ {
 		emitProgress(ctx, Progress{
@@ -163,7 +163,7 @@ func (a *Agent) run(ctx context.Context, jobID uuid.UUID, cfg RunConfig) error {
 			Phase: "repair", Message: "分析失败并自动修复…",
 		})
 
-		repairs, realDefects, stopped := a.repairFailures(ctx, cfg, scenarioRuns, &roundResult)
+		repairs, realDefects, stopped := a.repairFailures(ctx, cfg, scenarioRuns, &roundResult, repairHistory, round)
 		roundResult.Repairs = repairs
 		jobResult.RealDefects += realDefects
 		jobResult.Rounds[len(jobResult.Rounds)-1] = roundResult
@@ -189,41 +189,36 @@ func (a *Agent) run(ctx context.Context, jobID uuid.UUID, cfg RunConfig) error {
 
 func (a *Agent) executeScenarios(ctx context.Context, cfg RunConfig, scenarios []scenariogen.CreatedScenario, round int) []ScenarioRunRef {
 	out := make([]ScenarioRunRef, len(scenarios))
-	var wg sync.WaitGroup
-	var mu sync.Mutex
+	// Serial execution: scenarios may have interdependencies (e.g. scenario A
+	// creates data that scenario B needs). Parallel execution causes race
+	// conditions on shared state. Serial execution ensures deterministic,
+	// reproducible results.
 	for i, sc := range scenarios {
-		wg.Add(1)
-		go func(idx int, created scenariogen.CreatedScenario) {
-			defer wg.Done()
-			ref := ScenarioRunRef{ScenarioID: created.ScenarioID, ScenarioName: created.Name}
-			runOut, runErr := a.Runner.RunScenario(ctx, created.ScenarioID, runner.RunScenarioInput{
-				EnvironmentID: cfg.EnvironmentID,
-				Name:          fmt.Sprintf("gen-verify %s r%d", created.Name, round),
-			})
-			if runErr != nil {
-				ref.Status = "error"
-				ref.Failures = []string{runErr.Error()}
+		ref := ScenarioRunRef{ScenarioID: sc.ScenarioID, ScenarioName: sc.Name}
+		runOut, runErr := a.Runner.RunScenario(ctx, sc.ScenarioID, runner.RunScenarioInput{
+			EnvironmentID: cfg.EnvironmentID,
+			Name:          fmt.Sprintf("gen-verify %s r%d", sc.Name, round),
+		})
+		if runErr != nil {
+			ref.Status = "error"
+			ref.Failures = []string{runErr.Error()}
+		} else {
+			ref.RunID = runOut.Run.ID
+			ok, fails := summarizeRun(runOut)
+			if ok {
+				ref.Status = "passed"
 			} else {
-				ref.RunID = runOut.Run.ID
-				ok, fails := summarizeRun(runOut)
-				if ok {
-					ref.Status = "passed"
-				} else {
-					ref.Status = "failed"
-					ref.Failures = fails
-				}
-				ref.Output = runOut
+				ref.Status = "failed"
+				ref.Failures = fails
 			}
-			mu.Lock()
-			out[idx] = ref
-			mu.Unlock()
-		}(i, sc)
+			ref.Output = runOut
+		}
+		out[i] = ref
 	}
-	wg.Wait()
 	return out
 }
 
-func (a *Agent) repairFailures(ctx context.Context, cfg RunConfig, runs []ScenarioRunRef, roundResult *RoundResult) (repairs []RepairSummary, realDefects int, stopped bool) {
+func (a *Agent) repairFailures(ctx context.Context, cfg RunConfig, runs []ScenarioRunRef, roundResult *RoundResult, repairHistory map[uuid.UUID][]RepairAttempt, round int) (repairs []RepairSummary, realDefects int, stopped bool) {
 	if a.Repairer == nil || a.Scenarios == nil {
 		return nil, 0, false
 	}
@@ -249,12 +244,22 @@ func (a *Agent) repairFailures(ctx context.Context, cfg RunConfig, runs []Scenar
 					step = st
 				}
 			}
-			class, _ := a.Repairer.AI.ClassifyFailure(ctx, cfg.ProjectID, buildFailureEvidence(ref.ScenarioName, step, sr))
+			evidence := buildFailureEvidence(ref.ScenarioName, step, sr, ref.Output, repairHistory[step.ID])
+			class, _ := a.Repairer.AI.ClassifyFailure(ctx, cfg.ProjectID, evidence)
 			repair, err := applyRepair(ctx, a.Repairer, cfg, cfg.ProjectID, ref.ScenarioID, &step, sr, class)
 			if err != nil || repair == nil {
 				continue
 			}
 			repairs = append(repairs, *repair)
+			// Record repair attempt for cross-round memory.
+			success := repair.Action != "skip" && repair.Action != "noop"
+			repairHistory[step.ID] = append(repairHistory[step.ID], RepairAttempt{
+				Round:    round,
+				Category: repair.Category,
+				Action:   repair.Action,
+				Detail:   repair.Detail,
+				Success:  success,
+			})
 			if repair.Category == "real_defect" {
 				realDefects++
 				if cfg.StopOnRealDefect {

@@ -2,6 +2,7 @@ package builtin
 
 import (
 	"context"
+	"encoding/json"
 
 	testcase "autotest/internal/case"
 	"autotest/internal/generator"
@@ -116,6 +117,7 @@ type ParamSourceService interface {
 	DeleteSQLParameterSource(ctx context.Context, id uuid.UUID) error
 	DeleteDataSource(ctx context.Context, id uuid.UUID) error
 	PreviewSQLParameterSource(ctx context.Context, id uuid.UUID, input paramsource.PreviewInput) (*paramsource.PreviewOutput, error)
+	ExecuteReadOnlyQuery(ctx context.Context, dataSourceID uuid.UUID, sql string, params json.RawMessage) ([]map[string]string, error)
 }
 
 // TestDataService is the slice of `internal/testdata.Service` we depend on.

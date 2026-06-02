@@ -167,3 +167,58 @@ func (s *Service) MarkPendingFinal(ctx context.Context, messageID uuid.UUID, too
 func (s *Service) MarkPendingRejected(ctx context.Context, messageID uuid.UUID) error {
 	return s.repo.MarkMessageRejected(ctx, messageID)
 }
+
+// CreateCheckpoint creates a new checkpoint for a session.
+func (s *Service) CreateCheckpoint(ctx context.Context, sessionID uuid.UUID, input CreateCheckpointInput) (*Checkpoint, error) {
+	if sessionID == uuid.Nil {
+		return nil, errors.New("sessionId 不能为空")
+	}
+	return s.repo.CreateCheckpoint(ctx, sessionID, input)
+}
+
+// ListCheckpoints returns all checkpoints for a session.
+func (s *Service) ListCheckpoints(ctx context.Context, sessionID uuid.UUID) ([]Checkpoint, error) {
+	if sessionID == uuid.Nil {
+		return nil, errors.New("sessionId 不能为空")
+	}
+	return s.repo.ListCheckpoints(ctx, sessionID)
+}
+
+// GetCheckpoint fetches a single checkpoint.
+func (s *Service) GetCheckpoint(ctx context.Context, sessionID, checkpointID uuid.UUID) (*Checkpoint, error) {
+	if sessionID == uuid.Nil || checkpointID == uuid.Nil {
+		return nil, errors.New("sessionId 与 checkpointId 不能为空")
+	}
+	return s.repo.GetCheckpoint(ctx, sessionID, checkpointID)
+}
+
+// DeleteCheckpoint removes a checkpoint.
+func (s *Service) DeleteCheckpoint(ctx context.Context, sessionID, checkpointID uuid.UUID) error {
+	if sessionID == uuid.Nil || checkpointID == uuid.Nil {
+		return errors.New("sessionId 与 checkpointId 不能为空")
+	}
+	return s.repo.DeleteCheckpoint(ctx, sessionID, checkpointID)
+}
+
+// ExportSession exports a session with all messages and checkpoints.
+func (s *Service) ExportSession(ctx context.Context, projectID, userID, sessionID uuid.UUID) (*SessionExport, error) {
+	if projectID == uuid.Nil || userID == uuid.Nil || sessionID == uuid.Nil {
+		return nil, errors.New("projectId / userId / sessionId 不能为空")
+	}
+	// Verify ownership
+	if err := s.EnsureOwner(ctx, projectID, userID, sessionID); err != nil {
+		return nil, err
+	}
+	return s.repo.ExportSession(ctx, sessionID)
+}
+
+// ImportSession imports a session from an export into the given project.
+func (s *Service) ImportSession(ctx context.Context, projectID, userID uuid.UUID, data *SessionExport) (*Session, error) {
+	if projectID == uuid.Nil || userID == uuid.Nil {
+		return nil, errors.New("projectId 与 userId 不能为空")
+	}
+	if data == nil {
+		return nil, errors.New("导入数据为空")
+	}
+	return s.repo.ImportSession(ctx, projectID, userID, data)
+}

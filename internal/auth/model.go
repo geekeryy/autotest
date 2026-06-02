@@ -20,6 +20,16 @@ const (
 	PermissionPermissionsManage = "permissions:manage"
 	PermissionAPIKeysManage     = "apikeys:manage"
 	PermissionAuditRead         = "audit:read"
+
+	// AI 助理相关权限
+	PermissionAIChat          = "ai:chat"           // 使用 AI 助理对话
+	PermissionAIGenerate      = "ai:generate"       // 使用 AI 生成（参数/断言/数据）
+	PermissionAIAnalyze       = "ai:analyze"        // 使用 AI 分析（失败/变更）
+	PermissionAIScenarioGen   = "ai:scenario_gen"   // 使用 AI 生成场景
+	PermissionAIBackground    = "ai:background"      // 启动后台 AI 任务
+	PermissionAIManageSkills  = "ai:manage_skills"   // 管理 Skills
+	PermissionAIManageMemory  = "ai:manage_memory"   // 管理项目记忆
+	PermissionAIViewUsage     = "ai:view_usage"      // 查看 AI token 用量
 )
 
 // 认证来源：JWT 走原有用户名密码登录流程，APIKey 走 internal/apikey 校验。
@@ -187,4 +197,12 @@ var defaultPermissions = []defaultPermission{
 	{PermissionPermissionsManage, "管理权限", "权限点管理接口权限"},
 	{PermissionAPIKeysManage, "管理API Key", "创建、禁用、删除 API Key（用于 CI/CD 调用平台开放接口）"},
 	{PermissionAuditRead, "查看审计日志", "查看平台审计日志"},
+	{PermissionAIChat, "AI 对话", "使用 AI 助理进行对话"},
+	{PermissionAIGenerate, "AI 生成", "使用 AI 生成请求参数、断言脚本、测试数据"},
+	{PermissionAIAnalyze, "AI 分析", "使用 AI 分析测试失败原因和 Spec 变更影响"},
+	{PermissionAIScenarioGen, "AI 场景生成", "使用 AI 自动生成测试场景"},
+	{PermissionAIBackground, "AI 后台任务", "启动 AI 后台生成任务"},
+	{PermissionAIManageSkills, "管理 AI Skills", "创建和管理 AI 工作流技能"},
+	{PermissionAIManageMemory, "管理 AI 记忆", "管理项目的 AI 记忆"},
+	{PermissionAIViewUsage, "查看 AI 用量", "查看 AI token 使用量统计"},
 }

@@ -78,6 +78,12 @@ build-mcp: ## 构建 MCP 可执行文件到 bin/autotest-mcp。
 run-e2e-api: ## 运行 e2e 测试目标 API（APP_ENV=test）。
 	APP_ENV=test go run ./tests/e2e_api
 
+run: migrate ## 迁移后并行启动 API 与前端。
+	@trap 'kill 0' INT TERM; \
+	$(MAKE) run-api & \
+	$(MAKE) web-dev & \
+	wait
+
 web-install: ## 安装管理后台前端依赖。
 	npm --prefix web/admin install
 

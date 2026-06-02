@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"time"
 )
@@ -136,5 +137,20 @@ var (
 	ErrStreamingUnsupported = errors.New("ai provider does not support streaming")
 )
 
-// defaultHTTPClient is shared across provider clients.
+// defaultHTTPClient is shared across non-streaming provider calls.
 var defaultHTTPClient = &http.Client{Timeout: 60 * time.Second}
+
+// streamHTTPClient is used for streaming (SSE) requests. It has no overall
+// Timeout so that long-running model responses are not killed prematurely;
+// lifecycle control is delegated to the context passed to ChatStream.
+var streamHTTPClient = &http.Client{
+	Transport: &http.Transport{
+		DialContext: (&net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		TLSHandshakeTimeout:   15 * time.Second,
+		ResponseHeaderTimeout:  60 * time.Second,
+		IdleConnTimeout:        90 * time.Second,
+	},
+}

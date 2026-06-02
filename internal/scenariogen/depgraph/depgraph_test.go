@@ -85,6 +85,61 @@ func TestResourceGroupsByTag(t *testing.T) {
 	}
 }
 
+func TestIsLoginEndpointExtended(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name   string
+		ep     spec.Endpoint
+		expect bool
+	}{
+		{"classic login", spec.Endpoint{Method: "POST", Path: "/api/v1/auth/login"}, true},
+		{"token endpoint", spec.Endpoint{Method: "POST", Path: "/api/v1/oauth/token"}, true},
+		{"signin", spec.Endpoint{Method: "POST", Path: "/api/v1/signin"}, true},
+		{"sign-in", spec.Endpoint{Method: "POST", Path: "/api/v1/sign-in"}, true},
+		{"oauth authorize", spec.Endpoint{Method: "POST", Path: "/api/v1/oauth/authorize"}, true},
+		{"sso login", spec.Endpoint{Method: "POST", Path: "/api/v1/sso/login"}, true},
+		{"authenticate", spec.Endpoint{Method: "POST", Path: "/api/v1/authenticate"}, true},
+		{"operationId login", spec.Endpoint{Method: "POST", Path: "/api/v1/auth", OperationID: "loginUser"}, true},
+		{"summary login", spec.Endpoint{Method: "POST", Path: "/api/v1/auth", Summary: "用户登录"}, true},
+		{"body credentials", spec.Endpoint{Method: "POST", Path: "/api/v1/session", RequestSchema: mustSchema(`{"body":{"properties":{"username":{"type":"string"},"password":{"type":"string"}}}}`)}, true},
+		{"GET not login", spec.Endpoint{Method: "GET", Path: "/api/v1/login"}, false},
+		{"unrelated POST", spec.Endpoint{Method: "POST", Path: "/api/v1/users"}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := IsLoginEndpoint(tc.ep)
+			if got != tc.expect {
+				t.Fatalf("IsLoginEndpoint(%s %s) = %v, want %v", tc.ep.Method, tc.ep.Path, got, tc.expect)
+			}
+		})
+	}
+}
+
+func TestTokenResponsePathExtended(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name   string
+		schema string
+		expect string
+	}{
+		{"flat token", `{"properties":{"token":{"type":"string"}}}`, "response.body.token"},
+		{"flat access_token", `{"properties":{"access_token":{"type":"string"}}}`, "response.body.access_token"},
+		{"flat jwt", `{"properties":{"jwt":{"type":"string"}}}`, "response.body.jwt"},
+		{"wrapped access_token", `{"properties":{"data":{"properties":{"access_token":{"type":"string"}}}}}`, "response.body.data.access_token"},
+		{"prefers access_token over token", `{"properties":{"token":{"type":"string"},"access_token":{"type":"string"}}}`, "response.body.access_token"},
+		{"no token field", `{"properties":{"name":{"type":"string"}}}`, "response.body.token"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ep := spec.Endpoint{ResponseSchema: mustSchema(tc.schema)}
+			got := TokenResponsePath(ep)
+			if got != tc.expect {
+				t.Fatalf("TokenResponsePath() = %q, want %q", got, tc.expect)
+			}
+		})
+	}
+}
+
 func mustSchema(s string) []byte {
 	return []byte(s)
 }

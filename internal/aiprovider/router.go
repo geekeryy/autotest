@@ -12,6 +12,7 @@ package aiprovider
 
 import (
 	"encoding/json"
+	"fmt"
 	"sort"
 	"strings"
 
@@ -53,6 +54,12 @@ type RouterOutput struct {
 	Reason          string   `json:"reason"`
 }
 
+// SkillDomainHint carries the domain information from a matched skill.
+type SkillDomainHint struct {
+	Name        string   `json:"name"`
+	ToolDomains []string `json:"toolDomains"`
+}
+
 // Router selects a tool package from a plan. Stateless; safe to share.
 type Router struct{}
 
@@ -62,8 +69,9 @@ func NewRouter() *Router { return &Router{} }
 // Route applies the rule-based selection. cat may be nil (e.g. in a unit
 // test exercising only the confidence heuristic) in which case the tool
 // name lists come back empty but the confidence/fallback decision still
-// holds.
-func (Router) Route(plan PlannerOutput, pageContext json.RawMessage, cat *aitools.Catalog) RouterOutput {
+// holds. matchedSkills optionally provides skill hints that boost
+// confidence and widen the domain set.
+func (Router) Route(plan PlannerOutput, pageContext json.RawMessage, cat *aitools.Catalog, matchedSkills []SkillDomainHint) RouterOutput {
 	confidence := scoreConfidence(plan)
 
 	// Domains to include: planner domains + any inferred from the page.
@@ -77,8 +85,28 @@ func (Router) Route(plan PlannerOutput, pageContext json.RawMessage, cat *aitool
 		domainSet[d] = struct{}{}
 	}
 
-	var fallback []string
 	reasons := []string{}
+
+	// Merge domains from matched skills and boost confidence.
+	if len(matchedSkills) > 0 {
+		skillNames := make([]string, 0, len(matchedSkills))
+		for _, sk := range matchedSkills {
+			for _, d := range sk.ToolDomains {
+				if knownDomain(d) {
+					domainSet[d] = struct{}{}
+				}
+			}
+			skillNames = append(skillNames, sk.Name)
+		}
+		// Each matched skill boosts confidence by 0.15, capped at 1.0.
+		confidence += 0.15 * float64(len(matchedSkills))
+		if confidence > 1.0 {
+			confidence = 1.0
+		}
+		reasons = append(reasons, fmt.Sprintf("命中 %d 个技能: %s", len(matchedSkills), strings.Join(skillNames, ", ")))
+	}
+
+	var fallback []string
 	if len(plan.Domains) == 0 {
 		reasons = append(reasons, "planner 未给出 domains")
 	}

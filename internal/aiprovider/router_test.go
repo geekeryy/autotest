@@ -33,7 +33,7 @@ func contains(s []string, v string) bool {
 
 func TestRouter_CoreDiscoveryAlwaysUnioned(t *testing.T) {
 	cat := routerTestCatalog()
-	out := Router{}.Route(PlannerOutput{Domains: []string{"scenarios"}}, nil, cat)
+	out := Router{}.Route(PlannerOutput{Domains: []string{"scenarios"}}, nil, cat, nil)
 	for _, core := range []string{"list_services", "get_endpoint", "get_case", "get_scenario"} {
 		if !contains(out.ActiveTools, core) {
 			t.Fatalf("core tool %s missing from %+v", core, out.ActiveTools)
@@ -43,7 +43,7 @@ func TestRouter_CoreDiscoveryAlwaysUnioned(t *testing.T) {
 
 func TestRouter_HighConfidenceSelectsDomain(t *testing.T) {
 	cat := routerTestCatalog()
-	out := Router{}.Route(PlannerOutput{Domains: []string{"scenarios"}, Ambiguities: nil}, nil, cat)
+	out := Router{}.Route(PlannerOutput{Domains: []string{"scenarios"}, Ambiguities: nil}, nil, cat, nil)
 	if out.Confidence < aiconfig.DefaultRouterConfidenceThreshold {
 		t.Fatalf("expected high confidence, got %v", out.Confidence)
 	}
@@ -61,7 +61,7 @@ func TestRouter_HighConfidenceSelectsDomain(t *testing.T) {
 
 func TestRouter_EmptyDomainsLowConfidenceWidensToAll(t *testing.T) {
 	cat := routerTestCatalog()
-	out := Router{}.Route(PlannerOutput{Domains: nil}, nil, cat)
+	out := Router{}.Route(PlannerOutput{Domains: nil}, nil, cat, nil)
 	if out.Confidence >= aiconfig.DefaultRouterConfidenceThreshold {
 		t.Fatalf("expected low confidence, got %v", out.Confidence)
 	}
@@ -75,7 +75,7 @@ func TestRouter_EmptyDomainsLowConfidenceWidensToAll(t *testing.T) {
 }
 
 func TestRouter_AmbiguityLowersConfidence(t *testing.T) {
-	out := Router{}.Route(PlannerOutput{Domains: []string{"cases"}, Ambiguities: []string{"哪个服务?"}}, nil, nil)
+	out := Router{}.Route(PlannerOutput{Domains: []string{"cases"}, Ambiguities: []string{"哪个服务?"}}, nil, nil, nil)
 	if out.Confidence >= aiconfig.DefaultRouterConfidenceThreshold {
 		t.Fatalf("ambiguity should lower confidence below threshold, got %v", out.Confidence)
 	}
@@ -88,7 +88,7 @@ func TestRouter_PageContextInfersDomain(t *testing.T) {
 	cat := routerTestCatalog()
 	page := json.RawMessage(`{"path":"/scenarios/abc","scenarioId":"abc"}`)
 	// planner gave a different (cases) domain; page should add scenarios
-	out := Router{}.Route(PlannerOutput{Domains: []string{"cases"}}, page, cat)
+	out := Router{}.Route(PlannerOutput{Domains: []string{"cases"}}, page, cat, nil)
 	if !contains(out.ActiveTools, "create_scenario_with_steps") {
 		t.Fatalf("page-context scenarios domain not added: %+v", out.ActiveTools)
 	}
@@ -103,7 +103,7 @@ func TestRouter_MetaToolsNeverInOutput(t *testing.T) {
 		{Name: aitools.DescribeToolsName, Domain: "meta"},
 		{Name: "list_services", Domain: "meta"},
 	})
-	out := Router{}.Route(PlannerOutput{Domains: []string{"meta"}}, nil, cat)
+	out := Router{}.Route(PlannerOutput{Domains: []string{"meta"}}, nil, cat, nil)
 	// meta domain includes find/describe in catalog, but Router selecting
 	// the meta domain WILL include them here — that's acceptable because the
 	// loop mounts them anyway. The contract we assert is the loop's, not the

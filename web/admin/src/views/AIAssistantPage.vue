@@ -8,12 +8,12 @@
   >
     <template #sidebar>
     <aside class="ds-sidebar" :class="{ 'ds-sidebar--disabled': !currentProjectId }">
-      <div class="ds-sidebar__brand">
+      <router-link to="/" class="ds-sidebar__brand">
         <span class="ds-sidebar__logo" aria-hidden="true">
           <el-icon :size="20"><ChatLineRound /></el-icon>
         </span>
         <span class="ds-sidebar__title">AI 助理</span>
-      </div>
+      </router-link>
 
       <el-button
         class="ds-new-chat"
@@ -337,6 +337,9 @@ export default {
   align-items: center;
   gap: 10px;
   padding: 18px 16px 12px;
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
 }
 
 .ds-sidebar__logo {

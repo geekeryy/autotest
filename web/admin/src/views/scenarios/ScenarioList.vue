@@ -509,9 +509,10 @@ export default {
 }
 
 .scenario-action {
-  opacity: 0.45;
+  opacity: 0;
   cursor: pointer;
   color: var(--el-text-color-secondary);
+  transition: opacity 0.15s;
 }
 
 .scenario-item:hover .scenario-action {

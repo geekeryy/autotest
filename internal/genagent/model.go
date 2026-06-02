@@ -75,6 +75,61 @@ type JobResult struct {
 	CoverageResult json.RawMessage `json:"coverageResult,omitempty"`
 }
 
+// FailureEvidence is the structured context sent to the LLM for failure classification.
+type FailureEvidence struct {
+	ScenarioName string `json:"scenarioName"`
+	StepName     string `json:"stepName"`
+	StepOrder    int    `json:"stepOrder"`
+	StepType     string `json:"stepType"`
+
+	StepConfig          json.RawMessage `json:"stepConfig,omitempty"`
+	StepRequestOverride json.RawMessage `json:"stepRequestOverride,omitempty"`
+
+	Status           string          `json:"status"`
+	Error            string          `json:"error,omitempty"`
+	Assertions       json.RawMessage `json:"assertions,omitempty"`
+	RequestSnapshot  json.RawMessage `json:"requestSnapshot,omitempty"`
+	ResponseSnapshot json.RawMessage `json:"responseSnapshot,omitempty"`
+
+	StepOutput          map[string]any      `json:"stepOutput,omitempty"`
+	PreviousStepOutputs []StepOutputSummary  `json:"previousStepOutputs,omitempty"`
+	AssertionDiffs      []AssertionDiff      `json:"assertionDiffs,omitempty"`
+	PreviousRepairs     []RepairAttempt      `json:"previousRepairs,omitempty"`
+
+	// Endpoint metadata for context-enriched repair. Helps the LLM
+	// understand what the endpoint expects and generate better fixes.
+	EndpointSummary       string   `json:"endpointSummary,omitempty"`
+	EndpointRequiredFields []string `json:"endpointRequiredFields,omitempty"`
+	EndpointEnumFields    map[string][]any `json:"endpointEnumFields,omitempty"`
+}
+
+// StepOutputSummary is a compact representation of a prior step's output,
+// included so the LLM can trace variable references like $steps[1].output.token.
+type StepOutputSummary struct {
+	StepOrder int            `json:"stepOrder"`
+	StepName  string         `json:"stepName"`
+	Status    string         `json:"status"`
+	Output    map[string]any `json:"output,omitempty"`
+}
+
+// AssertionDiff captures the expected vs actual for a single failed assertion.
+type AssertionDiff struct {
+	Type     string `json:"type"`
+	Name     string `json:"name,omitempty"`
+	Expected string `json:"expected,omitempty"`
+	Actual   string `json:"actual,omitempty"`
+	Message  string `json:"message,omitempty"`
+}
+
+// RepairAttempt records a previous repair action for cross-round memory.
+type RepairAttempt struct {
+	Round    int    `json:"round"`
+	Category string `json:"category"`
+	Action   string `json:"action"`
+	Detail   string `json:"detail,omitempty"`
+	Success  bool   `json:"success"`
+}
+
 // JobRepository persists scenario_gen_jobs.
 type JobRepository interface {
 	Create(ctx context.Context, cfg RunConfig) (*Job, error)

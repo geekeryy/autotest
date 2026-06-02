@@ -252,16 +252,37 @@ func (c consumerField) resolvedProducerPath(prods []producerField, cons consumer
 	return "body.id"
 }
 
-// TokenResponsePath returns the step-output path for a login JWT (e.g. body.token or body.data.token).
+// tokenFieldNames defines recognized authentication token field names in
+// order of preference (most common first).
+var tokenFieldNames = []string{
+	"access_token",
+	"accessToken",
+	"token",
+	"jwt",
+	"authorization",
+	"session_token",
+	"sessionToken",
+	"id_token",
+	"idToken",
+}
+
+// TokenResponsePath returns the step-output path for a login JWT (e.g.
+// response.body.token or response.body.data.access_token). It searches the
+// response schema for known token field names, preferring access_token over
+// token over jwt. Returns a default "response.body.token" if nothing matches.
 func TokenResponsePath(ep spec.Endpoint) string {
-	var found string
-	walkJSONSchema(jsonValue(ep.ResponseSchema), "response.body", "", func(path, name, _ string) {
-		if found == "" && strings.EqualFold(name, "token") {
-			found = path
+	schema := jsonValue(ep.ResponseSchema)
+	// First pass: look for access_token (most common in OAuth2 APIs).
+	for _, target := range tokenFieldNames {
+		var found string
+		walkJSONSchema(schema, "response.body", "", func(path, name, _ string) {
+			if found == "" && strings.EqualFold(name, target) {
+				found = path
+			}
+		})
+		if found != "" {
+			return found
 		}
-	})
-	if found != "" {
-		return found
 	}
 	return "response.body.token"
 }
@@ -375,21 +396,96 @@ func resourcePrefix(path string) string {
 	return "/" + parts[0]
 }
 
-func isLoginEndpoint(ep spec.Endpoint) bool {
+// IsLoginEndpoint reports whether the endpoint is an authentication endpoint
+// (login, token, OAuth, SSO, etc.). It uses path patterns, operationId/summary
+// keywords, and request body field heuristics.
+func IsLoginEndpoint(ep spec.Endpoint) bool {
 	if !strings.EqualFold(ep.Method, "POST") {
 		return false
 	}
 	p := strings.ToLower(ep.Path)
-	return strings.Contains(p, "/login") || strings.Contains(p, "/auth/login")
+
+	// Path-based patterns.
+	loginPatterns := []string{
+		"/login", "/auth/login", "/signin", "/sign-in",
+		"/token", "/auth/token", "/oauth/token",
+		"/oauth/authorize", "/oauth/access_token",
+		"/sso/login", "/sso/callback", "/sso/authenticate",
+		"/authenticate", "/auth/authorize",
+	}
+	for _, pat := range loginPatterns {
+		if strings.Contains(p, pat) {
+			return true
+		}
+	}
+
+	// operationId / summary keyword matching.
+	keywordFields := []string{
+		strings.ToLower(ep.OperationID),
+		strings.ToLower(ep.Summary),
+	}
+	keywords := []string{"login", "signin", "sign_in", "authorize", "authenticate", "token", "oauth", "登录", "认证", "授权"}
+	for _, field := range keywordFields {
+		if field == "" {
+			continue
+		}
+		for _, kw := range keywords {
+			if strings.Contains(field, kw) {
+				return true
+			}
+		}
+	}
+
+	// Request body heuristic: POST with username+password (or email+password) fields.
+	if hasCredentialFields(ep.RequestSchema) {
+		return true
+	}
+
+	return false
 }
 
-func needsBearer(ep spec.Endpoint) bool {
+// hasCredentialFields checks if the request body contains credential-like field pairs.
+func hasCredentialFields(requestSchema json.RawMessage) bool {
+	var req map[string]any
+	if json.Unmarshal(requestSchema, &req) != nil {
+		return false
+	}
+	body, _ := req["body"].(map[string]any)
+	if body == nil {
+		return false
+	}
+	props, _ := body["properties"].(map[string]any)
+	if len(props) == 0 {
+		return false
+	}
+	lowerNames := make(map[string]bool, len(props))
+	for name := range props {
+		lowerNames[strings.ToLower(name)] = true
+	}
+	hasUser := lowerNames["username"] || lowerNames["user"] || lowerNames["email"] || lowerNames["account"] || lowerNames["login"] || lowerNames["loginname"] || lowerNames["login_name"]
+	hasPass := lowerNames["password"] || lowerNames["pass"] || lowerNames["pwd"] || lowerNames["passwd"] || lowerNames["secret"]
+	return hasUser && hasPass
+}
+
+// isLoginEndpoint is the unexported alias used internally (backward compat).
+func isLoginEndpoint(ep spec.Endpoint) bool {
+	return IsLoginEndpoint(ep)
+}
+
+// NeedsBearer reports whether the endpoint requires bearer token authentication
+// based on its security schema.
+func NeedsBearer(ep spec.Endpoint) bool {
 	var req map[string]any
 	if json.Unmarshal(ep.RequestSchema, &req) != nil {
 		return false
 	}
 	sec, _ := req["security"].([]any)
 	return len(sec) > 0
+}
+
+// needsBearer is the unexported alias used internally.
+func needsBearer(ep spec.Endpoint) bool {
+	return NeedsBearer(ep)
 }
 
 func methodPriority(ep spec.Endpoint) int {

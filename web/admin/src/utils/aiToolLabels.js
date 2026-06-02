@@ -18,6 +18,7 @@ export const AI_TOOL_DISPLAY_NAMES = {
   generate_and_verify_scenarios: '生成并验证场景',
   generate_coverage_scenarios: '生成覆盖场景',
   list_scenario_login_hints: '发现场景登录凭据',
+  ask_question: '向你提问',
 }
 
 /**

@@ -373,20 +373,11 @@ func depgraphMethodPriority(ep spec.Endpoint) int {
 }
 
 func isLoginEndpoint(ep spec.Endpoint) bool {
-	if ep.Method != "POST" {
-		return false
-	}
-	p := strings.ToLower(ep.Path)
-	return strings.HasSuffix(p, "/login") || strings.HasSuffix(p, "/auth/login")
+	return depgraph.IsLoginEndpoint(ep)
 }
 
 func needsBearer(ep spec.Endpoint) bool {
-	var req map[string]any
-	if err := json.Unmarshal(ep.RequestSchema, &req); err != nil {
-		return false
-	}
-	sec, _ := req["security"].([]any)
-	return len(sec) > 0
+	return depgraph.NeedsBearer(ep)
 }
 
 func loginBodyForEndpoint(ep spec.Endpoint, pctx planContext) json.RawMessage {
@@ -408,6 +399,11 @@ func loginCredentials(ep spec.Endpoint) (string, string) {
 }
 
 func expectedStatus(ep spec.Endpoint) int {
+	// First, try to extract from the OpenAPI response definition.
+	if code := statusFromResponseSchema(ep.ResponseSchema); code > 0 {
+		return code
+	}
+	// Fallback: infer from HTTP method.
 	if ep.Method == "POST" {
 		return 201
 	}
@@ -415,6 +411,71 @@ func expectedStatus(ep spec.Endpoint) int {
 		return 204
 	}
 	return 200
+}
+
+// statusFromResponseSchema attempts to extract the expected HTTP status code
+// from the endpoint's response schema. It looks for the first non-default
+// response key in the OpenAPI responses object.
+func statusFromResponseSchema(raw json.RawMessage) int {
+	if len(raw) == 0 {
+		return 0
+	}
+	var schema map[string]any
+	if json.Unmarshal(raw, &schema) != nil {
+		return 0
+	}
+
+	// OpenAPI 3.x: responses is a map of status code -> response object.
+	if responses, ok := schema["responses"].(map[string]any); ok {
+		return firstNonDefaultStatus(responses)
+	}
+
+	// Swagger 2.0: responses is also a map but may be at the top level.
+	// The schema might already be the responses object itself.
+	if _, ok := schema["200"]; ok {
+		return firstNonDefaultStatus(schema)
+	}
+	if _, ok := schema["201"]; ok {
+		return firstNonDefaultStatus(schema)
+	}
+
+	return 0
+}
+
+// firstNonDefaultStatus returns the first non-default, non-0 status code from
+// a responses map, preferring 2xx codes.
+func firstNonDefaultStatus(responses map[string]any) int {
+	best := 0
+	for key := range responses {
+		code := parseStatusCode(key)
+		if code <= 0 {
+			continue
+		}
+		// Prefer 2xx codes.
+		if code >= 200 && code < 300 {
+			if best == 0 || best >= 300 {
+				best = code
+			}
+		} else if best == 0 {
+			best = code
+		}
+	}
+	return best
+}
+
+func parseStatusCode(key string) int {
+	// Keys like "200", "201", "default", "4xx", "5xx".
+	if len(key) == 3 && key[0] >= '1' && key[0] <= '5' {
+		code := 0
+		for _, c := range key {
+			if c < '0' || c > '9' {
+				return 0
+			}
+			code = code*10 + int(c-'0')
+		}
+		return code
+	}
+	return 0
 }
 
 func (g *Generator) createScenario(ctx context.Context, projectID, serviceID uuid.UUID, plan ScenarioPlan) (*CreatedScenario, error) {

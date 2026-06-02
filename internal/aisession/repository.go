@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"autotest/internal/store"
 
@@ -297,6 +298,24 @@ func (r *Repository) AppendRoutingLog(ctx context.Context, sessionID uuid.UUID, 
 	return nil
 }
 
+// AppendToolOutcome inserts one tool call outcome row for analytics.
+// Write-only telemetry; errors are returned but should not break the conversation.
+func (r *Repository) AppendToolOutcome(ctx context.Context, sessionID uuid.UUID, input ToolOutcomeInput) error {
+	if r.DB == nil {
+		return fmt.Errorf("database unavailable")
+	}
+	_, err := r.DB.Exec(ctx, `
+		INSERT INTO ai_tool_outcomes (
+			session_id, message_seq, tool_name, domain, intent, success, error_type, hop_index, duration_ms
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	`, sessionID, input.MessageSeq, input.ToolName, input.Domain, input.Intent,
+		input.Success, input.ErrorType, input.HopIndex, input.DurationMs)
+	if err != nil {
+		return fmt.Errorf("append ai tool outcome: %w", err)
+	}
+	return nil
+}
+
 // MarkMessageFinal flips a pending_confirm message to final and updates
 // its tool_calls payload (the latter is rewritten so the persisted history
 // can drop the "pending" tool call entry once the user has decided).
@@ -443,4 +462,221 @@ func scanMessage(row rowScanner) (*Message, error) {
 		m.UsageDetails = json.RawMessage(usageDetails)
 	}
 	return &m, nil
+}
+
+// CreateCheckpoint inserts a new checkpoint for a session.
+func (r *Repository) CreateCheckpoint(ctx context.Context, sessionID uuid.UUID, input CreateCheckpointInput) (*Checkpoint, error) {
+	if r.DB == nil {
+		return nil, fmt.Errorf("database unavailable")
+	}
+	var state any
+	if len(input.State) > 0 {
+		state = input.State
+	}
+	row := r.DB.QueryRow(ctx, `
+		insert into ai_checkpoints (session_id, message_seq, state, label)
+		values ($1, $2, $3, $4)
+		returning id, session_id, message_seq, state, label, created_at
+	`, sessionID, input.MessageSeq, state, input.Label)
+	return scanCheckpoint(row)
+}
+
+// ListCheckpoints returns all checkpoints for a session.
+func (r *Repository) ListCheckpoints(ctx context.Context, sessionID uuid.UUID) ([]Checkpoint, error) {
+	if r.DB == nil {
+		return nil, fmt.Errorf("database unavailable")
+	}
+	rows, err := r.DB.Query(ctx, `
+		select id, session_id, message_seq, state, label, created_at
+		from ai_checkpoints
+		where session_id = $1
+		order by created_at desc
+	`, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("list checkpoints: %w", err)
+	}
+	defer rows.Close()
+	out := []Checkpoint{}
+	for rows.Next() {
+		cp, err := scanCheckpoint(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *cp)
+	}
+	return out, rows.Err()
+}
+
+// GetCheckpoint fetches a single checkpoint.
+func (r *Repository) GetCheckpoint(ctx context.Context, sessionID, checkpointID uuid.UUID) (*Checkpoint, error) {
+	if r.DB == nil {
+		return nil, fmt.Errorf("database unavailable")
+	}
+	row := r.DB.QueryRow(ctx, `
+		select id, session_id, message_seq, state, label, created_at
+		from ai_checkpoints
+		where id = $1 and session_id = $2
+	`, checkpointID, sessionID)
+	cp, err := scanCheckpoint(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("checkpoint 不存在")
+		}
+		return nil, err
+	}
+	return cp, nil
+}
+
+// DeleteCheckpoint removes a checkpoint.
+func (r *Repository) DeleteCheckpoint(ctx context.Context, sessionID, checkpointID uuid.UUID) error {
+	if r.DB == nil {
+		return fmt.Errorf("database unavailable")
+	}
+	tag, err := r.DB.Exec(ctx, `
+		delete from ai_checkpoints
+		where id = $1 and session_id = $2
+	`, checkpointID, sessionID)
+	if err != nil {
+		return fmt.Errorf("delete checkpoint: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("checkpoint 不存在")
+	}
+	return nil
+}
+
+// ImportSession imports a session from an export. It creates a new session
+// and replays all messages and checkpoints with new IDs. The entire operation
+// is wrapped in a transaction so it either fully succeeds or fully rolls back.
+func (r *Repository) ImportSession(ctx context.Context, projectID, userID uuid.UUID, data *SessionExport) (*Session, error) {
+	if r.DB == nil {
+		return nil, fmt.Errorf("database unavailable")
+	}
+	if data == nil {
+		return nil, fmt.Errorf("import data is nil")
+	}
+
+	tx, err := r.DB.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin import transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	// Create the new session within the transaction
+	var newSession Session
+	err = tx.QueryRow(ctx, `
+		insert into ai_sessions (project_id, user_id, title)
+		values ($1, $2, $3)
+		returning id, project_id, user_id, title, created_at, updated_at
+	`, projectID, userID, data.Session.Title+" (imported)",
+	).Scan(&newSession.ID, &newSession.ProjectID, &newSession.UserID, &newSession.Title, &newSession.CreatedAt, &newSession.UpdatedAt)
+	if err != nil {
+		return nil, fmt.Errorf("create imported session: %w", err)
+	}
+
+	// Import messages preserving seq order
+	for _, msg := range data.Messages {
+		var toolCallID any
+		if msg.ToolCallID != "" {
+			toolCallID = msg.ToolCallID
+		}
+		var toolCalls any
+		if len(msg.ToolCalls) > 0 {
+			toolCalls = msg.ToolCalls
+		}
+		var model any
+		if msg.Model != "" {
+			model = msg.Model
+		}
+		var elapsed any
+		if msg.ElapsedMillis > 0 {
+			elapsed = msg.ElapsedMillis
+		}
+		var attachments any
+		if len(msg.Attachments) > 0 {
+			attachments = msg.Attachments
+		}
+		var usageDetails any
+		if len(msg.UsageDetails) > 0 {
+			usageDetails = msg.UsageDetails
+		}
+		status := msg.Status
+		if status == "" {
+			status = StatusFinal
+		}
+		_, err := tx.Exec(ctx, `
+			insert into ai_messages (
+				session_id, seq, role, content, attachments, reasoning_content, tool_call_id, tool_calls,
+				status, model, elapsed_millis, usage_details
+			) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+		`, newSession.ID, msg.Seq, msg.Role, msg.Content, attachments, msg.ReasoningContent, toolCallID, toolCalls, status, model, elapsed, usageDetails)
+		if err != nil {
+			return nil, fmt.Errorf("import message seq=%d: %w", msg.Seq, err)
+		}
+	}
+
+	// Import checkpoints
+	for _, cp := range data.Checkpoints {
+		var state any
+		if len(cp.State) > 0 {
+			state = cp.State
+		}
+		_, err := tx.Exec(ctx, `
+			insert into ai_checkpoints (session_id, message_seq, state, label)
+			values ($1, $2, $3, $4)
+		`, newSession.ID, cp.MessageSeq, state, cp.Label+" (imported)")
+		if err != nil {
+			return nil, fmt.Errorf("import checkpoint: %w", err)
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit import: %w", err)
+	}
+	return &newSession, nil
+}
+
+// ExportSession exports a session with all messages and checkpoints.
+func (r *Repository) ExportSession(ctx context.Context, sessionID uuid.UUID) (*SessionExport, error) {
+	if r.DB == nil {
+		return nil, fmt.Errorf("database unavailable")
+	}
+	// Get session
+	var session Session
+	err := r.DB.QueryRow(ctx, `
+		select id, project_id, user_id, title, created_at, updated_at
+		from ai_sessions
+		where id = $1 and deleted_at is null
+	`, sessionID).Scan(&session.ID, &session.ProjectID, &session.UserID, &session.Title, &session.CreatedAt, &session.UpdatedAt)
+	if err != nil {
+		return nil, fmt.Errorf("export session: %w", err)
+	}
+	// Get messages
+	messages, err := r.ListMessages(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	// Get checkpoints
+	checkpoints, err := r.ListCheckpoints(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	return &SessionExport{
+		Session:     session,
+		Messages:    messages,
+		Checkpoints: checkpoints,
+		ExportedAt:  time.Now(),
+	}, nil
+}
+
+func scanCheckpoint(row rowScanner) (*Checkpoint, error) {
+	var cp Checkpoint
+	var state []byte
+	if err := row.Scan(&cp.ID, &cp.SessionID, &cp.MessageSeq, &state, &cp.Label, &cp.CreatedAt); err != nil {
+		return nil, err
+	}
+	if len(state) > 0 {
+		cp.State = json.RawMessage(state)
+	}
+	return &cp, nil
 }

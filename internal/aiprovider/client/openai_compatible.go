@@ -329,7 +329,7 @@ func (c *OpenAICompatibleClient) ChatStream(ctx context.Context, messages []Mess
 
 	httpClient := c.HTTPClient
 	if httpClient == nil {
-		httpClient = defaultHTTPClient
+		httpClient = streamHTTPClient
 	}
 
 	resp, err := httpClient.Do(req)
@@ -380,7 +380,7 @@ func parseOpenAIStream(r io.Reader, fallbackModel string, onEvent StreamCallback
 				continue
 			}
 			args := strings.TrimSpace(pc.Arguments.String())
-			if args == "" {
+			if args == "" || !json.Valid([]byte(args)) {
 				args = "{}"
 			}
 			tc := ToolCall{ID: pc.ID, Name: pc.Name, Arguments: json.RawMessage(args)}

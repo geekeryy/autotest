@@ -130,12 +130,14 @@ type AssistantGenRepairSummary struct {
 	Detail     string `json:"detail,omitempty"`
 }
 
-// AssistantThinkingState reports reasoning activity without exposing the
-// reasoning_content itself. The content is persisted server-side only when a
-// provider needs it for tool-call continuation.
+// AssistantThinkingState reports reasoning activity. When Active is true and
+// Content is non-empty the field carries an incremental reasoning chunk; the
+// frontend is responsible for concatenation. When Active flips to false the
+// Content is empty — the full reasoning text lives in the persisted message.
 type AssistantThinkingState struct {
-	Active        bool  `json:"active"`
-	ElapsedMillis int64 `json:"elapsedMillis,omitempty"`
+	Active        bool   `json:"active"`
+	ElapsedMillis int64  `json:"elapsedMillis,omitempty"`
+	Content       string `json:"content,omitempty"`
 }
 
 // AssistantToolCall is the public representation of a tool invocation.
@@ -160,17 +162,18 @@ type AssistantToolResult struct {
 // PersistedMessage is a flattened projection of ai_messages we forward to
 // the frontend so it can update its local store without a second round-trip.
 type PersistedMessage struct {
-	ID         uuid.UUID       `json:"id"`
-	Seq        int             `json:"seq"`
-	Role       string          `json:"role"`
-	Content     string          `json:"content"`
-	Attachments json.RawMessage `json:"attachments,omitempty"`
-	ToolCallID  string          `json:"toolCallId,omitempty"`
-	ToolCalls  json.RawMessage `json:"toolCalls,omitempty"`
-	Status     string          `json:"status"`
-	Model        string          `json:"model,omitempty"`
-	UsageDetails json.RawMessage `json:"usageDetails,omitempty"`
-	CreatedAt    time.Time       `json:"createdAt"`
+	ID               uuid.UUID       `json:"id"`
+	Seq              int             `json:"seq"`
+	Role             string          `json:"role"`
+	Content          string          `json:"content"`
+	ReasoningContent string          `json:"reasoningContent,omitempty"`
+	Attachments      json.RawMessage `json:"attachments,omitempty"`
+	ToolCallID       string          `json:"toolCallId,omitempty"`
+	ToolCalls        json.RawMessage `json:"toolCalls,omitempty"`
+	Status           string          `json:"status"`
+	Model            string          `json:"model,omitempty"`
+	UsageDetails     json.RawMessage `json:"usageDetails,omitempty"`
+	CreatedAt        time.Time       `json:"createdAt"`
 }
 
 // SessionStore decouples the streaming engine from the concrete aisession
@@ -199,6 +202,9 @@ type SessionStore interface {
 	// This is write-only telemetry (Shadow compare / offline eval) and does
 	// not affect the SSE schema or session isolation boundary.
 	AppendRoutingLog(ctx context.Context, input RoutingLogInput) error
+	// AppendToolOutcome persists one tool call outcome row for analytics.
+	// Write-only telemetry; failures must not affect the conversation flow.
+	AppendToolOutcome(ctx context.Context, input ToolOutcomeInput) error
 }
 
 // RoutingLogInput is the projection forwarded to the session store when
@@ -212,6 +218,19 @@ type RoutingLogInput struct {
 	RouterOutput  json.RawMessage
 	PerHop        json.RawMessage
 	Outcome       string
+}
+
+// ToolOutcomeInput records the outcome of a single tool call for analytics.
+type ToolOutcomeInput struct {
+	SessionID  uuid.UUID
+	MessageSeq int
+	ToolName   string
+	Domain     string
+	Intent     string
+	Success    bool
+	ErrorType  string
+	HopIndex   int
+	DurationMs int
 }
 
 // StoredMessage is the abstract record returned by the session store.
@@ -313,6 +332,9 @@ type streamConfig struct {
 	// Routing accumulates planner/router/per-hop telemetry for
 	// ai_routing_logs and carries the gray-rollout mode + confidence.
 	Routing *routingState
+	// MatchedSkillName is the name of the skill matched during routing,
+	// used to activate conditional prompt layers (e.g. smart_scenario_workflow).
+	MatchedSkillName string
 }
 
 // ChatStreamWithTools is the entry point for SSE assistant chats. The
@@ -669,7 +691,15 @@ func (s *Service) runStreamLoop(ctx context.Context, cfg *streamConfig) error {
 		return s.streamFail(cfg.Sink, err)
 	}
 
-	messages := buildClientMessages(history, cfg.PageContext, cfg.ProfileContext, cfg.VisionEnabled)
+	// Use ContextManager for token-budget-aware message construction.
+	// When the service has a valid repo, use LLM-powered compression
+	// for higher-quality history summaries.
+	var compressor Compressor
+	if s.repo != nil && s.repo.DB != nil {
+		compressor = NewLLMCompressor(s)
+	}
+	cm := NewContextManager(EstimateContextBudget(cfg.BaseOpts.Model, 0), compressor)
+	messages := cm.BuildContextMessages(history, cfg.PageContext, cfg.ProfileContext, cfg.VisionEnabled, cfg.MatchedSkillName)
 	initialHopBudget := cfg.HopBudget
 
 	// Stamp a per-stream describe collector so describe_tools can report
@@ -703,14 +733,15 @@ func (s *Service) runStreamLoop(ctx context.Context, cfg *streamConfig) error {
 		)
 		thinkingActive := false
 		var thinkingStartedAt time.Time
-		emitThinking := func(active bool) error {
-			if active == thinkingActive {
+		emitThinking := func(active bool, content string) error {
+			if active == thinkingActive && content == "" {
 				return nil
 			}
-			state := &AssistantThinkingState{Active: active}
-			if active {
+			state := &AssistantThinkingState{Active: active, Content: content}
+			if active && !thinkingActive {
 				thinkingStartedAt = time.Now()
-			} else if !thinkingStartedAt.IsZero() {
+			}
+			if !active && active != thinkingActive && !thinkingStartedAt.IsZero() {
 				state.ElapsedMillis = time.Since(thinkingStartedAt).Milliseconds()
 			}
 			thinkingActive = active
@@ -730,14 +761,14 @@ func (s *Service) runStreamLoop(ctx context.Context, cfg *streamConfig) error {
 		if err := streamingCli.ChatStream(ctx, messages, opts, func(ev client.StreamEvent) error {
 			switch ev.Kind {
 			case client.StreamEventText:
-				if err := emitThinking(false); err != nil {
+				if err := emitThinking(false, ""); err != nil {
 					return err
 				}
 				textBuf.WriteString(ev.Text)
 				return cfg.Sink(AssistantStreamEvent{Kind: StreamEventText, Text: ev.Text})
 			case client.StreamEventReasoning:
 				reasoningBuf.WriteString(ev.ReasoningContent)
-				return emitThinking(true)
+				return emitThinking(true, ev.ReasoningContent)
 			case client.StreamEventToolCall:
 				if ev.ToolCall != nil {
 					toolCalls = append(toolCalls, *ev.ToolCall)
@@ -756,12 +787,12 @@ func (s *Service) runStreamLoop(ctx context.Context, cfg *streamConfig) error {
 			return nil
 		}); err != nil {
 			if thinkingActive {
-				_ = emitThinking(false)
+				_ = emitThinking(false, "")
 			}
 			return s.streamFail(cfg.Sink, err)
 		}
 		if thinkingActive {
-			if err := emitThinking(false); err != nil {
+			if err := emitThinking(false, ""); err != nil {
 				return err
 			}
 		}
@@ -847,6 +878,7 @@ func (s *Service) runStreamLoop(ctx context.Context, cfg *streamConfig) error {
 					return err
 				}
 				content := executeToolCall(toolExecutionContext(ctx, cfg, cfg.Sink), cfg.Tools, call)
+				trackToolOutcome(cfg, call, content, hopIndex)
 				toolMsg, err := cfg.Store.AppendMessage(ctx, cfg.SessionID, StoredMessageInput{
 					Role:       "tool",
 					Content:    content,
@@ -976,6 +1008,7 @@ func (s *Service) runStreamLoop(ctx context.Context, cfg *streamConfig) error {
 				return err
 			}
 			content := executeToolCall(toolExecutionContext(ctx, cfg, cfg.Sink), cfg.Tools, call)
+			trackToolOutcome(cfg, call, content, hopIndex)
 			toolMsg, err := cfg.Store.AppendMessage(ctx, cfg.SessionID, StoredMessageInput{
 				Role:       "tool",
 				Content:    content,
@@ -1078,6 +1111,43 @@ func (s *Service) streamFail(sink StreamCallback, err error) error {
 	_ = sink(AssistantStreamEvent{Kind: StreamEventError, Error: err.Error()})
 	_ = sink(AssistantStreamEvent{Kind: StreamEventDone, Finish: "error"})
 	return err
+}
+
+// trackToolOutcome records the outcome of a tool call for analytics.
+// Runs asynchronously to avoid blocking the conversation loop.
+func trackToolOutcome(cfg *streamConfig, call client.ToolCall, content string, hopIndex int) {
+	if cfg == nil || cfg.Store == nil {
+		return
+	}
+	tool, _ := cfg.Tools[call.Name]
+	isError := strings.Contains(content, `"error"`)
+	domain := ""
+	if tool.Domain != "" {
+		domain = tool.Domain
+	}
+	intent := ""
+	if cfg.Routing != nil && len(cfg.Routing.PlannerOutput) > 0 {
+		var plan PlannerOutput
+		if json.Unmarshal(cfg.Routing.PlannerOutput, &plan) == nil {
+			intent = plan.Intent
+		}
+	}
+	errorType := ""
+	if isError {
+		errorType = "tool_error"
+	}
+	go func() {
+		_ = cfg.Store.AppendToolOutcome(context.Background(), ToolOutcomeInput{
+			SessionID:  cfg.SessionID,
+			MessageSeq: cfg.Routing.MessageSeq,
+			ToolName:   call.Name,
+			Domain:     domain,
+			Intent:     intent,
+			Success:    !isError,
+			ErrorType:  errorType,
+			HopIndex:   hopIndex,
+		})
+	}()
 }
 
 // buildClientMessages walks the persisted history and produces the
@@ -1238,10 +1308,14 @@ func assistantCallsToClient(calls []*AssistantToolCall) []client.ToolCall {
 func toStoredCalls(calls []client.ToolCall, tools map[string]aitools.Tool) []StoredToolCall {
 	out := make([]StoredToolCall, 0, len(calls))
 	for _, c := range calls {
+		args := c.Arguments
+		if len(args) == 0 || !json.Valid(args) {
+			args = json.RawMessage("{}")
+		}
 		stored := StoredToolCall{
 			ID:        c.ID,
 			Name:      c.Name,
-			Arguments: c.Arguments,
+			Arguments: args,
 		}
 		if t, ok := tools[c.Name]; ok {
 			stored.Mutating = t.Mutating
@@ -1342,17 +1416,18 @@ func toPersisted(m *StoredMessage) *PersistedMessage {
 		return nil
 	}
 	return &PersistedMessage{
-		ID:           m.ID,
-		Seq:          m.Seq,
-		Role:         m.Role,
-		Content:      m.Content,
-		Attachments:  m.Attachments,
-		ToolCallID:   m.ToolCallID,
-		ToolCalls:    m.ToolCalls,
-		Status:       m.Status,
-		Model:        m.Model,
-		UsageDetails: m.UsageDetails,
-		CreatedAt:    m.CreatedAt,
+		ID:               m.ID,
+		Seq:              m.Seq,
+		Role:             m.Role,
+		Content:          m.Content,
+		ReasoningContent: m.ReasoningContent,
+		Attachments:      m.Attachments,
+		ToolCallID:       m.ToolCallID,
+		ToolCalls:        m.ToolCalls,
+		Status:           m.Status,
+		Model:            m.Model,
+		UsageDetails:     m.UsageDetails,
+		CreatedAt:        m.CreatedAt,
 	}
 }
 

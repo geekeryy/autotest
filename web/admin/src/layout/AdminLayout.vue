@@ -16,10 +16,10 @@
       }"
     >
       <div class="brand">
-        <div class="brand-identity">
+        <router-link to="/" class="brand-identity">
           <BrandLogo class="brand-logo-mark" />
           <span v-if="!isSidebarCollapsed" class="brand-title">Autotest</span>
-        </div>
+        </router-link>
         <el-button
           class="collapse-button"
           text
@@ -509,6 +509,9 @@ export default {
   display: inline-flex;
   align-items: center;
   gap: 10px;
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
 }
 
 .brand-logo-mark {

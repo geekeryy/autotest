@@ -3,7 +3,6 @@ package generator
 import (
 	"encoding/json"
 	"fmt"
-	"strconv"
 	"strings"
 
 	testcase "autotest/internal/case"
@@ -89,19 +88,69 @@ func buildFingerprint(endpoint Endpoint, ruleID string) string {
 }
 
 func defaultExpectedStatus(responseSchema json.RawMessage) int {
-	var value map[string]any
-	if err := json.Unmarshal(responseSchema, &value); err != nil {
+	if len(responseSchema) == 0 {
 		return 200
 	}
-	status, _ := value["status"].(string)
-	if status == "" || status == "default" {
+	var schema map[string]any
+	if err := json.Unmarshal(responseSchema, &schema); err != nil {
 		return 200
 	}
-	code, err := strconv.Atoi(status)
-	if err != nil {
-		return 200
+
+	// Try to extract from OpenAPI responses map.
+	if responses, ok := schema["responses"].(map[string]any); ok {
+		if code := firstSuccessCode(responses); code > 0 {
+			return code
+		}
 	}
-	return code
+
+	// Fallback: the schema itself might be a responses map (Swagger 2.0 style).
+	for key := range schema {
+		if len(key) == 3 && key[0] >= '2' && key[0] <= '2' {
+			code := 0
+			for _, c := range key {
+				if c < '0' || c > '9' {
+					code = 0
+					break
+				}
+				code = code*10 + int(c-'0')
+			}
+			if code >= 200 && code < 300 {
+				return code
+			}
+		}
+	}
+
+	return 200
+}
+
+// firstSuccessCode returns the first 2xx status code from a responses map.
+func firstSuccessCode(responses map[string]any) int {
+	best := 0
+	for key := range responses {
+		if len(key) != 3 {
+			continue
+		}
+		code := 0
+		valid := true
+		for _, c := range key {
+			if c < '0' || c > '9' {
+				valid = false
+				break
+			}
+			code = code*10 + int(c-'0')
+		}
+		if !valid || code < 100 {
+			continue
+		}
+		if code >= 200 && code < 300 {
+			if best == 0 {
+				best = code
+			}
+		} else if best == 0 {
+			best = code
+		}
+	}
+	return best
 }
 
 func caseName(endpoint Endpoint) string {

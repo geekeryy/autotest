@@ -78,6 +78,7 @@ export const menuRoutes = [
       { path: '/platform/ai-providers', component: () => import('../views/platform/AIProviderList.vue'), meta: { title: 'AI 提供商', permission: 'projects:read' } },
       { path: '/platform/ai-assistant-settings', component: () => import('../views/platform/AIAssistantSettings.vue'), meta: { title: 'AI 助理配置', permission: 'projects:read' } },
       { path: '/platform/ai-prompts', component: () => import('../views/projects/ProjectPromptList.vue'), meta: { title: 'Prompt 管理', permission: 'projects:read' } },
+      { path: '/platform/ai-management', component: () => import('../views/platform/AIManagement.vue'), meta: { title: 'AI 能力管理', permission: 'projects:read' } },
       { path: '/mock-value-sets', component: () => import('../views/platform/MockValueSetList.vue'), meta: { title: '命名值集合', permission: 'projects:read' } },
       { path: '/template-reference', component: () => import('../views/platform/TemplateReference.vue'), meta: { title: '模板与变量参考' } }
     ]

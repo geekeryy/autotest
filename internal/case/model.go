@@ -119,15 +119,24 @@ type EndpointSchemaGetter interface {
 	GetEndpointRequestSchema(ctx context.Context, endpointID uuid.UUID) (json.RawMessage, error)
 }
 
+// FieldDependencyInfo describes a field that should be populated from an
+// upstream endpoint's response rather than random generation.
+type FieldDependencyInfo struct {
+	FieldPath  string `json:"fieldPath"`  // e.g. "body.userId" or path param "id"
+	DependsOn  string `json:"dependsOn"`  // human-readable, e.g. "POST /users → response.body.data.id"
+	Suggestion string `json:"suggestion"` // e.g. "在场景中使用 {{$steps[N].response.body.data.id}}"
+}
+
 // GeneratedParams is the response body for the generate-params endpoint.
 //
 // The "generate params" entry point only fills path/query/body; headers and
 // authentication are intentionally omitted so that triggering the action does
 // not silently overwrite headers or strip the request's `security` field.
 type GeneratedParams struct {
-	Query map[string]string `json:"query"`
-	Path  map[string]string `json:"path"`
-	Body  any               `json:"body"`
+	Query        map[string]string     `json:"query"`
+	Path         map[string]string     `json:"path"`
+	Body         any                   `json:"body"`
+	Dependencies []FieldDependencyInfo `json:"dependencies,omitempty"`
 }
 
 func NewFingerprint(parts ...string) string {

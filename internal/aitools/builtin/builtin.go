@@ -52,6 +52,8 @@ func ReadOnly(deps Deps) []aitools.Tool {
 		listDataSourcesTool(deps).WithMeta("paramsource", "列出平台全部数据库数据源"),
 		listSQLParameterSourcesTool(deps).WithMeta("paramsource", "列出某服务下的SQL参数源"),
 		previewSQLParameterSourceTool(deps).WithMeta("paramsource", "预览SQL参数源执行结果（只读）"),
+		getDataSourceSchemaTool(deps).WithMeta("paramsource", "查询数据源的表结构（表名+列名）"),
+		executeSQLQueryTool(deps).WithMeta("paramsource", "对数据源执行只读SQL查询，获取真实业务数据"),
 		// scripts
 		listScriptTemplatesTool(deps).WithMeta("scripts", "列出项目可用的脚本模板"),
 		// runs
@@ -126,6 +128,7 @@ func All(deps Deps) []aitools.Tool {
 	tools := ReadOnly(deps)
 	tools = append(tools, Mutating(deps)...)
 	tools = append(tools, GatedMutating(deps)...)
+	tools = append(tools, askQuestionTool().WithMeta("meta", "向用户提出交互式问题（单选/多选/文本输入），等待用户回答后继续"))
 	return tools
 }
 

@@ -47,6 +47,9 @@ func (s *recordingStore) AppendRoutingLog(_ context.Context, in RoutingLogInput)
 	s.routingLog = &cp
 	return nil
 }
+func (s *recordingStore) AppendToolOutcome(_ context.Context, _ ToolOutcomeInput) error {
+	return nil
+}
 
 // scriptedStreamClient replays a fixed sequence of hop responses and records
 // the tool definitions offered on each hop.

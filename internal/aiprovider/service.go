@@ -42,10 +42,56 @@ type ProfileContextProvider interface {
 	GetPromptContext(ctx context.Context, projectID uuid.UUID) (string, error)
 }
 
+// SkillMatcher provides skill matching for the Router.
+type SkillMatcher interface {
+	MatchSkills(ctx context.Context, projectID *uuid.UUID, input string, pageContext []byte) ([]*MatchedSkill, error)
+}
+
+// MatchedSkill is the minimal skill representation needed by the Router.
+type MatchedSkill struct {
+	Name        string   `json:"name"`
+	ToolDomains []string `json:"toolDomains"`
+}
+
+// EndpointSchemaProvider fetches the full endpoint schema from the database
+// for server-side context enrichment. This ensures the AI always has access
+// to complete description/example/default/enum fields even when the frontend
+// omits them.
+type EndpointSchemaProvider interface {
+	GetEndpointByID(ctx context.Context, endpointID uuid.UUID) (*EndpointBrief, error)
+}
+
+// EndpointBrief is the minimal endpoint data needed for schema enrichment.
+type EndpointBrief struct {
+	ID             uuid.UUID       `json:"id"`
+	Method         string          `json:"method"`
+	Path           string          `json:"path"`
+	OperationID    string          `json:"operationId,omitempty"`
+	Summary        string          `json:"summary,omitempty"`
+	Tags           []string        `json:"tags,omitempty"`
+	RequestSchema  json.RawMessage `json:"requestSchema,omitempty"`
+	ResponseSchema json.RawMessage `json:"responseSchema,omitempty"`
+}
+
+// ProfileConventionProvider retrieves just the response convention from the
+// project profile, for narrow injection into generate_assertion prompts.
+type ProfileConventionProvider interface {
+	GetConvention(ctx context.Context, projectID uuid.UUID) (*ConventionBrief, error)
+}
+
+// ConventionBrief holds the response convention data for assertion generation.
+type ConventionBrief struct {
+	Convention string `json:"convention,omitempty"`
+	Enums      string `json:"enums,omitempty"`
+}
+
 type Service struct {
 	repo           *Repository
 	mockSets       MockSetSummaryProvider
 	profileContext ProfileContextProvider
+	endpointSchema EndpointSchemaProvider
+	convention     ProfileConventionProvider
+	skillSvc       SkillMatcher
 
 	// On-demand tool surface (Planner/Router/Catalog) + gray-rollout mode.
 	// All three must be set for the on-demand surface to engage; otherwise
@@ -75,6 +121,20 @@ func (s *Service) WithProfileContext(provider ProfileContextProvider) *Service {
 	return s
 }
 
+// WithEndpointSchema 注入端点 schema 查询源，让 generate_params 在后端补全
+// 完整的 description/example/default/enum 字段，不依赖前端传入。
+func (s *Service) WithEndpointSchema(provider EndpointSchemaProvider) *Service {
+	s.endpointSchema = provider
+	return s
+}
+
+// WithConvention 注入项目响应约定查询源，让 generate_assertion 能基于
+// 项目实际的响应格式（如 {code, msg, data} 包装）生成更准确的断言。
+func (s *Service) WithConvention(provider ProfileConventionProvider) *Service {
+	s.convention = provider
+	return s
+}
+
 // WithRouting 注入按需工具表面所需的 Planner / Router / Catalog 与灰度模式。
 // 三者齐备时，浮窗对话会在主循环前计算 Planner→Router 并写 ai_routing_logs；
 // 是否真正收窄发给 LLM 的工具，由 mode 决定（默认 shadow：全量 + 影子记录）。
@@ -86,6 +146,12 @@ func (s *Service) WithRouting(planner *Planner, router *Router, catalog *aitools
 		mode = RoutingModeShadow
 	}
 	s.routingMode = mode
+	return s
+}
+
+// WithSkillMatcher 注入技能匹配服务，让 Router 在路由时参考已匹配的技能。
+func (s *Service) WithSkillMatcher(sm SkillMatcher) *Service {
+	s.skillSvc = sm
 	return s
 }
 
@@ -238,6 +304,20 @@ func (s *Service) Chat(ctx context.Context, projectID uuid.UUID, req ChatRequest
 		summaries := s.mockSets.SummariesForProject(ctx, projectID)
 		if len(summaries) > 0 {
 			contextPayload = mergeAvailableMockSets(req.Context, summaries)
+		}
+	}
+
+	// generate_params: 后端补全完整 schema（description/example/default/enum），
+	// 确保 AI 即使前端传入了精简 schema 也能获得完整信息。
+	if action == ActionGenerateParams && s.endpointSchema != nil {
+		contextPayload = s.enrichEndpointSchema(ctx, contextPayload)
+	}
+
+	// generate_assertion: 注入项目响应约定和字段枚举，让 AI 生成的断言
+	// 能检查业务状态码和数据字段，而不只是 status_code。
+	if action == ActionGenerateAssertion && s.convention != nil {
+		if conv, err := s.convention.GetConvention(ctx, projectID); err == nil && conv != nil {
+			contextPayload = mergeConventionContext(contextPayload, conv)
 		}
 	}
 
@@ -582,6 +662,128 @@ func mergeAvailableMockSets(raw json.RawMessage, summaries []MockSetSummary) jso
 		ctxObj = map[string]any{}
 	}
 	ctxObj["availableMockSets"] = summaries
+	out, err := json.Marshal(ctxObj)
+	if err != nil {
+		return raw
+	}
+	return out
+}
+
+// enrichEndpointSchema fetches the full endpoint schema from DB and merges
+// missing fields (description, example, default, enum) into the context.
+// This is a best-effort operation: any error returns the original context.
+func (s *Service) enrichEndpointSchema(ctx context.Context, raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 || s.endpointSchema == nil {
+		return raw
+	}
+	var ctxObj map[string]any
+	if err := json.Unmarshal(raw, &ctxObj); err != nil {
+		return raw
+	}
+
+	// Try to extract endpointId from context.
+	var endpointID uuid.UUID
+	if idStr, ok := ctxObj["endpointId"].(string); ok && idStr != "" {
+		if parsed, err := uuid.Parse(idStr); err == nil {
+			endpointID = parsed
+		}
+	}
+	if endpointID == uuid.Nil {
+		return raw
+	}
+
+	ep, err := s.endpointSchema.GetEndpointByID(ctx, endpointID)
+	if err != nil || ep == nil {
+		return raw
+	}
+
+	// Merge full requestSchema into context endpoint.requestSchema.
+	var fullReqSchema map[string]any
+	if len(ep.RequestSchema) > 0 {
+		if json.Unmarshal(ep.RequestSchema, &fullReqSchema) == nil {
+			if epCtx, ok := ctxObj["endpoint"].(map[string]any); ok {
+				// Merge: keep frontend values, fill in missing description/example/default/enum.
+				if existing, ok := epCtx["requestSchema"].(map[string]any); ok {
+					mergeSchemaFields(existing, fullReqSchema)
+				} else {
+					epCtx["requestSchema"] = fullReqSchema
+				}
+			}
+		}
+	}
+
+	// Also merge responseSchema for semantic reference.
+	var fullRespSchema map[string]any
+	if len(ep.ResponseSchema) > 0 {
+		if json.Unmarshal(ep.ResponseSchema, &fullRespSchema) == nil {
+			if epCtx, ok := ctxObj["endpoint"].(map[string]any); ok {
+				epCtx["responseSchema"] = fullRespSchema
+			}
+		}
+	}
+
+	out, err := json.Marshal(ctxObj)
+	if err != nil {
+		return raw
+	}
+	return out
+}
+
+// mergeSchemaFields recursively merges missing metadata fields from src into dst.
+// It preserves existing dst values and only adds description/example/default/enum
+// that are missing in dst.
+func mergeSchemaFields(dst, src map[string]any) {
+	metaFields := []string{"description", "example", "default", "enum", "title", "format", "pattern"}
+	for _, f := range metaFields {
+		if _, exists := dst[f]; !exists {
+			if v, ok := src[f]; ok {
+				dst[f] = v
+			}
+		}
+	}
+
+	// Recurse into properties.
+	if dstProps, ok := dst["properties"].(map[string]any); ok {
+		if srcProps, ok := src["properties"].(map[string]any); ok {
+			for name, dstProp := range dstProps {
+				if dstMap, ok := dstProp.(map[string]any); ok {
+					if srcProp, ok := srcProps[name].(map[string]any); ok {
+						mergeSchemaFields(dstMap, srcProp)
+					}
+				}
+			}
+		}
+	}
+
+	// Recurse into items (for arrays).
+	if dstItems, ok := dst["items"].(map[string]any); ok {
+		if srcItems, ok := src["items"].(map[string]any); ok {
+			mergeSchemaFields(dstItems, srcItems)
+		}
+	}
+}
+
+// mergeConventionContext injects response convention and field enum info into
+// the context JSON for generate_assertion.
+func mergeConventionContext(raw json.RawMessage, conv *ConventionBrief) json.RawMessage {
+	if conv == nil || (conv.Convention == "" && conv.Enums == "") {
+		return raw
+	}
+	var ctxObj map[string]any
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &ctxObj); err != nil {
+			ctxObj = nil
+		}
+	}
+	if ctxObj == nil {
+		ctxObj = map[string]any{}
+	}
+	if conv.Convention != "" {
+		ctxObj["responseConvention"] = conv.Convention
+	}
+	if conv.Enums != "" {
+		ctxObj["fieldEnums"] = conv.Enums
+	}
 	out, err := json.Marshal(ctxObj)
 	if err != nil {
 		return raw

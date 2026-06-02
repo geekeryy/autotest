@@ -7,17 +7,35 @@ import (
 	"strings"
 
 	"autotest/internal/sampler"
+	"autotest/internal/testprofile"
 
 	"github.com/google/uuid"
 )
 
+// ProfileGetter retrieves a project's test profile. Satisfied by *testprofile.Service.
+type ProfileGetter interface {
+	Get(ctx context.Context, projectID uuid.UUID) (*testprofile.Profile, error)
+}
+
 type Service struct {
 	repo           *Repository
 	endpointSchema EndpointSchemaGetter
+	profileGetter  ProfileGetter // optional; nil disables profile-enriched generation
 }
 
 func NewService(repo *Repository, endpointSchema EndpointSchemaGetter) *Service {
 	return &Service{repo: repo, endpointSchema: endpointSchema}
+}
+
+// WithProfileGetter returns a copy of the service configured with a profile
+// source. When set, GenerateParams will use historically observed field values
+// from the project test profile.
+func (s *Service) WithProfileGetter(pg ProfileGetter) *Service {
+	return &Service{
+		repo:           s.repo,
+		endpointSchema: s.endpointSchema,
+		profileGetter:  pg,
+	}
 }
 
 func (s *Service) CreateManual(ctx context.Context, input CreateManualInput) (*TestCase, error) {
@@ -119,7 +137,9 @@ func (s *Service) UpsertGenerated(ctx context.Context, draft Draft) (*TestCase, 
 }
 
 // GenerateParams generates default request parameter values for a test case based on its
-// associated endpoint's OpenAPI request schema.
+// associated endpoint's OpenAPI request schema. When a ProfileGetter is configured,
+// historically observed values from the project test profile are used to produce
+// more realistic parameters.
 func (s *Service) GenerateParams(ctx context.Context, testCaseID uuid.UUID) (*GeneratedParams, error) {
 	if testCaseID == uuid.Nil {
 		return nil, errors.New("接口模板 ID 不能为空")
@@ -141,13 +161,86 @@ func (s *Service) GenerateParams(ctx context.Context, testCaseID uuid.UUID) (*Ge
 		return nil, fmt.Errorf("fetch endpoint schema: %w", err)
 	}
 
-	// 运行控制台「一键生成参数」走 PreferMockTags 模式：fallback 字符串字段
-	// 输出 `{{$mock.<helper>}}` 占位，由 Runner 在每次发请求时实时生成新值，
-	// 无需用户为 id / email / createdAt 等动态字段反复点击「生成参数」。
-	sample := sampler.FromSchemaWithOptions(requestSchema, sampler.Options{PreferMockTags: true})
+	opts := sampler.Options{PreferMockTags: true}
+	var depInfos []FieldDependencyInfo
+
+	// When a profile is available, use historically observed field values
+	// and dependency graph to produce more realistic parameters.
+	if s.profileGetter != nil {
+		profile, perr := s.profileGetter.Get(ctx, tc.ProjectID)
+		if perr == nil && profile != nil {
+			if len(profile.FieldProfiles) > 0 {
+				opts.Profile = sampler.NewFieldProfileAdapter(tc.Method, tc.Path, profile.FieldProfiles)
+			}
+			// Build dependency hints from the profile's dependency graph.
+			if len(profile.DependencyGraph) > 0 {
+				hints := buildDependencyHints(tc.Method, tc.Path, profile.DependencyGraph)
+				if hints != nil && len(hints.Hints) > 0 {
+					opts.Dependencies = hints
+					depInfos = buildFieldDependencyInfos(tc.Method, tc.Path, profile.DependencyGraph)
+				}
+			}
+		}
+	}
+
+	sample := sampler.FromSchemaWithOptions(requestSchema, opts)
 	return &GeneratedParams{
-		Query: sample.Query,
-		Path:  sample.Path,
-		Body:  sample.Body,
+		Query:        sample.Query,
+		Path:         sample.Path,
+		Body:         sample.Body,
+		Dependencies: depInfos,
 	}, nil
+}
+
+// buildDependencyHints converts profile EndpointDependency entries targeting
+// the given method+path into sampler.DependencyHints.
+func buildDependencyHints(method, path string, deps []testprofile.EndpointDependency) *sampler.DependencyHints {
+	var hints []sampler.DependencyHint
+	for _, dep := range deps {
+		if !strings.EqualFold(dep.TargetMethod, method) || dep.TargetPath != path {
+			continue
+		}
+		if dep.Confidence < 0.5 {
+			continue
+		}
+		fieldPath := dep.TargetField
+		// Strip location prefix (e.g. "path.id" → "id", "body.userId" → "userId").
+		if idx := strings.Index(fieldPath, "."); idx >= 0 {
+			fieldPath = fieldPath[idx+1:]
+		}
+		hints = append(hints, sampler.DependencyHint{
+			FieldPath:    fieldPath,
+			SourceMethod: dep.SourceMethod,
+			SourcePath:   dep.SourcePath,
+			SourceField:  dep.SourceField,
+		})
+	}
+	if len(hints) == 0 {
+		return nil
+	}
+	return &sampler.DependencyHints{Hints: hints}
+}
+
+// buildFieldDependencyInfos converts profile EndpointDependency entries into
+// user-facing FieldDependencyInfo for the API response.
+func buildFieldDependencyInfos(method, path string, deps []testprofile.EndpointDependency) []FieldDependencyInfo {
+	var infos []FieldDependencyInfo
+	for _, dep := range deps {
+		if !strings.EqualFold(dep.TargetMethod, method) || dep.TargetPath != path {
+			continue
+		}
+		if dep.Confidence < 0.5 {
+			continue
+		}
+		fieldPath := dep.TargetField
+		if idx := strings.Index(fieldPath, "."); idx >= 0 {
+			fieldPath = fieldPath[idx+1:]
+		}
+		infos = append(infos, FieldDependencyInfo{
+			FieldPath:  dep.TargetField,
+			DependsOn:  fmt.Sprintf("%s %s → %s", strings.ToUpper(dep.SourceMethod), dep.SourcePath, dep.SourceField),
+			Suggestion: fmt.Sprintf("在场景中使用 {{$steps[N].%s}}", dep.SourceField),
+		})
+	}
+	return infos
 }

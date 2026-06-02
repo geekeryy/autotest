@@ -30,7 +30,11 @@ func (r HappyPathRule) GenerateWithProfile(endpoint Endpoint, profile *testprofi
 }
 
 func (HappyPathRule) generate(endpoint Endpoint, profile *testprofile.Profile) ([]testcase.Draft, error) {
-	sample := sampler.FromSchema(endpoint.RequestSchema)
+	var opts sampler.Options
+	if profile != nil && len(profile.FieldProfiles) > 0 {
+		opts.Profile = sampler.NewFieldProfileAdapter(endpoint.Method, endpoint.Path, profile.FieldProfiles)
+	}
+	sample := sampler.FromSchemaWithOptions(endpoint.RequestSchema, opts)
 	request := map[string]any{
 		"method":    strings.ToUpper(endpoint.Method),
 		"path":      endpoint.Path,

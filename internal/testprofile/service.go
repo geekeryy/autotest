@@ -3,6 +3,7 @@ package testprofile
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
@@ -92,6 +93,44 @@ func (s *Service) GetPromptContext(ctx context.Context, projectID uuid.UUID) (st
 		return "", err
 	}
 	return FormatProfileForPrompt(profile), nil
+}
+
+// GetConvention returns just the response convention and field enum data
+// for narrow injection into generate_assertion prompts.
+func (s *Service) GetConvention(ctx context.Context, projectID uuid.UUID) (*ConventionBrief, error) {
+	profile, err := s.repo.Get(ctx, projectID)
+	if err != nil || profile == nil {
+		return nil, err
+	}
+	brief := &ConventionBrief{}
+	if profile.ResponseConvention != nil {
+		brief.Convention = FormatConventionForPrompt(profile.ResponseConvention)
+	}
+	enumFields := filterEnumFields(profile.FieldProfiles)
+	if len(enumFields) > 0 {
+		brief.Enums = formatEnumFieldsForPrompt(enumFields)
+	}
+	if brief.Convention == "" && brief.Enums == "" {
+		return nil, nil
+	}
+	return brief, nil
+}
+
+// ConventionBrief holds narrow profile data for assertion generation.
+type ConventionBrief struct {
+	Convention string `json:"convention,omitempty"`
+	Enums      string `json:"enums,omitempty"`
+}
+
+func formatEnumFieldsForPrompt(fields []FieldProfile) string {
+	var sb strings.Builder
+	sb.WriteString("以下字段有确定的取值范围，断言中可用于验证返回值：\n")
+	for _, fp := range fields {
+		values := formatValues(fp.ObservedValues)
+		sb.WriteString(fmt.Sprintf("- %s %s → %s.%s: [%s]\n",
+			strings.ToUpper(fp.Method), fp.Path, fp.Location, fp.FieldPath, values))
+	}
+	return sb.String()
 }
 
 func (s *Service) buildProfile(projectID uuid.UUID, endpoints []EndpointInfo, cases []CaseInfo, results []RunResultInfo) *Profile {

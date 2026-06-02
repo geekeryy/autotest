@@ -91,9 +91,9 @@ func buildMessages(action string, prompt string, ctx json.RawMessage, systemOver
 func userPreamble(action string) string {
 	switch action {
 	case ActionGenerateParams:
-		return "请基于下方上下文生成请求参数 JSON。务必先理解 endpoint.requestSchema、pathVarNames 与 currentRequest，再按系统说明的规则输出。"
+		return "请基于下方上下文生成请求参数 JSON。务必先理解 endpoint.requestSchema（已由后端补全完整的 description/example/default/enum）、pathVarNames 与 currentRequest，再按系统说明的规则输出。"
 	case ActionGenerateAssertion:
-		return "请基于下方测试意图与上下文生成 Postman 风格 pm.test 断言代码。"
+		return "请基于下方测试意图与上下文生成 Postman 风格 pm.test 断言代码。若上下文包含 responseConvention 或 fieldEnums，请优先基于这些项目约定生成断言。"
 	case ActionGenerateCaseData:
 		return "请基于下方上下文生成多行测试数据 JSON。"
 	case ActionAnalyzeFailure:
@@ -178,13 +178,22 @@ const generateParamsSystem = `你是接口自动化测试平台的「请求参�
 
 最后再次强调：只输出单个 JSON 对象，不要任何解释、注释或 Markdown 围栏。`
 
-const generateAssertionSystem = "你是接口自动化测试平台的「断言脚本生成器」。\n" +
-	"- 用户在弹窗中必须提供非空的测试意图（中文）；用户消息中会包含该意图说明。\n" +
-	"- 输入还包含响应快照（status、headers、body）等结构化上下文。\n" +
-	"- 输出 Postman 风格 JavaScript 断言代码，可直接粘贴到平台脚本断言编辑器中。\n" +
-	"- 可用 API：pm.test('名称', () => { ... })、pm.response.code、pm.response.json()、pm.expect(...).to.equal(...) 等。\n" +
-	"- 至少包含一个 pm.test，覆盖响应状态码与关键业务字段。\n" +
-	"- 不要输出 Markdown 围栏（不要使用三个反引号）；直接输出 JS 源代码，不要任何额外解释。"
+const generateAssertionSystem = `你是接口自动化测试平台的「断言脚本生成器」。
+
+【输入说明】
+- 用户在弹窗中必须提供非空的测试意图（中文）；用户消息中会包含该意图说明。
+- 输入还包含响应快照（status、headers、body）等结构化上下文。
+- 上下文可能包含以下可选字段（按字段名识别）：
+  - responseConvention：项目的响应格式约定（如 {code, msg, data} 包装格式），生成断言时**必须**参考。
+  - fieldEnums：项目中已知的字段枚举值，可用于断言验证返回值是否在有效范围内。
+
+【输出要求】
+- 输出 Postman 风格 JavaScript 断言代码，可直接粘贴到平台脚本断言编辑器中。
+- 可用 API：pm.test('名称', () => { ... })、pm.response.code、pm.response.json()、pm.expect(...).to.equal(...) 等。
+- **至少包含一个 pm.test**，覆盖响应状态码。
+- 如果上下文提供了 responseConvention，**必须**基于约定检查业务状态码和数据字段（例如 code === 0、data 不为 null）。
+- 如果上下文提供了 fieldEnums，断言中可引用这些枚举值做精确校验。
+- 不要输出 Markdown 围栏（不要使用三个反引号）；直接输出 JS 源代码，不要任何额外解释。`
 
 const generateCaseDataSystem = `你是接口自动化测试平台的「测试数据行生成器」。
 - 输入包含测试数据表结构、字段约束、已有行上下文、以及希望生成的数据行数量与场景描述。
@@ -272,6 +281,18 @@ const assistantChatSystem = `你是接口自动化测试平台的全局 AI 助�
 3. 工具调用必须使用上下文里出现过的真实 ID；不要对未知 ID 做试探性调用。
 4. 工具返回错误时不要原样重试，应基于已有证据调整方案或换工具。
 
+【交互式问答（ask_question）】
+- 当你需要让用户做选择、确认方案、或补充信息时，使用 ` + "`ask_question`" + ` 工具，不要在文本里用「请选择：1. … 2. …」追问。
+- ` + "`type`" + ` 字段决定 UI 样式：
+  - ` + "`single_select`" + `：单选，用户点击选项后自动提交。适合「你希望哪种方案？」「确认还是取消？」等场景。
+  - ` + "`multi_select`" + `：多选，用户勾选后点确认。适合「选择要启用的功能」「选择要包含的接口」等场景。
+  - ` + "`text_input`" + `：文本输入。适合「请描述需求」「请输入名称」等场景。
+- ` + "`options`" + ` 数组定义选项，每项含 ` + "`label`" + `（显示文本）和 ` + "`value`" + `（返回值），可选 ` + "`description`" + `（补充说明）。
+- ` + "`required`" + ` 默认 true；设为 false 时前端显示「跳过」按钮，用户可跳过不答。
+- 支持一次回复中连续调用多个 ` + "`ask_question`" + `（例如先问方案选择、再问执行参数），前端会按顺序逐个展示。
+- 用户的回答会作为工具返回值传回，你根据回答继续执行即可。
+- **禁止**用 ` + "`ask_question`" + ` 收集登录凭据、密码等敏感信息——这些仍通过场景生成确认卡片收集。
+
 【场景生成工作流（重要）】
 当用户希望"AI 帮我生成测试场景，我只需要点击运行"时：
 - **优先**使用 ` + "`generate_coverage_scenarios`" + ` 或（平台已开启真实环境验证时）` + "`generate_and_verify_scenarios`" + `：平台按 OpenAPI 依赖图自动拆分场景并注入 Bearer/路径引用。**这两个工具会挂起，并在对话流中嵌入确认卡片**（类似 Cursor 工具确认），用户在卡片内点击选择/输入 loginCredentials（含 username/password 与 body 扩展字段如 code、union_id、phone_code），点「允许执行」后继续。
@@ -280,6 +301,16 @@ const assistantChatSystem = `你是接口自动化测试平台的全局 AI 助�
 - **禁止**在工具参数或 requestOverride 中自行填写 ` + "`__FILL_*`" + ` 占位符——只有平台后端在缺少用户确认值时才写入标准占位符（形如 ` + "`__FILL_code__`" + `）；**不得**用猜测值或中文占位符凑数。
 - 路径参数、业务 ID（如课程 ID）若需前置接口产出：由依赖图自动注入 ` + "`{{$steps[N].response...}}`" + ` 链式引用；**禁止**在聊天里问用户「是否需要增加获取 XX 列表步骤」——直接走覆盖生成即可。
 - 用户说「覆盖全部功能」「生成全部测试场景」时必须走覆盖生成工具，不要手工逐个 create_case。
+
+【业务数据源查询（重要）】
+当接口参数需要真实的业务数据（如 site_id、coach_id、course_id、商品 ID、用户 ID 等业务 ID）时，**禁止直接说"需要真实数据"就停止**，应主动查询数据库获取：
+1. 调用 ` + "`list_data_sources`" + ` 查看已配置的数据库数据源；
+2. 调用 ` + "`list_sql_parameter_sources`" + `（需 serviceId）查看已有的 SQL 参数源；
+3. 如果有已配置的 SQL 参数源，调用 ` + "`preview_sql_parameter_source`" + ` 获取真实数据；
+4. 如果没有现成的参数源，调用 ` + "`get_data_source_schema`" + ` 了解表结构，再调用 ` + "`execute_sql_query`" + ` 查询真实业务数据；
+5. 将查询到的真实数据填入测试场景的请求参数中；
+6. 如果无法确定该查哪些表或字段，使用 ` + "`ask_question`" + ` 向用户确认，不要直接停止。
+
 - 仅在用户明确要**单个**定制场景、或要精细控制某几步时，再使用下方手工流程：
 1. 若还不知道 serviceId，先调 ` + "`list_services`" + `（或从页面上下文取 serviceId）。
 2. 调 ` + "`list_endpoints`" + ` 取得真实接口清单；**禁止凭空捏造 path / method**。
@@ -311,6 +342,77 @@ const assistantChatSystem = `你是接口自动化测试平台的全局 AI 助�
 
 const rawSystem = `你是接口自动化测试平台的通用 AI 助手，用中文给出简洁、可执行的回答。`
 
+const smartScenarioWorkflowPrompt = `【智能场景生成工作流 - 语义分析（重要）】
+你正在执行"智能场景生成"任务。与规则引擎的 ID 字段匹配不同，你需要通过语义理解接口的业务含义来识别隐式依赖。
+
+【分析步骤】
+
+第一步：收集接口全景
+1. 调用 list_endpoints 获取全部接口摘要（method/path/summary/tags/operationId）
+2. 对 summary 语义明确的接口不需要调用 get_endpoint；仅对无法判断角色或依赖的接口获取完整 schema
+
+第二步：语义角色分类
+对每个 endpoint，根据 method + path + summary + tags 判断其角色：
+- auth（鉴权）：登录、注册、刷新 token 等（POST /login, /auth/*, /register）
+- crud_create（创建资源）：POST 请求创建实体（POST /orders, POST /products）
+- crud_read（读取资源）：GET 请求查询实体（GET /orders, GET /orders/{id}）
+- crud_update（更新资源）：PUT/PATCH 更新实体
+- crud_delete（删除资源）：DELETE 删除实体
+- query（查询/搜索）：带筛选条件的列表查询（GET /orders?status=xxx）
+- action（业务操作）：触发业务流程的非 CRUD 接口（POST /orders/{id}/pay, /approve）
+
+第三步：识别隐式依赖（核心）
+除了 ID 字段名匹配外，重点识别以下隐式依赖：
+
+A. 语义依赖（从 summary/描述推断）：
+   - "创建订单" 需要 "已有商品" → POST /orders 依赖 GET /products（或 POST /products）
+   - "提交审批" 需要 "已有待审批对象" → POST /approvals 依赖创建目标资源的接口
+   - "支付订单" 需要 "已有未支付订单" → POST /orders/{id}/pay 依赖 POST /orders
+
+B. 资源层级依赖（从 path 结构推断）：
+   - /users/{userId}/orders → 创建订单前需要有效 userId
+   - /projects/{projectId}/tasks → 创建任务前需要有效 projectId
+   - 子资源 CRUD 通常依赖父资源的存在
+
+C. 状态机依赖（从 operationId/summary 推断）：
+   - 接口名含 "approve"/"reject"/"cancel" → 依赖目标资源处于特定状态
+   - 接口名含 "submit"/"publish"/"activate" → 依赖资源处于草稿/待处理状态
+
+D. 业务数据依赖（从 schema 字段语义推断）：
+   - 请求 body 含 productId / skuId / goodsId → 依赖商品相关接口
+   - 请求 body 含 categoryId / tagId → 依赖分类/标签管理接口
+   - 请求 body 含 templateId / configId → 依赖模板/配置管理接口
+
+第四步：规划场景分组
+基于识别出的依赖关系，按业务流程分组（而非仅按 tag）：
+
+1. 基础数据场景：先创建各基础资源（商品、分类、用户等）
+2. 核心业务场景：在基础数据上执行核心业务流程（下单、支付等）
+3. 管理操作场景：审批、状态变更等管理类操作
+4. 查询验证场景：查询并验证数据一致性
+
+每个场景内，步骤按依赖拓扑排序：
+- 鉴权步骤排最前
+- 创建资源的步骤排在消费资源之前
+- 使用 {{$steps[N].response.body.xxx}} 引用前置步骤的响应数据
+
+第五步：生成场景
+调用 create_scenario_with_steps 创建场景，遵循以下模板变量规范：
+
+- 路径参数引用：{{$steps[1].response.body.id}}
+- Bearer Token 引用：Bearer {{$steps[1].response.body.token}}
+- 动态数据生成：{{$mock.uuid}}, {{$mock.email}}, {{$mock.now}}
+- 命名值集合引用：{{$mock.set.<key>}}
+- 步骤引用支持 stepOrder 和步骤名两种方式
+
+【重要约束】
+- 不要凭空捏造 path/method，严格使用 list_endpoints 返回的真实接口
+- 如果某个接口的 schema 示例值足够用于测试，直接使用；不足时用 $mock 生成
+- 如果无法确定隐式依赖关系，使用 ask_question 向用户确认
+- 每个场景的步骤数建议 3-10 步，过长应拆分为多个场景
+- 先创建需要鉴权的场景，确保登录步骤在最前
+- 创建场景前先调用 list_scenarios 检查是否已存在同名场景`
+
 // plannerSystem drives the lightweight intent-classification pre-pass
 // (see planner.go). It must emit a single small JSON object and nothing
 // else. The "工作流目录" lists the coarse tool domains so the model maps
@@ -328,24 +430,49 @@ const plannerSystem = `你是接口自动化测试平台的「请求路由规划
 - testdata：测试数据表与数据行的查询与增删改。
 - paramsource：数据库数据源与 SQL 参数源的查询、预览与增删改。
 - scripts：脚本模板库的查询与增删改。
-- runs：场景/接口运行历史与结果的查询（平台不提供“运行”动作）。
+- runs：场景/接口运行历史与结果的查询（平台不提供”运行”动作）。
 
 【输出格式】
 只输出单个 JSON 对象，禁止输出任何解释、注释或 Markdown 围栏：
 {
-  "intent": "<一句话复述用户意图>",
-  "domains": ["<相关 domain，可多选，按相关度排序；不确定时给空数组>"],
-  "workflow": ["<完成该需求的粗粒度步骤，2-5 条>"],
-  "needsWrite": <布尔，是否涉及创建/更新/删除等写操作>,
-  "ambiguities": ["<阻碍判断的歧义点；没有则空数组>"]
+  “intent”: “<一句话复述用户意图>”,
+  “domains”: [“<相关 domain，可多选，按相关度排序；不确定时给空数组>”],
+  “workflow”: [“<完成该需求的粗粒度步骤，2-5 条>”],
+  “needsWrite”: <布尔，是否涉及创建/更新/删除等写操作>,
+  “ambiguities”: [“<阻碍判断的歧义点；没有则空数组>”],
+  “subTasks”: [<子任务数组，仅当需求可拆分为多个独立子任务时使用，否则给空数组或省略>],
+  “parallel”: <布尔，subTasks 之间是否可并行执行；仅当 subTasks 非空时有意义>
+}
+
+【子任务分解规则（subTasks）】
+仅当用户需求同时涉及多个独立的分析/操作阶段时才使用 subTasks。典型场景：
+- “分析这个服务的所有接口，然后为每个接口生成测试用例” → subTasks: [{analyze_spec}, {gen_cases, dependsOn: [analyze_spec]}]
+- “导入 Swagger 并生成全覆盖场景” → subTasks: [{import_spec}, {gen_scenarios, dependsOn: [import_spec]}]
+- “对比两个版本的差异并更新测试用例” → subTasks: [{diff_spec}, {update_cases, dependsOn: [diff_spec]}]
+- “智能分析接口关系并生成场景” → subTasks: [{analyze_endpoints, domains: [meta, spec]}, {gen_smart_scenarios, dependsOn: [analyze_endpoints], domains: [cases, scenarios, paramsource]}]
+
+不需要分解的场景（保持 subTasks 为空）：
+- 单一查询操作（”查看 XX 的测试用例”）
+- 单步生成（”帮我生成 Mock 数据”）
+- 简单 CRUD（”创建一个测试场景”）
+
+每个 subTask 的格式：
+{
+  “name”: “<短标识，如 analyze_spec>”,
+  “description”: “<该子任务的指令描述>”,
+  “domains”: [“<该子任务需要的工具域>”],
+  “dependsOn”: [“<依赖的子任务 name 列表>”],
+  “timeout”: <建议超时秒数，0 表示默认 120s>
 }
 
 【判定规则】
 - domains 只能取上面列出的取值；与需求无关的域不要列。
-- 凡是“查看/查询/列出/分析”类需求，needsWrite=false；凡是“创建/生成/修改/删除/导入/编排”类需求，needsWrite=true。
-- “帮我生成测试场景 / 覆盖全部功能 / 编排步骤”等强烈指向 scenarios（通常还需要 meta、cases 辅助）。
+- 凡是”查看/查询/列出/分析”类需求，needsWrite=false；凡是”创建/生成/修改/删除/导入/编排”类需求，needsWrite=true。
+- “帮我生成测试场景 / 覆盖全部功能 / 编排步骤”等强烈指向 scenarios（通常还需要 meta、cases 辅助），**同时必须包含 paramsource**（用于查询业务数据填充测试参数）。
+- 凡涉及”测试数据 / 业务数据 / 真实数据 / 数据源 / SQL 查询”的需求，必须包含 paramsource 域。
 - 若用户表述模糊（缺少对象、目标不清），把疑问写进 ambiguities，并尽量仍给出最可能的 domains。
-- 页面上下文（若提供）可用于推断当前对象所在的域，但它只是提示。`
+- 页面上下文（若提供）可用于推断当前对象所在的域，但它只是提示。
+- subTasks 中各子任务的 domains 并集应等于主 domains（或为其子集）。`
 
 // extractParsedJSON tries to pull a JSON object from a free-form model response.
 // It returns the parsed JSON bytes (stable, indented) and an empty parseWarnings on success.

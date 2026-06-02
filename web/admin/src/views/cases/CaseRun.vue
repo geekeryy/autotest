@@ -202,7 +202,7 @@
               <span :class="{ active: requestBodyViewMode === 'preview' }" @click="requestBodyViewMode = 'preview'">预览</span>
             </div>
           </div>
-          <div class="body-schema-layout" :style="bodySchemaLayoutStyle">
+          <div class="body-schema-layout" :class="{ 'body-schema-layout--preview': requestBodyViewMode === 'preview' }" :style="bodySchemaLayoutStyle">
             <div v-if="requestBodyViewMode === 'preview' && requestBodyEditorJsonLines !== null" class="json-viewer code-view">
               <div v-for="line in requestBodyEditorJsonLines" :key="line.id" class="json-line" :style="{ paddingLeft: `${line.depth * 16}px` }">
                 <span v-if="line.type === 'open'" class="json-toggle" @click="toggleSchemaCollapse(requestBodyJsonCollapsed, line.path)" />
@@ -2638,7 +2638,7 @@ export default {
 .debug-page {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
 }
 
 .debug-page.is-embedded {
@@ -2649,8 +2649,8 @@ export default {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
-  padding: 2px 2px 0;
+  gap: 12px;
+  padding: 0;
 }
 
 .debug-actions,
@@ -2664,7 +2664,7 @@ export default {
 .body-view-toggle {
   display: flex;
   gap: 0;
-  border: 1px solid var(--app-border-color);
+  border: 1px solid var(--el-border-color-lighter);
   border-radius: 6px;
   overflow: hidden;
   margin-left: auto;
@@ -2680,7 +2680,7 @@ export default {
 }
 
 .body-view-toggle span:first-child {
-  border-right: 1px solid var(--app-border-color);
+  border-right: 1px solid var(--el-border-color-lighter);
 }
 
 .body-view-toggle span.active {
@@ -2693,6 +2693,7 @@ export default {
   overflow: hidden;
   border-radius: 12px;
   background: #ffffff;
+  border: 1px solid var(--el-border-color-lighter);
 }
 
 .request-card :deep(.el-card__body) {
@@ -2703,18 +2704,19 @@ export default {
   overflow: hidden;
   border-radius: 12px;
   background: #ffffff;
+  border: 1px solid var(--el-border-color-lighter);
 }
 
 .result-card :deep(.el-card__body) {
-  padding: 16px;
+  padding: 12px;
 }
 
 .result-title {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 14px;
+  gap: 12px;
+  margin-bottom: 10px;
   flex-wrap: wrap;
 }
 
@@ -2820,8 +2822,8 @@ export default {
 }
 
 .request-line {
-  padding: 14px 16px;
-  border-bottom: 1px solid var(--app-border-color);
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
   background: #ffffff;
 }
 
@@ -2831,13 +2833,13 @@ export default {
 
 .request-line :deep(.el-select__wrapper),
 .request-line :deep(.el-input__wrapper) {
-  min-height: 42px;
-  box-shadow: 0 0 0 1px var(--app-border-color) inset;
+  min-height: 36px;
+  box-shadow: 0 0 0 1px var(--el-border-color-lighter) inset;
 }
 
 .inline-sql-hint {
-  padding: 8px 16px;
-  border-bottom: 1px solid var(--app-border-color);
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
   background: #f8fafc;
   color: var(--app-secondary-text);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
@@ -2858,7 +2860,7 @@ export default {
 
 .send-button {
   min-width: 88px;
-  min-height: 42px;
+  min-height: 36px;
   font-weight: 700;
 }
 
@@ -2947,13 +2949,13 @@ export default {
 
 .request-tabs {
   margin-top: 0;
-  padding: 0 16px 16px;
+  padding: 0 12px 10px;
 }
 
 .request-tabs :deep(.el-tabs__header) {
-  margin: 0 -16px 16px;
-  padding: 0 16px;
-  border-bottom: 1px solid var(--app-border-color);
+  margin: 0 -12px 12px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
   background: #fbfdff;
 }
 
@@ -2967,11 +2969,11 @@ export default {
 }
 
 .add-row {
-  margin-top: 12px;
+  margin-top: 8px;
 }
 
 .params-section {
-  margin-bottom: 20px;
+  margin-bottom: 12px;
 }
 
 .params-section:last-child {
@@ -2979,7 +2981,7 @@ export default {
 }
 
 .params-section-title {
-  margin: 0 0 10px;
+  margin: 0 0 6px;
   font-size: var(--app-font-size-small);
   font-weight: 700;
   color: var(--app-secondary-text);
@@ -3017,13 +3019,13 @@ export default {
 }
 
 .path-input :deep(.el-input__wrapper) {
-  min-height: 42px;
-  box-shadow: 0 0 0 1px var(--app-border-color) inset;
+  min-height: 36px;
+  box-shadow: 0 0 0 1px var(--el-border-color-lighter) inset;
 }
 
 .body-toolbar {
   justify-content: space-between;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
   color: var(--app-secondary-text);
 }
 
@@ -3032,8 +3034,8 @@ export default {
   min-height: 260px;
   max-height: 520px;
   overflow: auto;
-  padding: 14px;
-  border: 1px solid var(--app-border-color);
+  padding: 12px;
+  border: 1px solid var(--el-border-color-lighter);
   border-radius: 10px;
   background: var(--app-code-bg);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
@@ -3056,6 +3058,17 @@ export default {
   min-width: 0;
 }
 
+.body-schema-layout--preview {
+  grid-template-columns: 1fr;
+}
+
+.body-schema-layout--preview > .json-viewer,
+.body-schema-layout--preview > .code-view,
+.body-schema-layout--preview > .body-json-editor,
+.body-schema-layout--preview > .body-schema-resizer {
+  display: none;
+}
+
 .body-schema-resizer {
   position: relative;
   width: 8px;
@@ -3073,7 +3086,7 @@ export default {
   left: 3px;
   width: 2px;
   border-radius: 999px;
-  background: var(--app-border-color);
+  background: var(--el-border-color-lighter);
   transition: background 0.12s ease, width 0.12s ease, left 0.12s ease;
 }
 
@@ -3087,8 +3100,8 @@ export default {
   min-height: 260px;
   max-height: 520px;
   overflow: auto;
-  padding: 10px 12px;
-  border: 1px solid var(--app-border-color);
+  padding: 8px 10px;
+  border: 1px solid var(--el-border-color-lighter);
   border-radius: 10px;
   background: var(--app-card-bg);
 }
@@ -3098,7 +3111,7 @@ export default {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 
 .schema-panel-title {
@@ -3114,7 +3127,7 @@ export default {
 }
 
 .schema-field-table {
-  border: 1px solid var(--app-border-color);
+  border: 1px solid var(--el-border-color-lighter);
   border-radius: 8px;
   overflow: hidden;
   background: #fff;
@@ -3140,7 +3153,7 @@ export default {
 .schema-field-row {
   min-height: 34px;
   padding: 6px 10px;
-  border-top: 1px solid var(--app-border-color);
+  border-top: 1px solid var(--el-border-color-lighter);
 }
 
 .schema-field-name {
@@ -3298,8 +3311,7 @@ export default {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: var(--app-font-size-small);
   line-height: 1.4;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  word-break: break-word;
 }
 
 .schema-field-meaning {
@@ -3307,8 +3319,7 @@ export default {
   color: var(--app-secondary-text);
   font-size: var(--app-font-size-small);
   line-height: 1.4;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  word-break: break-word;
 }
 
 .response-empty-card {
@@ -3325,16 +3336,16 @@ export default {
 }
 
 .response-detail-tabs :deep(.el-tabs__header) {
-  margin-bottom: 12px;
+  margin-bottom: 8px;
 }
 
 .response-detail-tabs--subtle :deep(.el-tabs__header) {
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 
 .response-detail-tabs--subtle :deep(.el-tabs__nav-wrap::after) {
   height: 1px;
-  background: var(--app-border-color);
+  background: var(--el-border-color-lighter);
 }
 
 .response-detail-tabs--subtle :deep(.el-tabs__item) {
@@ -3361,7 +3372,7 @@ export default {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-top: 12px;
+  margin-top: 8px;
 }
 
 .save-ok-hint {
@@ -3383,7 +3394,7 @@ export default {
 .section-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
+  gap: 10px;
 }
 
 .section-block.full {
@@ -3391,7 +3402,7 @@ export default {
 }
 
 .section-block h3 {
-  margin: 0 0 10px;
+  margin: 0 0 6px;
   font-size: var(--app-font-size-base);
 }
 
@@ -3399,9 +3410,9 @@ export default {
   display: flex;
   align-items: center;
   gap: 10px;
-  min-height: 42px;
-  padding: 10px 12px;
-  border: 1px solid var(--app-border-color);
+  min-height: 36px;
+  padding: 8px 10px;
+  border: 1px solid var(--el-border-color-lighter);
   border-radius: 10px;
   background: var(--app-card-bg);
   word-break: break-all;

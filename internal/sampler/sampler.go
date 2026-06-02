@@ -7,6 +7,7 @@ package sampler
 import (
 	"encoding/json"
 	"fmt"
+	"math/rand/v2"
 	"strings"
 	"time"
 
@@ -27,6 +28,56 @@ type RequestSample struct {
 	Security any               `json:"security,omitempty"`
 }
 
+// ProfileLookup provides historically observed values for a request field.
+// Implementations wrap testprofile.FieldProfile data so the sampler can prefer
+// real-world values over random generation.
+type ProfileLookup interface {
+	// Lookup returns observed values for the given field path within a request
+	// body (dot-separated, e.g. "status" or "address.city"). Returns nil if
+	// no historical data is available for the field.
+	Lookup(fieldPath string) []any
+}
+
+// DependencyHint marks a field as depending on an upstream endpoint's response.
+type DependencyHint struct {
+	FieldPath    string `json:"fieldPath"`    // consumer field path, e.g. "userId" or "orderId"
+	SourceMethod string `json:"sourceMethod"` // producer HTTP method
+	SourcePath   string `json:"sourcePath"`   // producer path
+	SourceField  string `json:"sourceField"`  // producer response field path, e.g. "response.body.data.id"
+	ConsumerKind string `json:"consumerKind"` // "path_param" | "body_field"
+}
+
+// DependencyHints groups dependency hints for one endpoint.
+type DependencyHints struct {
+	Hints []DependencyHint
+}
+
+// HasDependency returns true if the given body field path has a dependency hint.
+func (dh *DependencyHints) HasDependency(fieldPath string) bool {
+	if dh == nil {
+		return false
+	}
+	for _, h := range dh.Hints {
+		if h.FieldPath == fieldPath {
+			return true
+		}
+	}
+	return false
+}
+
+// Lookup returns the dependency hint for a field, or nil.
+func (dh *DependencyHints) Lookup(fieldPath string) *DependencyHint {
+	if dh == nil {
+		return nil
+	}
+	for i := range dh.Hints {
+		if dh.Hints[i].FieldPath == fieldPath {
+			return &dh.Hints[i]
+		}
+	}
+	return nil
+}
+
 // Options tweaks how FromSchemaWithOptions generates fallback values.
 type Options struct {
 	// PreferMockTags makes the sampler emit `{{$mock.<helper>}}` placeholder
@@ -40,6 +91,18 @@ type Options struct {
 	// request, so users no longer need to re-click "生成参数" to refresh
 	// dynamic fields like uuid / email / createdAt between runs.
 	PreferMockTags bool
+
+	// Profile, when set, provides historically observed values for fields.
+	// The sampler uses these values (randomly picking one) before falling
+	// back to semantic heuristics. This makes generated parameters match
+	// real-world data patterns learned from past runs.
+	Profile ProfileLookup
+
+	// Dependencies, when set, marks fields that depend on upstream endpoint
+	// responses. The sampler will skip generating random values for these
+	// fields, leaving a placeholder that indicates they should be filled
+	// via $steps[N] references in scenario context.
+	Dependencies *DependencyHints
 }
 
 // FromSchema generates a RequestSample with the default options. It is kept
@@ -75,6 +138,12 @@ func FromSchemaWithOptions(raw json.RawMessage, opts Options) RequestSample {
 			name, _ := param["name"].(string)
 			location, _ := param["in"].(string)
 			if name == "" {
+				continue
+			}
+			// Skip path params that depend on upstream responses.
+			if location == "path" && opts.Dependencies != nil && opts.Dependencies.HasDependency(name) {
+				hint := opts.Dependencies.Lookup(name)
+				sample.Path[name] = fmt.Sprintf("{{__DEPENDENCY:%s %s→%s__}}", hint.SourceMethod, hint.SourcePath, hint.SourceField)
 				continue
 			}
 			value := toString(valueFromSchema(name, schemaMap(param["schema"]), opts))
@@ -130,6 +199,13 @@ func toString(value any) string {
 // used for semantic-aware fallback (e.g. a string field named "email" yields
 // a random email address) when the schema does not provide example/default/enum.
 func valueFromSchema(fieldName string, schema map[string]any, opts Options) any {
+	return valueFromSchemaWithPath(fieldName, schema, opts, fieldName)
+}
+
+// valueFromSchemaWithPath is the internal variant that tracks the full dot-separated
+// field path for profile lookups. fieldPath is used to query historical values;
+// fieldName is the short name used for semantic matching.
+func valueFromSchemaWithPath(fieldName string, schema map[string]any, opts Options, fieldPath string) any {
 	if example, ok := schema["example"]; ok {
 		return example
 	}
@@ -139,11 +215,19 @@ func valueFromSchema(fieldName string, schema map[string]any, opts Options) any 
 	if enumValues, ok := schema["enum"].([]any); ok && len(enumValues) > 0 {
 		return enumValues[0]
 	}
+
+	// Query profile for historically observed values before semantic fallback.
+	if opts.Profile != nil && fieldPath != "" {
+		if observed := opts.Profile.Lookup(fieldPath); len(observed) > 0 {
+			return pickRandom(observed)
+		}
+	}
+
 	if allOf, ok := schema["allOf"].([]any); ok && len(allOf) > 0 {
 		out := map[string]any{}
 		for _, item := range allOf {
 			itemSchema, _ := item.(map[string]any)
-			if sample, ok := valueFromSchema(fieldName, itemSchema, opts).(map[string]any); ok {
+			if sample, ok := valueFromSchemaWithPath(fieldName, itemSchema, opts, fieldPath).(map[string]any); ok {
 				for key, val := range sample {
 					out[key] = val
 				}
@@ -152,10 +236,10 @@ func valueFromSchema(fieldName string, schema map[string]any, opts Options) any 
 		return out
 	}
 	if oneOf, ok := schema["oneOf"].([]any); ok && len(oneOf) > 0 {
-		return valueFromSchema(fieldName, schemaMap(oneOf[0]), opts)
+		return valueFromSchemaWithPath(fieldName, schemaMap(oneOf[0]), opts, fieldPath)
 	}
 	if anyOf, ok := schema["anyOf"].([]any); ok && len(anyOf) > 0 {
-		return valueFromSchema(fieldName, schemaMap(anyOf[0]), opts)
+		return valueFromSchemaWithPath(fieldName, schemaMap(anyOf[0]), opts, fieldPath)
 	}
 
 	schemaType, _ := schema["type"].(string)
@@ -171,10 +255,10 @@ func valueFromSchema(fieldName string, schema map[string]any, opts Options) any 
 
 	switch schemaType {
 	case "object":
-		return objectSample(schema, opts)
+		return objectSampleWithPath(schema, opts, fieldPath)
 	case "array":
 		itemSchema, _ := schema["items"].(map[string]any)
-		return []any{valueFromSchema(fieldName, itemSchema, opts)}
+		return []any{valueFromSchemaWithPath(fieldName, itemSchema, opts, fieldPath+"[0]")}
 	case "integer":
 		return integerSample(fieldName, schema)
 	case "number":
@@ -185,7 +269,7 @@ func valueFromSchema(fieldName string, schema map[string]any, opts Options) any 
 		return stringSample(fieldName, schema, opts)
 	default:
 		if props, _ := schema["properties"].(map[string]any); len(props) > 0 {
-			return objectSample(schema, opts)
+			return objectSampleWithPath(schema, opts, fieldPath)
 		}
 		// Last resort: use the example/default value verbatim when the type
 		// cannot be determined any other way.
@@ -223,13 +307,35 @@ func inferSchemaType(v any) string {
 }
 
 func objectSample(schema map[string]any, opts Options) map[string]any {
+	return objectSampleWithPath(schema, opts, "")
+}
+
+func objectSampleWithPath(schema map[string]any, opts Options, parentPath string) map[string]any {
 	properties, _ := schema["properties"].(map[string]any)
 	out := make(map[string]any, len(properties))
 	for name, prop := range properties {
+		childPath := name
+		if parentPath != "" {
+			childPath = parentPath + "." + name
+		}
+		// Skip fields that depend on upstream endpoint responses.
+		if opts.Dependencies != nil && opts.Dependencies.HasDependency(name) {
+			hint := opts.Dependencies.Lookup(name)
+			out[name] = fmt.Sprintf("{{__DEPENDENCY:%s %s→%s__}}", hint.SourceMethod, hint.SourcePath, hint.SourceField)
+			continue
+		}
 		propSchema, _ := prop.(map[string]any)
-		out[name] = valueFromSchema(name, propSchema, opts)
+		out[name] = valueFromSchemaWithPath(name, propSchema, opts, childPath)
 	}
 	return out
+}
+
+// pickRandom returns a random element from the slice.
+func pickRandom(values []any) any {
+	if len(values) == 0 {
+		return nil
+	}
+	return values[rand.N(len(values))]
 }
 
 func integerSample(fieldName string, schema map[string]any) int {

@@ -51,7 +51,25 @@ func (s *Service) applyRouting(
 	}
 	cfg.Routing.PlannerOutput = marshalPlannerOutput(plan)
 
-	routed := s.router.Route(plan, pageContext, s.catalog)
+	// Skill matching: find skills that match the user's input.
+	var skillHints []SkillDomainHint
+	if s.skillSvc != nil {
+		projectID := cfg.ProjectID
+		matched, err := s.skillSvc.MatchSkills(ctx, &projectID, userMsg, pageContext)
+		if err == nil {
+			for _, sk := range matched {
+				skillHints = append(skillHints, SkillDomainHint{
+					Name:        sk.Name,
+					ToolDomains: sk.ToolDomains,
+				})
+			}
+			if len(matched) > 0 {
+				cfg.MatchedSkillName = matched[0].Name
+			}
+		}
+	}
+
+	routed := s.router.Route(plan, pageContext, s.catalog, skillHints)
 	cfg.Routing.RouterOutput = marshalRouterOutput(routed)
 	cfg.Routing.Confidence = routed.Confidence
 	cfg.setActiveTools(routed.ActiveTools)
@@ -73,7 +91,7 @@ func (s *Service) recoverRouting(
 	// No planner output on resume; let the Router infer from the page only.
 	// An empty plan yields low confidence, so the Router widens to a safe
 	// package — exactly what we want when we cannot replay the intent.
-	routed := s.router.Route(safePlannerOutput(), pageContext, s.catalog)
+	routed := s.router.Route(safePlannerOutput(), pageContext, s.catalog, nil)
 	cfg.Routing.RouterOutput = marshalRouterOutput(routed)
 	cfg.Routing.Confidence = routed.Confidence
 	cfg.setActiveTools(routed.ActiveTools)

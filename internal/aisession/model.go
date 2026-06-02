@@ -55,7 +55,7 @@ type Message struct {
 	Role             string          `json:"role"`
 	Content          string          `json:"content"`
 	Attachments      json.RawMessage `json:"attachments,omitempty"`
-	ReasoningContent string          `json:"-"`
+	ReasoningContent string          `json:"reasoningContent,omitempty"`
 	ToolCallID       string          `json:"toolCallId,omitempty"`
 	ToolCalls        json.RawMessage `json:"toolCalls,omitempty"`
 	Status           string          `json:"status"`
@@ -109,10 +109,47 @@ type RoutingLogInput struct {
 	Outcome       string
 }
 
+// ToolOutcomeInput records the outcome of a single tool call for analytics.
+type ToolOutcomeInput struct {
+	MessageSeq int
+	ToolName   string
+	Domain     string
+	Intent     string
+	Success    bool
+	ErrorType  string
+	HopIndex   int
+	DurationMs int
+}
+
 // ConfirmDecision captures the user's choice for a pending mutating tool
 // call. Reason is optional and surfaces in the tool result fed back to the
 // model.
 type ConfirmDecision struct {
 	Approve bool   `json:"approve"`
 	Reason  string `json:"reason,omitempty"`
+}
+
+// Checkpoint represents a snapshot of session state at a specific point.
+type Checkpoint struct {
+	ID         uuid.UUID       `json:"id"`
+	SessionID  uuid.UUID       `json:"sessionId"`
+	MessageSeq int             `json:"messageSeq"`
+	State      json.RawMessage `json:"state"`
+	Label      string          `json:"label"`
+	CreatedAt  time.Time       `json:"createdAt"`
+}
+
+// CreateCheckpointInput is the payload for creating a checkpoint.
+type CreateCheckpointInput struct {
+	MessageSeq int             `json:"messageSeq"`
+	State      json.RawMessage `json:"state"`
+	Label      string          `json:"label"`
+}
+
+// SessionExport is the exported representation of a session.
+type SessionExport struct {
+	Session     Session     `json:"session"`
+	Messages    []Message   `json:"messages"`
+	Checkpoints []Checkpoint `json:"checkpoints"`
+	ExportedAt  time.Time   `json:"exportedAt"`
 }

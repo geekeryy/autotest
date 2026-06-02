@@ -164,7 +164,7 @@ func Evaluate(cases []Case, cat *aitools.Catalog) Report {
 	router := aiprovider.NewRouter()
 	rep := Report{}
 	for _, c := range cases {
-		routed := router.Route(c.Planner.toOutput(), pageContextJSON(c.PageContext), cat)
+		routed := router.Route(c.Planner.toOutput(), pageContextJSON(c.PageContext), cat, nil)
 		firstHop := aiprovider.FirstHopToolNames(routed, cat)
 		rep.Results = append(rep.Results, scoreCase(c, firstHop, cat))
 	}

@@ -292,7 +292,7 @@
                         >预览</span>
                       </div>
                     </div>
-                    <div class="body-schema-layout" :style="scenarioStepBodySchemaLayoutStyle">
+                    <div class="body-schema-layout" :class="{ 'body-schema-layout--preview': stepRequestBodyViewMode === 'preview' }" :style="scenarioStepBodySchemaLayoutStyle">
                       <div
                         v-if="stepRequestBodyViewMode === 'preview' && scenarioStepBodyEditorJsonLines !== null"
                         class="json-viewer code-view scenario-body-code-pane"
@@ -4757,8 +4757,8 @@ export default {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 20px;
-  border-bottom: 1px solid var(--el-border-color-light);
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
   background: var(--el-bg-color);
 }
 
@@ -4779,7 +4779,7 @@ export default {
 
 .run-env-select {
   width: 200px;
-  margin-right: 10px;
+  margin-right: 8px;
 }
 
 .json-form-item {
@@ -4926,7 +4926,7 @@ export default {
 }
 
 .scenario-run-outer-collapse :deep(.el-collapse-item__header) {
-  padding: 12px 20px;
+  padding: 8px 16px;
   font-weight: 600;
   background: var(--el-bg-color);
 }
@@ -4960,7 +4960,7 @@ export default {
 }
 
 .run-result-collapse-body {
-  padding: 0 20px 16px;
+  padding: 0 16px 10px;
   overflow-y: auto;
 }
 
@@ -4968,7 +4968,7 @@ export default {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 
 .run-result-steps-header > span {
@@ -4981,7 +4981,7 @@ export default {
   gap: 8px;
   min-width: 0;
   flex: 1;
-  padding-right: 8px;
+  padding-right: 6px;
 }
 
 .step-run-result-title__seq {
@@ -5189,7 +5189,7 @@ export default {
   flex: 1;
   height: auto;
   min-height: 0;
-  margin: 16px 20px;
+  margin: 10px 16px;
 }
 
 .step-dialog-sidebar {
@@ -5225,7 +5225,7 @@ export default {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 12px 12px 8px;
+  padding: 8px 10px 6px;
   font-size: var(--app-font-size-small);
   font-weight: 600;
 }
@@ -5276,23 +5276,23 @@ export default {
 .step-dialog-main {
   flex: 1;
   overflow-y: auto;
-  padding: 14px 16px;
+  padding: 10px 12px;
   background: var(--el-bg-color);
 }
 
 .step-dialog-main.scenario-step-console {
-  padding: 12px 14px 16px;
+  padding: 8px 12px 10px;
   background: #f3f6fb;
 }
 
 .scenario-step-tabs {
   flex: 0 0 auto;
-  margin: 0 0 10px;
+  margin: 0 0 6px;
 }
 
 .scenario-step-tabs :deep(.el-tabs__header) {
   margin-bottom: 0;
-  border-bottom: 1px solid var(--el-border-color-light);
+  border-bottom: 1px solid var(--el-border-color-lighter);
 }
 
 .scenario-step-tabs :deep(.el-tabs__nav) {
@@ -5316,7 +5316,7 @@ export default {
 
 .scenario-step-tabs :deep(.el-tabs__item.is-active) {
   background: #ffffff;
-  border-color: var(--el-border-color-light);
+  border-color: var(--el-border-color-lighter);
   color: var(--el-color-primary);
 }
 
@@ -5338,6 +5338,7 @@ export default {
   overflow: hidden;
   border-radius: 12px;
   background: #ffffff;
+  border: 1px solid var(--el-border-color-lighter);
 }
 
 .request-card :deep(.el-card__body) {
@@ -5348,9 +5349,9 @@ export default {
   display: flex;
   align-items: center;
   gap: 10px;
-  min-height: 48px;
-  padding: 10px 16px;
-  border-bottom: 1px solid var(--app-border-color, var(--el-border-color));
+  min-height: 40px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
   background: #f8fafc;
 }
 
@@ -5396,8 +5397,8 @@ export default {
 .scenario-api-pick-line {
   display: flex;
   align-items: center;
-  padding: 14px 16px;
-  border-bottom: 1px solid var(--app-border-color, var(--el-border-color));
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
   background: #ffffff;
 }
 
@@ -5406,16 +5407,16 @@ export default {
 }
 
 .scenario-request-hint {
-  padding: 8px 16px;
-  border-bottom: 1px solid var(--app-border-color, var(--el-border-color));
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
   background: #f8fafc;
   color: var(--app-secondary-text, var(--el-text-color-secondary));
   font-size: var(--app-font-size-small, 12px);
 }
 
 .scenario-step-extra-form {
-  padding: 12px 16px 16px;
-  border-top: 1px solid var(--app-border-color, var(--el-border-color));
+  padding: 8px 12px 10px;
+  border-top: 1px solid var(--el-border-color-lighter);
   background: #ffffff;
 }
 
@@ -5423,8 +5424,8 @@ export default {
   display: flex;
   align-items: flex-start;
   gap: 16px;
-  padding: 24px 20px 28px;
-  border-top: 1px solid var(--app-border-color, var(--el-border-color));
+  padding: 16px 16px 20px;
+  border-top: 1px solid var(--el-border-color-lighter);
   background: #ffffff;
 }
 .scenario-clone-step-illustration {
@@ -5498,9 +5499,9 @@ export default {
 }
 
 .condition-branch-editor {
-  margin-bottom: 12px;
-  padding: 12px 12px 2px;
-  border: 1px solid var(--app-border-color, var(--el-border-color));
+  margin-bottom: 8px;
+  padding: 8px 10px 2px;
+  border: 1px solid var(--el-border-color-lighter);
   border-radius: 8px;
   background: #f8fafc;
 }
@@ -5527,8 +5528,8 @@ export default {
 }
 
 .request-meta {
-  padding: 14px 16px;
-  border-bottom: 1px solid var(--app-border-color, var(--el-border-color));
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
   background: #f8fafc;
   flex-wrap: wrap;
 }
@@ -5536,7 +5537,7 @@ export default {
 .body-view-toggle {
   display: flex;
   gap: 0;
-  border: 1px solid var(--app-border-color, var(--el-border-color));
+  border: 1px solid var(--el-border-color-lighter);
   border-radius: 6px;
   overflow: hidden;
   margin-left: auto;
@@ -5552,7 +5553,7 @@ export default {
 }
 
 .body-view-toggle span:first-child {
-  border-right: 1px solid var(--app-border-color, var(--el-border-color));
+  border-right: 1px solid var(--el-border-color-lighter);
 }
 
 .body-view-toggle span.active {
@@ -5565,8 +5566,8 @@ export default {
   min-height: 260px;
   max-height: 520px;
   overflow: auto;
-  padding: 14px;
-  border: 1px solid var(--app-border-color, var(--el-border-color));
+  padding: 12px;
+  border: 1px solid var(--el-border-color-lighter);
   border-radius: 10px;
   background: var(--app-code-bg, var(--el-fill-color-light));
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
@@ -5584,8 +5585,8 @@ export default {
 
 .code-editor {
   overflow: auto;
-  padding: 14px;
-  border: 1px solid var(--app-border-color, var(--el-border-color));
+  padding: 12px;
+  border: 1px solid var(--el-border-color-lighter);
   border-radius: 10px;
   background: var(--app-code-bg, var(--el-fill-color-light));
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
@@ -5612,6 +5613,17 @@ export default {
   min-width: 0;
 }
 
+.body-schema-layout--preview {
+  grid-template-columns: 1fr;
+}
+
+.body-schema-layout--preview > .json-viewer,
+.body-schema-layout--preview > .code-view,
+.body-schema-layout--preview > .scenario-body-code-pane,
+.body-schema-layout--preview > .body-schema-resizer {
+  display: none;
+}
+
 .schema-panel-placeholder {
   width: 8px;
   min-height: 260px;
@@ -5634,7 +5646,7 @@ export default {
   left: 3px;
   width: 2px;
   border-radius: 999px;
-  background: var(--app-border-color, var(--el-border-color));
+  background: var(--el-border-color-lighter);
   transition:
     background 0.12s ease,
     width 0.12s ease,
@@ -5651,8 +5663,8 @@ export default {
   min-height: 260px;
   max-height: 520px;
   overflow: auto;
-  padding: 10px 12px;
-  border: 1px solid var(--app-border-color, var(--el-border-color));
+  padding: 8px 10px;
+  border: 1px solid var(--el-border-color-lighter);
   border-radius: 10px;
   background: var(--app-card-bg, #ffffff);
 }
@@ -5678,7 +5690,7 @@ export default {
 }
 
 .schema-field-table {
-  border: 1px solid var(--app-border-color, var(--el-border-color));
+  border: 1px solid var(--el-border-color-lighter);
   border-radius: 8px;
   overflow: hidden;
   background: #fff;
@@ -5704,7 +5716,7 @@ export default {
 .schema-field-row {
   min-height: 34px;
   padding: 6px 10px;
-  border-top: 1px solid var(--app-border-color, var(--el-border-color));
+  border-top: 1px solid var(--el-border-color-lighter);
 }
 
 .schema-field-name {
@@ -5867,8 +5879,7 @@ export default {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: var(--app-font-size-small);
   line-height: 1.4;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  word-break: break-word;
 }
 
 .schema-field-meaning {
@@ -5876,8 +5887,7 @@ export default {
   color: var(--app-secondary-text, var(--el-text-color-secondary));
   font-size: var(--app-font-size-small, 13px);
   line-height: 1.4;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  word-break: break-word;
 }
 
 .query-value-cell {
@@ -5917,14 +5927,15 @@ export default {
 }
 
 .result-card.scenario-step-result-card {
-  margin-top: 12px;
+  margin-top: 8px;
   overflow: hidden;
   border-radius: 12px;
   background: #ffffff;
+  border: 1px solid var(--el-border-color-lighter);
 }
 
 .scenario-step-result-card :deep(.el-card__body) {
-  padding: 16px;
+  padding: 12px;
 }
 
 .scenario-step-result-head.result-title {
@@ -5932,7 +5943,7 @@ export default {
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 14px;
+  margin-bottom: 10px;
   flex-wrap: wrap;
 }
 
@@ -6006,7 +6017,7 @@ export default {
 .section-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
+  gap: 10px;
 }
 
 .section-block.full {
@@ -6014,7 +6025,7 @@ export default {
 }
 
 .section-block h3 {
-  margin: 0 0 10px;
+  margin: 0 0 6px;
   font-size: var(--app-font-size-base, 14px);
 }
 
@@ -6022,16 +6033,16 @@ export default {
   display: flex;
   align-items: center;
   gap: 10px;
-  min-height: 42px;
-  padding: 10px 12px;
-  border: 1px solid var(--app-border-color, var(--el-border-color));
+  min-height: 36px;
+  padding: 8px 10px;
+  border: 1px solid var(--el-border-color-lighter);
   border-radius: 10px;
   background: var(--app-card-bg, #fafafa);
   word-break: break-all;
 }
 
 .scenario-step-result-tabs :deep(.el-tabs__header) {
-  margin-bottom: 12px;
+  margin-bottom: 8px;
 }
 
 .response-detail-tabs {
@@ -6039,12 +6050,12 @@ export default {
 }
 
 .response-detail-tabs--subtle :deep(.el-tabs__header) {
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 
 .response-detail-tabs--subtle :deep(.el-tabs__nav-wrap::after) {
   height: 1px;
-  background: var(--app-border-color, var(--el-border-color));
+  background: var(--el-border-color-lighter);
 }
 
 .response-detail-tabs--subtle :deep(.el-tabs__item) {
@@ -6079,8 +6090,8 @@ export default {
 }
 
 .request-line {
-  padding: 14px 16px;
-  border-bottom: 1px solid var(--app-border-color, var(--el-border-color));
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
   background: #ffffff;
 }
 
@@ -6090,8 +6101,8 @@ export default {
 
 .request-line :deep(.el-select__wrapper),
 .request-line :deep(.el-input__wrapper) {
-  min-height: 42px;
-  box-shadow: 0 0 0 1px var(--app-border-color, var(--el-border-color)) inset;
+  min-height: 36px;
+  box-shadow: 0 0 0 1px var(--el-border-color-lighter) inset;
 }
 
 .path-input {
@@ -6113,7 +6124,7 @@ export default {
 
 .send-button {
   min-width: 88px;
-  min-height: 42px;
+  min-height: 36px;
   font-weight: 700;
 }
 
@@ -6124,13 +6135,13 @@ export default {
 
 .request-tabs {
   margin-top: 0;
-  padding: 0 16px 16px;
+  padding: 0 12px 10px;
 }
 
 .request-tabs :deep(.el-tabs__header) {
-  margin: 0 -16px 16px;
-  padding: 0 16px;
-  border-bottom: 1px solid var(--app-border-color, var(--el-border-color));
+  margin: 0 -12px 12px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
   background: #fbfdff;
 }
 
@@ -6167,7 +6178,7 @@ export default {
 }
 
 .params-section {
-  margin-bottom: 20px;
+  margin-bottom: 12px;
 }
 
 .params-section:last-child {
@@ -6175,7 +6186,7 @@ export default {
 }
 
 .params-section-title {
-  margin: 0 0 10px;
+  margin: 0 0 6px;
   font-size: var(--app-font-size-small, 12px);
   font-weight: 700;
   color: var(--app-secondary-text, var(--el-text-color-secondary));
@@ -6183,12 +6194,12 @@ export default {
 }
 
 .add-row {
-  margin-top: 12px;
+  margin-top: 8px;
 }
 
 .body-toolbar {
   justify-content: space-between;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
   color: var(--app-secondary-text, var(--el-text-color-secondary));
 }
 
@@ -6197,13 +6208,13 @@ export default {
 }
 
 .step-debug-result {
-  margin-top: 12px;
+  margin-top: 8px;
   border-top: 1px solid var(--el-border-color-lighter);
-  padding-top: 12px;
+  padding-top: 8px;
 }
 
 .step-debug-tabs {
-  margin-top: 8px;
+  margin-top: 6px;
 }
 
 .extraction-hint code {
@@ -6215,7 +6226,7 @@ export default {
 .step-ref-hint {
   font-size: var(--app-font-size-small);
   color: var(--el-text-color-secondary);
-  margin: 0 0 12px;
+  margin: 0 0 8px;
   line-height: 1.6;
 }
 
@@ -6234,7 +6245,7 @@ export default {
 }
 
 .step-assertion-tip {
-  margin-bottom: 10px;
+  margin-bottom: 6px;
   font-size: var(--app-font-size-small, 13px);
   color: var(--app-secondary-text, #909399);
 }
@@ -6268,7 +6279,7 @@ export default {
 .scenario-editor .step-dialog-sidebar .step-case-list {
   flex: 1;
   overflow-y: auto;
-  padding: 0 8px 32px;
+  padding: 0 6px 16px;
 }
 
 .scenario-editor .step-dialog-sidebar .step-sortable-root {

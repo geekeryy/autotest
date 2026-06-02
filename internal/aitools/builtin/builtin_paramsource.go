@@ -389,6 +389,82 @@ func previewSQLParameterSourceTool(deps Deps) aitools.Tool {
 		})
 }
 
+func getDataSourceSchemaTool(deps Deps) aitools.Tool {
+	return readOnlyTool("get_data_source_schema",
+		"查询数据源的表结构（表名+列名列表），用于了解数据库中有哪些表和字段可供查询。",
+		rawSchema(`{
+            "type": "object",
+            "properties": {
+                "dataSourceId": {"type": "string", "description": "数据源 ID"}
+            },
+            "required": ["dataSourceId"],
+            "additionalProperties": false
+        }`),
+		func(ctx context.Context, args json.RawMessage) (any, error) {
+			if deps.ParamSource == nil {
+				return nil, errors.New("get_data_source_schema: param source 服务未配置")
+			}
+			var p struct {
+				DataSourceID string `json:"dataSourceId"`
+			}
+			if err := json.Unmarshal(args, &p); err != nil {
+				return nil, fmt.Errorf("get_data_source_schema: 解析参数失败: %w", err)
+			}
+			id, err := uuid.Parse(strings.TrimSpace(p.DataSourceID))
+			if err != nil {
+				return nil, fmt.Errorf("get_data_source_schema: dataSourceId 不是合法 UUID: %w", err)
+			}
+			tables, err := deps.ParamSource.GetDataSourceSchema(ctx, id)
+			if err != nil {
+				return nil, fmt.Errorf("get_data_source_schema: 查询失败: %w", err)
+			}
+			return map[string]any{
+				"tables": tables,
+				"count":  len(tables),
+			}, nil
+		})
+}
+
+func executeSQLQueryTool(deps Deps) aitools.Tool {
+	return readOnlyTool("execute_sql_query",
+		"对已配置的数据源执行只读 SQL 查询（仅 SELECT/WITH），获取真实业务数据。用于在生成测试场景时查询业务 ID、配置数据等。",
+		rawSchema(`{
+            "type": "object",
+            "properties": {
+                "dataSourceId": {"type": "string", "description": "数据源 ID"},
+                "sql":          {"type": "string", "description": "只读 SQL 查询语句（SELECT/WITH）"},
+                "params":       {"type": ["array", "null"], "description": "SQL 参数绑定数组，可选"}
+            },
+            "required": ["dataSourceId", "sql"],
+            "additionalProperties": false
+        }`),
+		func(ctx context.Context, args json.RawMessage) (any, error) {
+			if deps.ParamSource == nil {
+				return nil, errors.New("execute_sql_query: param source 服务未配置")
+			}
+			var p struct {
+				DataSourceID string          `json:"dataSourceId"`
+				SQL          string          `json:"sql"`
+				Params       json.RawMessage `json:"params"`
+			}
+			if err := json.Unmarshal(args, &p); err != nil {
+				return nil, fmt.Errorf("execute_sql_query: 解析参数失败: %w", err)
+			}
+			id, err := uuid.Parse(strings.TrimSpace(p.DataSourceID))
+			if err != nil {
+				return nil, fmt.Errorf("execute_sql_query: dataSourceId 不是合法 UUID: %w", err)
+			}
+			results, err := deps.ParamSource.ExecuteReadOnlyQuery(ctx, id, p.SQL, p.Params)
+			if err != nil {
+				return nil, fmt.Errorf("execute_sql_query: 执行失败: %w", err)
+			}
+			return map[string]any{
+				"rows":  results,
+				"count": len(results),
+			}, nil
+		})
+}
+
 func decodeDataSourceInput(args json.RawMessage) (paramsource.DataSourceInput, error) {
 	var input paramsource.DataSourceInput
 	if err := json.Unmarshal(args, &input); err != nil {

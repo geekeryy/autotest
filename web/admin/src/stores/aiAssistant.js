@@ -845,6 +845,7 @@ async function streamWith(url, body, paneId = 'panel') {
       thinking: false,
       thinkingStartedAt: 0,
       thinkingElapsedMillis: 0,
+      thinkingContent: '',
     }
     if (thinking) setPlaceholderThinking(placeholder, true)
     pane.messages = [...pane.messages, placeholder]
@@ -867,6 +868,9 @@ async function streamWith(url, body, paneId = 'panel') {
           case 'thinking': {
             const p = ensurePlaceholder()
             setPlaceholderThinking(p, !!event.thinking?.active, event.thinking?.elapsedMillis)
+            if (event.thinking?.content) {
+              p.thinkingContent = (p.thinkingContent || '') + event.thinking.content
+            }
             pane.messages = [...pane.messages]
             break
           }
@@ -970,7 +974,8 @@ function handleMessage(pane, msg, placeholderId) {
   if (!msg || !msg.id) return
   const prior = pane.messages.find((m) => m.id === placeholderId)
   const usageDetails = normalizeUsageDetails(msg.usageDetails) || prior?.usageDetails || null
-  const merged = { ...msg, usageDetails }
+  const thinkingContent = prior?.thinkingContent || msg.reasoningContent || ''
+  const merged = { ...msg, usageDetails, thinkingContent }
   const filtered = pane.messages.filter(
     (m) => m.id !== placeholderId && m.id !== msg.id && !m.optimistic
   )
