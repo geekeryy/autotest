@@ -27,7 +27,6 @@ import (
 	"autotest/internal/aitools"
 	"autotest/internal/auth"
 	"autotest/internal/httpx"
-	"autotest/internal/project"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -248,10 +247,4 @@ func buildSSESink(w http.ResponseWriter, flusher http.Flusher, ctx context.Conte
 		return nil
 	}
 	return sink, stop
-}
-
-// requireProjectViewer is used by Register; declared here to keep the
-// assistant handler self-contained.
-func (h *Handler) requireProjectViewer() func(http.Handler) http.Handler {
-	return h.projectHandler.RequireProjectRole(project.ProjectRoleViewer)
 }

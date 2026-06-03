@@ -4,7 +4,7 @@
 
 ## AI 提供商
 
-- 平台支持**全局** AI 提供商配置（不按项目隔离），在「平台资源 → AI 提供商」维护。
+- 平台支持**全局** AI 提供商配置（不按项目隔离），在「平台资源 → AI 能力管理 → AI 提供商」Tab 维护。
 - 提供商类型包括 deepseek、xiaomi、openai、anthropic、kimi、ollama。
 - 全平台可维护多份 AI 提供商配置。
 - 配置包含名称、Base URL、API Key 脱敏、**文本默认模型**、按能力配置的默认模型（`modalityModels.image` / `audio` / `video`，存于 `extra_config`）、extraConfig、启用状态与是否默认。
@@ -14,9 +14,14 @@
 - 模型下拉不再依赖 `/ai-provider-types` 的静态列表：已保存配置走 `GET /ai-providers/{providerId}/models`；创建/编辑表单在填写 Base URL 与 API Key 后走 `POST /ai-providers/models/discover`（编辑时 apiKey 留空则复用库内密钥）。OpenAI 兼容类型调用上游 `GET {baseUrl}/models`，Anthropic 调用 `GET {baseUrl}/models`，Ollama 在 `/v1/models` 不可用时回退 `GET /api/tags`；上游失败时返回内置 fallback 列表与 `warning`。
 - 管理 API 使用全局 RBAC：`projects:read` 可读，`projects:write` 可写（与项目管理权限一致）。
 
+## AI 能力管理（管理后台）
+
+- 「平台资源 → AI 能力管理」（`/platform/ai-management`）以 Tab 聚合：AI 提供商、AI 助理配置、动作 Prompt、Skills、记忆、Prompt 分层版本、速率限制。
+- 历史路径 `/platform/ai-providers`、`/platform/ai-assistant-settings`、`/platform/ai-prompts`（及 `/ai-providers`）重定向到 `/platform/ai-management` 对应 Tab（`providers` / `assistant` / `action-prompts`）。
+
 ## AI 助理平台配置
 
-- 在「平台资源 → AI 助理配置」（`/platform/ai-assistant-settings`）维护 AI 助理运行时参数，持久化于 `ai_assistant_settings` 表（singleton 行，`config` jsonb）。
+- 在「平台资源 → AI 能力管理 → AI 助理配置」Tab 维护 AI 助理运行时参数，持久化于 `ai_assistant_settings` 表（singleton 行，`config` jsonb）。
 - 管理 API：`GET/PUT /ai-assistant-settings`；`GET` 返回当前值 + 各字段 `label` / `description` / `type` / 默认值元数据，供表单渲染；`PUT` 保存后立即刷新内存配置，**无需重启**。
 - 可配置项（实现于 `internal/aiconfig`）：
   - **工具调用最大轮次**（`maxToolHops`，默认 6）：单次对话/分析的工具循环上限。
@@ -31,6 +36,7 @@
 
 ## 平台 Prompt
 
+- 在「平台资源 → AI 能力管理 → 动作 Prompt」Tab 维护（原独立「Prompt 管理」页）。
 - 平台 Prompt（`project_ai_prompts` 表，历史表名保留）按 **action** 全局唯一，维护 System Prompt / 默认模型。
 - 可选绑定 `providerId`；留空时跟随平台默认 AI 提供商。
 - 管理 API：`GET/POST /ai-prompts`、`PUT/DELETE /ai-prompts/{promptID}`，权限同 AI 提供商。
@@ -62,6 +68,102 @@
 - 当前既有 `/ai/chat` action，也有专用 HTTP 分析入口（如运行失败分析、spec 变更分析）;分析结果当前不写库。
 - 分析侧 AI 可基于内置只读工具按需补充上下文（见下方「AI Tool Calling 框架」与「智能分析的工具增强」）。
 - 分析输出统一为中文 Markdown 结构；前端使用 `MarkdownView`（marked + DOMPurify）渲染，禁止注入未经净化的 HTML。
+
+## AI 断言推断（`internal/aiassert`）
+
+- 平台提供**三层断言推断引擎**，从 OpenAPI schema 和历史运行数据自动推断测试断言，零或极少 LLM 调用。
+- **第一层：Schema 规则推断**（零 LLM 调用）：从接口的 OpenAPI response schema 自动生成断言——
+  - HTTP 方法→状态码映射（GET→200、POST→201 等，置信度 0.95）；
+  - `required` 字段→`exists` 断言（置信度 0.9）；
+  - `enum` 字段→`eq` 断言（置信度 0.85）；
+  - 数值 `minimum/maximum`→`gte/lte` 断言（置信度 0.8）；
+  - `format` 字段→正则 `matches` 断言（置信度 0.8）；
+  - 数组类型→`is_not_empty` 断言（置信度 0.8）。
+- **第二层：历史响应分析**：查询该用例最近通过的运行结果快照（默认 10 条），分析字段值的一致模式，生成置信度 0.7 的断言。
+- **第三层：语义推断**：基于 endpoint 元数据的简单规则（如响应时间 ≤5s），未来可接入 LLM。
+- 推断结果按置信度降序排序，同 type+expression+operator 去重保留最高置信度。
+- HTTP API：
+  - `POST /cases/{caseID}/infer-assertions`：执行推断，可指定 `sampleCount` 和 `sources`（schema/history/semantic）。
+  - `POST /cases/{caseID}/apply-assertions`：将推断断言应用到用例，支持 `replaceMode`（替换/追加）。
+- 推断结果中的每条断言包含 `type`、`expression`、`operator`、`expected`、`confidence`、`source`、`reason` 字段。
+- `ToAssertionJSON` 将推断结果转换为 `internal/assertion` 包兼容的 JSON 数组格式。
+- AI 工具 `generate_assertions_from_schema` 暴露给助理浮窗，供用户在对话中触发断言推断。
+
+## 语义测试数据工厂（`internal/aifactory`）
+
+- 平台提供**语义感知的测试数据生成工厂**，从 OpenAPI RequestSchema 自动提取字段定义并生成真实感测试数据。
+- **语义类型推断**（`InferSemantics`）：根据字段名模式（email、phone、name、address、url、ip、uuid、date 等）和 schema format 自动推断语义类型，覆盖 30+ 种常见业务字段。
+- **多场景生成**：支持 `normal`（正常）、`boundary`（边界）、`stress`（压力）三种场景模式。
+- **多语言支持**：内置 `zh_CN` 和 `en_US` 两套 locale 模板（姓名、地址、电话格式等）。
+- **两种入口**：
+  - `Generate(requestSchema, input)`：从 Endpoint 的 RequestSchema 生成，自动解析 parameters 和 body properties。
+  - `GenerateFromColumns(columns, input)`：从列定义直接生成，用于测试数据表场景。
+- 生成行数限制 1-1000，支持字段级 `constraints` 覆盖。
+- 嵌套 object 递归展开，数组类型跳过（仅生成扁平字段）。
+- AI 工具 `generate_test_data` 暴露给助理浮窗，供用户在对话中按接口 schema 批量生成测试数据。
+
+## 自然语言场景编排（`internal/ainl`）
+
+- 平台支持**自然语言描述→测试场景**的自动编排能力。
+- **编排流程**（`Orchestrator.Orchestrate`）：
+  1. 从 spec 仓库获取目标服务下所有已导入端点；
+  2. 构建包含端点目录的 prompt，调用 LLM 解析自然语言描述为结构化操作序列（`LLMOperations`）；
+  3. 通过 `EndpointMatcher` 将 LLM 输出的步骤匹配到已知端点（精确 method+path → 模糊摘要/operationId）；
+  4. 对低置信度匹配尝试 LLM 辅助二次匹配（从同 method 候选中选择最佳）；
+  5. 校验步骤顺序、端点匹配、断言合法性；
+  6. 输出 `OrchestratorOutput`：场景名称、描述、步骤列表（含 endpointId、requestOverride、assertions）、人类可读预览、警告。
+- **步骤输出**（`ParsedStep`）：每步包含 stepOrder、stepType、name、endpointMethod/Path/ID、matchConfidence（exact/high/medium/low/none）、requestOverride、assertions、description。
+- **匹配置信度**：`exact`（精确 method+path）、`high`（summary/operationId 匹配）、`medium`（LLM 辅助匹配）、`low`（模糊匹配）、`none`（未匹配）。非 exact 匹配会在 warnings 中提示用户确认。
+- **AI 工具入口**：`describe_scenario_in_natural_language` 工具暴露给助理浮窗，参数为 `description`（自然语言描述）和 `serviceId`，返回场景预览供用户确认后再创建。
+- **适配器模式**：`ainl.ChatProvider` 接口通过 `adapter.ChatProviderAdapter` 桥接 `aiprovider.Service`，避免循环导入。
+
+## 项目测试画像（`internal/testprofile`）
+
+- 平台从项目历史运行数据中自动学习项目特征，形成「项目测试画像」（`project_test_profiles` 表）。
+- 画像包含：响应约定（常见字段的稳定值模式）、字段枚举（字段的高频取值分布）、接口依赖（接口间的调用顺序和数据传递）、认证模式（项目的认证方式偏好）。
+- 画像注入到 AI 助理 prompt 和测试用例生成器（`generator`），使生成结果适配项目差异。
+- 管理 API：
+  - `POST /projects/{id}/test-profile/build`：触发画像构建（从历史运行数据学习）。
+  - `GET /projects/{id}/test-profile/`：查看当前画像。
+  - `GET /projects/{id}/test-profile/prompt-context`：获取格式化的 prompt 上下文，供 AI 助理注入。
+- 画像通过 `ProfileConventionProvider` 适配器注入到 `aiprovider.Router` 的上下文构建中。
+- `generator.ProfileAwareRule` 接口允许生成规则使用画像中的约定值（如项目惯例的状态码、常见断言模式）。
+
+## AI 记忆系统（`internal/aimemory`）
+
+- 平台提供 AI 助理的持久化记忆能力，记录用户偏好、项目约定和历史决策。
+- 记忆按 `(project_id, user_id)` 隔离，支持分类存储和按相关性检索。
+- 记忆在 AI 助理对话中作为额外上下文注入，帮助模型理解用户的历史偏好和项目特殊约定。
+- 管理 API：`GET/POST/DELETE /projects/{id}/ai-memory`，支持 CRUD 操作。
+
+## AI 技能发现（`internal/aiskill`）
+
+- 平台支持从 AI 路由观测日志和工具调用结果中自动发现高频操作模式，沉淀为「技能」。
+- 技能发现基于 `ai_routing_logs` 的 `per_hop` 数据和 `tool_outcomes` 的调用成功率，识别用户常见操作序列。
+- 发现的技能可被 Planner/Router 引用，提升后续对话的路由置信度。
+- 技能发现作为后台任务定期执行（默认每天一次）。
+
+## AI 反馈与自进化（`internal/aifeedback`）
+
+- 平台收集用户对 AI 助理回复的反馈（满意/不满意、具体意见），用于持续改进。
+- 反馈数据关联到具体的会话和消息，便于回溯分析。
+- 反馈指标纳入自评估报告，驱动 prompt 和路由规则的迭代优化。
+- 管理 API：`POST /projects/{id}/ai-feedback`。
+
+## 自评估代理（`internal/evalagent`）
+
+- 平台提供自动化的 AI 助理质量评估能力，定期执行 Golden Set 评测。
+- 评估任务作为后台 goroutine 运行（默认每周一次），使用 `testdata/ai_assistant_eval/*.yaml` 中的测试用例。
+- 评估指标包括：Tool Recall@Hop1、Mis-route Rate、describe 扩展率、Confirm Reject Rate、Hop to Success、Token per Task。
+- 评估结果写入数据库，可在管理后台查看趋势。
+- 评估失败（指标回归）时触发告警通知。
+
+## Prompt 分层系统（`internal/promptlayer`）
+
+- 平台支持 prompt 的分层管理，将 system prompt 拆分为多个可独立维护的层。
+- 各层按优先级叠加：平台基础层 → 项目画像层 → 行为特定层（如 assistant_chat、generate_params 等 action）。
+- 分层设计便于单独更新某一层的 prompt 而不影响其他层，降低 prompt 维护的耦合度。
+- 每层可绑定特定 provider 或使用平台默认 provider。
 
 ## AI Tool Calling 框架
 
@@ -95,6 +197,13 @@
 - 平台 **不暴露** 用户管理相关写能力：用户/角色/权限/登录方式/API Key 等系统管理接口不在工具集中。
 
 完整工具名以 `builtin.All()` 注册顺序为准（约 60+ 个）；新增工具须遵循 `additionalProperties: false`、不暴露 `projectId`、删除类使用 `deleteTool` helper。
+
+### 特殊工具说明
+
+- **`generate_test_data`**（`builtin_factory.go`）：语义测试数据工厂工具。输入 `endpointId`（关联接口）、`scenario`（normal/boundary/stress）、`count`（行数）、`locale`（zh_CN/en_US），从接口 RequestSchema 提取字段定义并批量生成真实感测试数据。语义类型推断覆盖 email、phone、name、address、idCard、plateNumber、bankCard 等 30+ 种业务字段。
+- **`describe_scenario_in_natural_language`**（`builtin_nl.go`）：自然语言场景编排工具。输入 `description`（中文测试流程描述）和 `serviceId`，自动解析操作序列、匹配已有接口、生成步骤列表和断言，返回场景预览供用户确认。端点匹配支持精确（method+path）、高置信度（summary/operationId）、中等置信度（LLM 辅助）三级。
+- **`generate_and_verify_scenarios`**（`builtin_scenariogen.go`）：异步场景生成验证工具（gated）。输入 `serviceId`/`environmentId`/`autoRepair`/`maxRounds`，在真实环境执行「生成→验证→（可选）自动修复」闭环。需平台 AI 助理配置开启「场景生成真实环境验证」。
+- **`generate_coverage_scenarios`**（`builtin_scenarios_extra.go`）：依赖图驱动的覆盖场景生成。从接口 schema 推断 producer→consumer 依赖，自动生成 requestOverride（Bearer 链、路径 ID 引用）。
 
 ## AI 场景生成与编排
 

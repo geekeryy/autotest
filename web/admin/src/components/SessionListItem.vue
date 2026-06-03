@@ -14,7 +14,6 @@
           <span v-for="tag in tags" :key="tag" class="session-list-item__tag">{{ tag }}</span>
         </span>
       </span>
-      <span v-if="showMeta" class="session-list-item__meta">{{ timeLabel }}</span>
     </div>
     <el-dropdown
       trigger="click"
@@ -48,7 +47,6 @@
 
 <script>
 import { Delete, EditPen, InfoFilled, MoreFilled } from '@element-plus/icons-vue'
-import { formatRelativeTime, formatSessionTime } from '../utils/useRelativeTime'
 
 export default {
   name: 'SessionListItem',
@@ -69,13 +67,6 @@ export default {
         'session-list-item--focused': this.focused,
         'session-list-item--history': this.variant === 'history',
       }
-    },
-    showMeta() {
-      return this.variant === 'sidebar'
-    },
-    timeLabel() {
-      const fn = this.variant === 'history' ? formatSessionTime : formatRelativeTime
-      return fn(this.session.updatedAt)
     },
   },
   methods: {
@@ -106,10 +97,10 @@ export default {
   justify-content: space-between;
   gap: 4px;
   width: 100%;
-  margin-bottom: 2px;
-  padding: 8px 10px;
+  margin-bottom: 4px;
+  padding: 10px 12px;
   border: none;
-  border-radius: 10px;
+  border-radius: 8px;
   background: transparent;
   cursor: pointer;
   text-align: left;
@@ -121,17 +112,22 @@ export default {
 
 .session-list-item:hover,
 .session-list-item:focus-visible {
-  background: var(--app-surface-subtle);
+  background: #e8f0fe;
 }
 
 .session-list-item.active {
-  background: var(--app-focus-ring);
+  background: #e4edfd;
 }
 
+.session-list-item.active .session-list-item__title {
+  color: #3964fe;
+}
+
+
 .session-list-item--history {
-  padding: 7px 8px;
+  padding: 8px 10px;
   border-radius: 8px;
-  margin-bottom: 0;
+  margin-bottom: 2px;
 }
 
 .session-list-item__body {
@@ -155,8 +151,8 @@ export default {
   flex: 1;
   min-width: 0;
   font-size: 14px;
-  font-weight: 500;
-  color: var(--app-text-color);
+  font-weight: 400;
+  color: #333;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -164,12 +160,9 @@ export default {
 
 .session-list-item--history .session-list-item__title {
   font-size: 13px;
+  color: #333;
 }
 
-.session-list-item__meta {
-  font-size: 12px;
-  color: var(--app-text-muted);
-}
 
 .session-list-item__tags {
   display: inline-flex;
@@ -215,7 +208,7 @@ export default {
 }
 
 .session-list-item--focused.active {
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--el-color-primary) 35%, transparent);
+  box-shadow: none;
 }
 </style>
 

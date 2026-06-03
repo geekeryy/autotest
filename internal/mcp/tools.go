@@ -25,6 +25,7 @@ func RegisterTools(server *sdkmcp.Server, cfg Config, client *APIClient) {
 		FilePath    string `json:"filePath,omitempty" jsonschema:"local path to openapi.json/yaml or swagger file"`
 		Content     string `json:"content,omitempty" jsonschema:"raw OpenAPI/Swagger document text (use when filePath is not set)"`
 		ContentType string `json:"contentType,omitempty" jsonschema:"optional Content-Type: application/json or application/yaml (auto-detected when omitted)"`
+		SyncMode    string `json:"syncMode,omitempty" jsonschema:"optional sync mode: merge (default) or overwrite"`
 	}
 	sdkmcp.AddTool(server, &sdkmcp.Tool{
 		Name:        "import_swagger",
@@ -38,7 +39,7 @@ func RegisterTools(server *sdkmcp.Server, cfg Config, client *APIClient) {
 		if err != nil {
 			return toolError(err)
 		}
-		summary, err := client.ImportSpec(ctx, projectID, serviceID, data, args.ContentType)
+		summary, err := client.ImportSpec(ctx, projectID, serviceID, data, args.ContentType, args.SyncMode)
 		if err != nil {
 			return toolError(err)
 		}
@@ -50,6 +51,7 @@ func RegisterTools(server *sdkmcp.Server, cfg Config, client *APIClient) {
 		ServiceID   string `json:"serviceId,omitempty" jsonschema:"service UUID; falls back to AUTOTEST_SERVICE_ID when omitted"`
 		URL         string `json:"url" jsonschema:"HTTP(S) URL of the OpenAPI/Swagger document"`
 		ContentType string `json:"contentType,omitempty" jsonschema:"optional Content-Type override after download"`
+		SyncMode    string `json:"syncMode,omitempty" jsonschema:"optional sync mode: merge (default) or overwrite"`
 	}
 	sdkmcp.AddTool(server, &sdkmcp.Tool{
 		Name:        "import_swagger_from_url",
@@ -67,7 +69,7 @@ func RegisterTools(server *sdkmcp.Server, cfg Config, client *APIClient) {
 		if err != nil {
 			return toolError(err)
 		}
-		summary, err := client.ImportSpec(ctx, projectID, serviceID, data, args.ContentType)
+		summary, err := client.ImportSpec(ctx, projectID, serviceID, data, args.ContentType, args.SyncMode)
 		if err != nil {
 			return toolError(err)
 		}

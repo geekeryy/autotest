@@ -35,7 +35,8 @@ func NewAPIClient(cfg Config) *APIClient {
 }
 
 // ImportSpec posts OpenAPI/Swagger document bytes to the specs import endpoint.
-func (c *APIClient) ImportSpec(ctx context.Context, projectID, serviceID uuid.UUID, content []byte, contentType string) (*spec.ImportSummary, error) {
+// syncMode is optional: "merge" (default) or "overwrite".
+func (c *APIClient) ImportSpec(ctx context.Context, projectID, serviceID uuid.UUID, content []byte, contentType string, syncMode string) (*spec.ImportSummary, error) {
 	if len(content) == 0 {
 		return nil, fmt.Errorf("spec content is empty")
 	}
@@ -47,6 +48,9 @@ func (c *APIClient) ImportSpec(ctx context.Context, projectID, serviceID uuid.UU
 	}
 
 	url := fmt.Sprintf("%s/projects/%s/services/%s/specs/import", c.baseURL, projectID, serviceID)
+	if mode := strings.TrimSpace(syncMode); mode == string(spec.SyncModeOverwrite) {
+		url += "?sync=overwrite"
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(content))
 	if err != nil {
 		return nil, err

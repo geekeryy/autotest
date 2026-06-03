@@ -147,11 +147,6 @@ func chatResultTitleText(result *client.Result) string {
 	return strings.TrimSpace(result.Text)
 }
 
-// chatResultText is used by tests and non-title callers if needed.
-func chatResultText(result *client.Result) string {
-	return chatResultTitleText(result)
-}
-
 // userMessageSnapshot returns the total non-empty user message count and up to
 // max earliest user contents (in conversation order).
 func userMessageSnapshot(ctx context.Context, store SessionStore, sessionID uuid.UUID, max int) (int, []string) {

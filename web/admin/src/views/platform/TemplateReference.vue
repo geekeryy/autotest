@@ -2,7 +2,7 @@
   <div class="page-card template-reference">
     <div class="page-header">
       <div>
-        <h2 class="page-title">模板与变量参考</h2>
+        <h2 class="page-title">模板参考</h2>
         <p class="page-subtitle">
           梳理平台所有可在请求模板、场景步骤和 Mock 响应中使用的占位符、引用与函数。可直接复制示例到对应输入框。
         </p>

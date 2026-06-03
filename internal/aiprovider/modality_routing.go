@@ -80,7 +80,7 @@ func pickModalityModel(_ string, configured, modality string, gateway []client.M
 	if configured != "" {
 		return resolveConfiguredModelID(configured, gateway), nil
 	}
-	return "", fmt.Errorf("未配置%s模型：请在 AI 提供商设置中为「%s」选择默认模型", client.ModalityLabelZH(modality), client.ModalityLabelZH(modality))
+	return "", fmt.Errorf("未配置%s模型：请在「AI 能力管理 → AI 提供商」中为「%s」选择默认模型", client.ModalityLabelZH(modality), client.ModalityLabelZH(modality))
 }
 
 func providerSupportsImageInput(provider *providerRow) error {
@@ -91,6 +91,6 @@ func providerSupportsImageInput(provider *providerRow) error {
 	if strings.TrimSpace(mm.Image) != "" {
 		return nil
 	}
-	return fmt.Errorf("当前 AI 提供商未配置图片模型：请在「AI 提供商」设置中指定图片默认模型")
+	return fmt.Errorf("当前 AI 提供商未配置图片模型：请在「AI 能力管理 → AI 提供商」中指定图片默认模型")
 }
 

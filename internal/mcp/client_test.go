@@ -48,7 +48,7 @@ func TestAPIClientImportSpec(t *testing.T) {
 		APIBaseURL: srv.URL + "/api/v1",
 		APIKey:     "at-test-key",
 	})
-	summary, err := client.ImportSpec(context.Background(), projectID, serviceID, []byte(`{"openapi":"3.0.0"}`), "")
+	summary, err := client.ImportSpec(context.Background(), projectID, serviceID, []byte(`{"openapi":"3.0.0"}`), "", "")
 	if err != nil {
 		t.Fatal(err)
 	}

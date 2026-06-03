@@ -24,7 +24,7 @@ import (
 // values stamped on builtin tools (see internal/aitools/builtin).
 var allDomains = []string{
 	"meta", "cases", "scenarios", "mock", "mockset",
-	"testdata", "paramsource", "scripts", "runs", "spec",
+	"testdata", "paramsource", "scripts", "runs", "spec", "factory",
 }
 
 func knownDomain(d string) bool {

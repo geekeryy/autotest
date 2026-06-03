@@ -78,7 +78,7 @@ func (h *Handler) importSpec(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	summary, err := h.service.Import(r.Context(), projectID, serviceID, data)
+	summary, err := h.service.Import(r.Context(), projectID, serviceID, data, ParseSyncMode(r.URL.Query().Get("sync")))
 	if err != nil {
 		httpx.Error(w, http.StatusBadRequest, err)
 		return

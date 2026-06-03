@@ -148,7 +148,7 @@ func TestMockHandlerRecordsAccessLogOnMatch(t *testing.T) {
 		server: MockServer{ID: serverID, ProjectID: projectID, Port: 18081},
 		routes: []MockRoute{route},
 	}
-	runtime := NewRuntime(repo, nil)
+	runtime := NewRuntime(repo, nil, nil, nil)
 	runtime.mu.Lock()
 	runtime.running[serverID] = &runningServer{server: repo.server, startedAt: time.Now()}
 	runtime.mu.Unlock()
@@ -197,7 +197,7 @@ func TestMockHandlerRecordsAccessLogOnNotFound(t *testing.T) {
 		server: MockServer{ID: serverID, ProjectID: projectID, Port: 18082},
 		routes: nil,
 	}
-	runtime := NewRuntime(repo, nil)
+	runtime := NewRuntime(repo, nil, nil, nil)
 	runtime.mu.Lock()
 	runtime.running[serverID] = &runningServer{server: repo.server, startedAt: time.Now()}
 	runtime.mu.Unlock()
@@ -241,7 +241,7 @@ func TestMockHandlerSkipsOptionsAccessLog(t *testing.T) {
 	repo := &fakeAccessLogRepo{
 		server: MockServer{ID: serverID, ProjectID: uuid.New(), Port: 18083},
 	}
-	runtime := NewRuntime(repo, nil)
+	runtime := NewRuntime(repo, nil, nil, nil)
 
 	req := httptest.NewRequest(http.MethodOptions, "/api/ping", nil)
 	recorder := httptest.NewRecorder()

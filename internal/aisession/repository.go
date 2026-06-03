@@ -63,6 +63,37 @@ func (r *Repository) ListSessions(ctx context.Context, projectID, userID uuid.UU
 	return out, rows.Err()
 }
 
+// ListSessionsPage returns a paginated slice of sessions, newest-updated first.
+// offset is the number of sessions to skip; limit is the max to return.
+func (r *Repository) ListSessionsPage(ctx context.Context, projectID, userID uuid.UUID, offset, limit int) ([]Session, error) {
+	if r.DB == nil {
+		return nil, fmt.Errorf("database unavailable")
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+	rows, err := r.DB.Query(ctx, `
+		select id, project_id, user_id, title, created_at, updated_at
+		from ai_sessions
+		where project_id = $1 and user_id = $2 and deleted_at is null
+		order by updated_at desc
+		limit $3 offset $4
+	`, projectID, userID, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("list ai sessions page: %w", err)
+	}
+	defer rows.Close()
+	out := []Session{}
+	for rows.Next() {
+		s, err := scanSession(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *s)
+	}
+	return out, rows.Err()
+}
+
 // GetSession fetches a single session enforcing user ownership.
 func (r *Repository) GetSession(ctx context.Context, projectID, userID, sessionID uuid.UUID) (*Session, error) {
 	if r.DB == nil {

@@ -39,3 +39,37 @@
 - 示例 API 支持 JWT 登录，业务接口通过 Bearer Token 访问。
 - `/api/v1/admin` 示例接口使用独立于普通业务接口的鉴权密钥。
 - 通过 migrations 维护数据库结构变更。
+
+## AI 能力模块概览
+
+平台 AI 能力分布在以下模块中，详细设计见 [ai-capabilities.md](ai-capabilities.md)：
+
+| 模块 | 职责 |
+|------|------|
+| `internal/aiprovider` | AI 提供商管理、Planner（意图分类）、Router（工具包选择）、SSE 对话引擎 |
+| `internal/aitools` | Tool Calling 框架：Registry、Catalog、Meta 工具（find_tools/describe_tools）、向量检索 |
+| `internal/aitools/builtin` | 60+ 内置工具实现（只读/自动写/删除写），按域拆分 |
+| `internal/aisession` | AI 会话与消息持久化、SSE 流式推送、Token 用量统计 |
+| `internal/aiassert` | 三层断言推断引擎（Schema 规则/历史分析/语义推断） |
+| `internal/aifactory` | 语义测试数据工厂（字段名语义推断、多场景/locale） |
+| `internal/ainl` | 自然语言→测试场景编排（LLM 解析 + 端点匹配） |
+| `internal/aimemory` | AI 助理持久化记忆（用户偏好、项目约定） |
+| `internal/aiskill` | 技能发现（从路由日志识别高频操作模式） |
+| `internal/aifeedback` | AI 反馈收集（用户满意度、自进化驱动） |
+| `internal/evalagent` | 自评估代理（Golden Set 定期评测、指标回归告警） |
+| `internal/aianalysis` | 失败分析与 spec 变更影响分析 |
+| `internal/aiconfig` | AI 助理平台配置（singleton 行，热更新） |
+| `internal/projectprompt` | 平台 Prompt 管理（action 级 System Prompt） |
+| `internal/promptlayer` | Prompt 分层系统（基础层/画像层/行为层叠加） |
+| `internal/genagent` | 执行-修复闭环 Agent（异步场景生成→验证→修复） |
+| `internal/scenariogen` | 依赖图驱动的覆盖场景生成 |
+
+## 其他新增模块
+
+| 模块 | 职责 |
+|------|------|
+| `internal/mockgen` | 基于 JSON Schema 的 Mock 数据生成（语义推断、中文业务数据） |
+| `internal/mockrecord` | Mock Server 录制与回放（转发真实服务、精确匹配回放） |
+| `internal/testprofile` | 项目测试画像（从历史运行数据学习项目特征） |
+| `internal/specdiff` | Spec 版本差异比较 |
+| `internal/sampler` | 响应采样与 profile 适配（从 schema 生成请求参数） |

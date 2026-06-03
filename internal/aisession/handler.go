@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 
 	"autotest/internal/auth"
 	"autotest/internal/httpx"
@@ -75,6 +76,31 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+
+	// 分页参数：limit 默认 20，offset 默认 0
+	limit := 20
+	if v, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && v > 0 && v <= 100 {
+		limit = v
+	}
+	offset := 0
+	if v, err := strconv.Atoi(r.URL.Query().Get("offset")); err == nil && v >= 0 {
+		offset = v
+	}
+
+	// 无分页参数时返回全量（兼容旧客户端）
+	if r.URL.Query().Has("limit") || r.URL.Query().Has("offset") {
+		items, hasMore, err := h.service.ListSessionsPage(r.Context(), projectID, userID, offset, limit)
+		if err != nil {
+			httpx.Error(w, http.StatusInternalServerError, err)
+			return
+		}
+		httpx.JSON(w, http.StatusOK, map[string]any{
+			"sessions": items,
+			"hasMore":   hasMore,
+		})
+		return
+	}
+
 	items, err := h.service.ListSessions(r.Context(), projectID, userID)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, err)

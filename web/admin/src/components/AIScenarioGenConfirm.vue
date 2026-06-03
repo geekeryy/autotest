@@ -295,44 +295,49 @@ export default {
 <style scoped>
 .gen-confirm {
   background: var(--el-fill-color-blank, #fff);
-  border: 1px solid color-mix(in srgb, var(--el-color-warning) 55%, var(--app-border-color));
-  border-radius: 12px;
-  padding: 14px 16px;
+  border: 1px solid var(--el-border-color-light, #e4e7ed);
+  border-radius: 8px;
+  padding: 16px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 16px;
+  transition: border-color 0.2s ease;
+}
+
+.gen-confirm:hover {
+  border-color: var(--el-border-color, #dcdfe6);
 }
 
 .gen-confirm--inline {
-  border-color: var(--app-border-color);
-  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.04);
+  border-color: var(--el-border-color-light, #e4e7ed);
+  box-shadow: none;
   background: var(--el-fill-color-blank, #fff);
 }
 
 .gen-confirm__head {
   display: flex;
-  gap: 10px;
+  gap: 12px;
   align-items: flex-start;
 }
 
 .gen-confirm__warn {
   flex-shrink: 0;
   font-size: 20px;
-  color: var(--el-color-warning);
+  color: var(--el-color-warning, #e6a23c);
   margin-top: 2px;
 }
 
 .gen-confirm__title {
   font-size: 14px;
   font-weight: 600;
-  color: var(--app-text-color);
+  color: var(--el-text-color-primary, #303133);
 }
 
 .gen-confirm__desc {
-  margin: 4px 0 0;
+  margin: 6px 0 0;
   font-size: 13px;
-  line-height: 1.55;
-  color: var(--app-secondary-text);
+  line-height: 1.6;
+  color: var(--el-text-color-regular, #606266);
 }
 
 .gen-confirm__form {
@@ -346,34 +351,47 @@ export default {
 .gen-confirm__switch-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   flex-wrap: wrap;
 }
 
 .gen-confirm__switch-hint,
 .gen-confirm__rounds-hint {
   font-size: 12px;
-  color: var(--app-text-muted);
+  color: var(--el-text-color-secondary, #909399);
   margin-left: 8px;
 }
 
 .gen-confirm__args {
   font-size: 12px;
-  color: var(--app-secondary-text);
+  color: var(--el-text-color-secondary, #909399);
+}
+
+.gen-confirm__args summary {
+  cursor: pointer;
+  user-select: none;
+}
+
+.gen-confirm__args summary:hover {
+  color: var(--el-text-color-primary, #303133);
 }
 
 .gen-confirm__args pre {
-  margin: 6px 0 0;
-  padding: 8px;
+  margin: 8px 0 0;
+  padding: 12px;
   border-radius: 6px;
-  background: var(--el-fill-color-light);
+  background: #1e1e1e;
+  color: #d4d4d4;
   overflow: auto;
   max-height: 160px;
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 .gen-confirm__error {
   font-size: 13px;
-  color: var(--el-color-danger);
+  color: var(--el-color-danger, #f56c6c);
 }
 
 .gen-confirm__actions {
@@ -390,6 +408,6 @@ export default {
 
 .gen-confirm__reject-actions {
   display: flex;
-  gap: 6px;
+  gap: 8px;
 }
 </style>

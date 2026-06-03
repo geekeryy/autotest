@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"autotest/internal/logx"
+	"autotest/internal/urlx"
 
 	"github.com/google/uuid"
 )
@@ -181,6 +182,23 @@ func (s *Service) ListRoutes(ctx context.Context, projectID, serverID uuid.UUID)
 	return s.repo.ListRoutes(ctx, projectID, serverID)
 }
 
+// GetRoute returns a single mock route by ID.
+func (s *Service) GetRoute(ctx context.Context, projectID, serverID, routeID uuid.UUID) (*MockRoute, error) {
+	if routeID == uuid.Nil {
+		return nil, errors.New("mock route id is required")
+	}
+	routes, err := s.repo.ListRoutes(ctx, projectID, serverID)
+	if err != nil {
+		return nil, err
+	}
+	for _, route := range routes {
+		if route.ID == routeID {
+			return &route, nil
+		}
+	}
+	return nil, ErrMockRouteNotFound
+}
+
 // UpdateRoute validates and updates a mock route.
 func (s *Service) UpdateRoute(ctx context.Context, projectID, serverID, routeID uuid.UUID, input MockRouteInput) (*MockRoute, error) {
 	if routeID == uuid.Nil {
@@ -348,12 +366,29 @@ func normalizeRouteInput(input *MockRouteInput) error {
 	if input.ResponseMode == "" {
 		input.ResponseMode = ResponseModeBody
 	}
-	if input.ResponseMode != ResponseModeBody && input.ResponseMode != ResponseModeRedirect {
-		return errors.New("mock route responseMode must be body or redirect")
+	if input.ResponseMode != ResponseModeBody &&
+		input.ResponseMode != ResponseModeRedirect &&
+		input.ResponseMode != ResponseModeSchema &&
+		input.ResponseMode != ResponseModeRecord &&
+		input.ResponseMode != ResponseModeReplay {
+		return errors.New("mock route responseMode must be body, redirect, schema, record, or replay")
+	}
+	input.RecordTargetURL = strings.TrimRight(strings.TrimSpace(input.RecordTargetURL), "/")
+	if input.ResponseMode == ResponseModeRecord {
+		if err := urlx.ValidateHTTPServiceURL(input.RecordTargetURL); err != nil {
+			return fmt.Errorf("recordTargetUrl: %w", err)
+		}
 	}
 	input.RedirectLocation = strings.TrimSpace(input.RedirectLocation)
 	if input.ResponseMode == ResponseModeRedirect && input.RedirectLocation == "" {
 		return errors.New("mock route redirectLocation is required for redirect response")
+	}
+	// schema 模式下，如果提供了 responseSchema 则校验格式
+	if input.ResponseMode == ResponseModeSchema && len(input.ResponseSchema) > 0 {
+		var schema map[string]any
+		if err := json.Unmarshal(input.ResponseSchema, &schema); err != nil {
+			return errors.New("mock route responseSchema must be a valid JSON object")
+		}
 	}
 	if input.ResponseStatus == 0 {
 		if input.ResponseMode == ResponseModeRedirect {

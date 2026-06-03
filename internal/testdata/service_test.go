@@ -255,7 +255,7 @@ func TestGenerateRowsAIColumnWarnsWhenNoProviderConfigured(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate rows: %v", err)
 	}
-	if len(out.Warnings) == 0 || !strings.Contains(out.Warnings[0], "请先在项目 Prompt 管理或 AI 提供商中配置") {
+	if len(out.Warnings) == 0 || !strings.Contains(out.Warnings[0], "请先在「AI 能力管理") {
 		t.Fatalf("expected unconfigured warning, got %#v", out.Warnings)
 	}
 	if ai.calls != 0 {

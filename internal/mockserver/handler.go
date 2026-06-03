@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"time"
 
 	"autotest/internal/httpx"
 	"autotest/internal/project"
@@ -44,6 +45,8 @@ func (h *Handler) Register(r chi.Router) {
 			r.Put("/{serverID}/routes/{routeID}", h.updateRoute)
 			r.Delete("/{serverID}/routes/{routeID}", h.deleteRoute)
 			r.Delete("/{serverID}/access-logs", h.clearAccessLogs)
+			r.Post("/sync-from-spec", h.syncFromSpec)
+			r.Put("/{serverID}/routes/{routeID}/ai-pool", h.updateAIPool)
 		})
 	})
 }
@@ -296,4 +299,94 @@ func writeServiceError(w http.ResponseWriter, err error) {
 	default:
 		httpx.Error(w, http.StatusBadRequest, err)
 	}
+}
+
+// syncFromSpec 接收 endpoints 列表并同步为 Schema 模式的 MockRoutes。
+// 请求体格式：{"endpoints": [{"method": "GET", "path": "/users", "responseSchema": {...}}, ...]}
+func (h *Handler) syncFromSpec(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := parseProjectID(w, r)
+	if !ok {
+		return
+	}
+
+	var input struct {
+		Endpoints []EndpointInfo `json:"endpoints"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		httpx.Error(w, http.StatusBadRequest, err)
+		return
+	}
+
+	created, err := h.service.SyncFromEndpoints(r.Context(), projectID, input.Endpoints)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	httpx.JSON(w, http.StatusOK, map[string]any{
+		"created": created,
+		"total":   len(input.Endpoints),
+	})
+}
+
+// updateAIPool 更新路由的 AI 预生成数据池。
+// 请求体格式：{"pool": [{...}, {...}, ...]}
+func (h *Handler) updateAIPool(w http.ResponseWriter, r *http.Request) {
+	projectID, serverID, routeID, ok := parseRouteIDs(w, r)
+	if !ok {
+		return
+	}
+
+	var input struct {
+		Pool json.RawMessage `json:"pool"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		httpx.Error(w, http.StatusBadRequest, err)
+		return
+	}
+
+	if len(input.Pool) == 0 {
+		httpx.Error(w, http.StatusBadRequest, nil)
+		return
+	}
+
+	// 获取现有路由
+	route, err := h.service.GetRoute(r.Context(), projectID, serverID, routeID)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+
+	// 更新 AI 池
+	now := time.Now()
+	routeUpdate := MockRouteInput{
+		Method:           route.Method,
+		Path:             route.Path,
+		Priority:         route.Priority,
+		Enabled:          &route.Enabled,
+		RequestMatch:     route.RequestMatch,
+		ResponseMode:     route.ResponseMode,
+		ResponseStatus:   route.ResponseStatus,
+		ResponseHeaders:  route.ResponseHeaders,
+		RedirectLocation: route.RedirectLocation,
+		ResponseBody:     route.ResponseBody,
+		ResponseBodyType: route.ResponseBodyType,
+		ResponseSchema:   route.ResponseSchema,
+		AIGeneratedPool:  input.Pool,
+		RecordTargetURL:  route.RecordTargetURL,
+		DelayMillis:      route.DelayMillis,
+	}
+
+	updated, err := h.service.UpdateRoute(r.Context(), projectID, serverID, routeID, routeUpdate)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+
+	httpx.JSON(w, http.StatusOK, map[string]any{
+		"message":       "AI pool updated",
+		"poolSize":      len(input.Pool),
+		"aiGeneratedAt": now,
+		"route":         updated,
+	})
 }

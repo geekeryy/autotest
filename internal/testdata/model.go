@@ -23,7 +23,7 @@ var (
 	ErrUnknownMockHelper     = errors.New("unknown mock helper")
 	ErrAIProviderUnavailable = errors.New("ai provider service is unavailable")
 	// ErrAIProviderUnconfigured 表示既没有项目级 prompt 也没有项目默认 AI 提供商，调用方需先配置。
-	ErrAIProviderUnconfigured = errors.New("请先在项目 Prompt 管理或 AI 提供商中配置 generate_case_data 的提供商")
+	ErrAIProviderUnconfigured = errors.New("请先在「AI 能力管理 → 动作 Prompt」或「AI 提供商」中配置 generate_case_data 的提供商")
 )
 
 // Generator kinds supported by a column. Each row is generated independently

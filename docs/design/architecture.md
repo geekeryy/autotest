@@ -16,7 +16,7 @@
 ┌──────────────────────────┴───────────────────────────────────┐
 │                       Backend (Go)                           │
 │  ┌─────────────────────────────────────────────────────────┐ │
-│  │                    HTTP Layer (Gin)                     │ │
+│  │                    HTTP Layer (chi)                     │ │
 │  │   auth middleware · JWT · RBAC permission check         │ │
 │  └─────────────────────────┬───────────────────────────────┘ │
 │                            │                                 │
@@ -29,6 +29,8 @@
 │  │              Shared Services & Utils                    │ │
 │  │  httpx · assertion · sampler · generator · paramsource  │ │
 │  │  aiprovider · scenariogen/depgraph · genagent · report  │ │
+│  │  aiassert · aifactory · ainl · mockgen · mockrecord     │ │
+│  │  aiskill · aimemory · aifeedback · evalagent            │ │
 │  └──────────────────────────┬──────────────────────────────┘ │
 │                             │                                │
 │  ┌──────────────────────────┴──────────────────────────────┐ │
@@ -37,7 +39,7 @@
 └──────────────────────────────────────────────────────────────┘
 ```
 
-前端为 Vue 3 管理后台；后端为 Go API（Gin），持久化使用 PostgreSQL。**默认生产形态**为 Firebase Hosting 托管前端 + 自托管 API（`deploy/prod`）；本地开发用 Vite dev server；All-in-One 单镜像仅为可选的便捷部署方式。
+前端为 Vue 3 管理后台；后端为 Go API（chi router），持久化使用 PostgreSQL。**默认生产形态**为 Firebase Hosting 托管前端 + 自托管 API（`deploy/prod`）；本地开发用 Vite dev server；All-in-One 单镜像仅为可选的便捷部署方式。
 
 ## 部署方案选择
 
@@ -175,7 +177,7 @@ CORS 由 `auth.CORSMiddleware` 统一处理（`cmd/api/main.go`）：
 | `CORS_ALLOWED_ORIGINS` | 生产部署必填 | 空 | 逗号分隔的前端 Origin，作为浏览器跨域 API 的 CORS 白名单（与登录方式「可信前端域名」无关） |
 | `LOG_LEVEL` | 否 | 按环境 | debug / info / warn / error |
 | `LOG_FORMAT` | 否 | 按环境 | text / json |
-| `AI_SCENARIO_AUTORUN` | 否 | off | **已推荐在后台「AI 助理配置」维护**；设为 `on`/`1`/`true` 时作为未入库默认值启用场景真实环境验证 |
+| `AI_SCENARIO_AUTORUN` | 否 | off | **已推荐在后台「AI 能力管理 → AI 助理配置」维护**；设为 `on`/`1`/`true` 时作为未入库默认值启用场景真实环境验证 |
 | `AI_MAX_TOOL_HOPS` | 否 | 6 | 未入库时默认工具调用轮次上限 |
 | `AI_SCENARIO_GEN_MAX_ROUNDS` | 否 | 3 | 未入库时 genagent 默认最大轮次 |
 | `AI_ROUTER_CONFIDENCE_THRESHOLD` | 否 | 0.7 | 未入库时 Router 置信度阈值 |

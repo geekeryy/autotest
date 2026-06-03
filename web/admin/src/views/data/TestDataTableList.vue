@@ -175,7 +175,7 @@
             show-icon
             :closable="false"
             title="当前项目尚未配置 AI 提供商"
-            description="存在使用 AI 生成方式的列。请先在「项目管理 / AI 提供商」配置至少一个启用的提供商，并可在「项目管理 / Prompt 管理」中按 generate_case_data 维护 SystemPrompt。"
+            description="存在使用 AI 生成方式的列。请先在「平台资源 / AI 能力管理 → AI 提供商」配置至少一个启用的提供商，并可在「动作 Prompt」Tab 中按 generate_case_data 维护 SystemPrompt。"
           />
 
           <div class="row-toolbar">

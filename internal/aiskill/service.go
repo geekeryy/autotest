@@ -11,10 +11,9 @@ import (
 
 // Service provides skill operations with user/project isolation.
 type Service struct {
-	repo            *Repository
-	candidateRepo   *CandidateRepository
-	registry        *Registry
-	discovery       *DiscoveryDeps
+	repo          *Repository
+	candidateRepo *CandidateRepository
+	discovery     *DiscoveryDeps
 }
 
 // NewService constructs a Service.

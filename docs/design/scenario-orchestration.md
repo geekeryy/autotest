@@ -10,6 +10,19 @@
 - 数据库步骤复用当前项目下的业务数据源。
 - 脚本步骤在平台内以 JavaScript（goja 沙箱）执行。
 
+## 自然语言场景编排
+
+- 平台支持通过自然语言描述自动生成测试场景（`internal/ainl`）。
+- 用户在 AI 助理浮窗中描述测试流程（如"先登录，然后查询用户列表，验证返回 code 为 0"），AI 自动解析操作序列、匹配已有接口、生成步骤列表和断言。
+- 编排结果包含场景预览和匹配置信度警告，用户确认后再创建场景。
+- 详细设计见 [ai-capabilities.md](ai-capabilities.md)「自然语言场景编排」章节。
+
+## 依赖图驱动覆盖生成
+
+- 平台支持从接口 schema 自动推断 producer→consumer 依赖关系，生成覆盖场景（`internal/scenariogen/depgraph`）。
+- 覆盖生成自动创建 requestOverride（Bearer 链、路径 ID 引用），替代手工编写前置步骤。
+- 详细设计见 [ai-capabilities.md](ai-capabilities.md)「依赖图驱动覆盖生成」章节。
+
 ## 变量与脚本
 
 - 步骤间通过 **extracts**（见 [场景步骤引用 v2](scenario-step-refs-v2.md)）与 `{{$steps[...].*}}` 传递数据。

@@ -25,7 +25,7 @@
     >
       <template #default>
         请前往
-        <router-link to="/platform/ai-providers" class="ai-link" @click="visible = false">「平台资源 / AI 提供商」</router-link>
+        <router-link to="/platform/ai-management?tab=providers" class="ai-link" @click="visible = false">「平台资源 / AI 能力管理 → AI 提供商」</router-link>
         新增并启用至少一个提供商。
       </template>
     </el-alert>

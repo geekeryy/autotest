@@ -121,23 +121,28 @@ export default {
 <style scoped>
 .tool-call-confirm {
   background: var(--el-fill-color-blank, #fff);
-  border: 1px solid var(--el-color-warning, #e6a23c);
+  border: 1px solid var(--el-border-color-light, #e4e7ed);
   border-radius: 8px;
-  padding: 6px 10px 8px;
+  padding: 12px 16px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 12px;
+  transition: border-color 0.2s ease;
+}
+
+.tool-call-confirm:hover {
+  border-color: var(--el-border-color, #dcdfe6);
 }
 
 .tool-call-confirm--inline {
-  border-color: var(--app-border-color);
-  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.04);
+  border-color: var(--el-border-color-light, #e4e7ed);
+  box-shadow: none;
 }
 
 .tool-call-confirm-head {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   width: 100%;
   min-height: 32px;
   padding: 0;
@@ -150,14 +155,14 @@ export default {
 }
 
 .tool-call-confirm-head:hover {
-  opacity: 0.9;
+  opacity: 0.85;
 }
 
 .tool-chevron {
   flex-shrink: 0;
   font-size: 12px;
   color: var(--el-text-color-secondary, #909399);
-  transition: transform 0.15s ease;
+  transition: transform 0.2s ease;
 }
 
 .tool-chevron--expanded {
@@ -175,22 +180,22 @@ export default {
 
 .tool-call-confirm-args {
   margin: 0;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
   font-size: 12px;
-  background: var(--el-fill-color-light, #f5f7fa);
-  border: 1px solid var(--el-border-color-lighter, #ebeef5);
+  line-height: 1.6;
+  background: #1e1e1e;
   border-radius: 6px;
-  padding: 6px 8px;
+  padding: 12px;
   max-height: 220px;
   overflow: auto;
   white-space: pre-wrap;
   word-break: break-word;
-  color: var(--el-text-color-regular, #606266);
+  color: #d4d4d4;
 }
 
 .tool-call-confirm-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 6px;
+  gap: 8px;
 }
 </style>

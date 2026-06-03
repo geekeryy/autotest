@@ -186,19 +186,23 @@ func (r *Repository) CreateRoute(ctx context.Context, projectID, serverID uuid.U
 		insert into mock_routes (
 			mock_server_id, method, path, priority, enabled, request_match,
 			response_mode, response_status, response_headers, redirect_location,
-			response_body, response_body_type, delay_millis
+			response_body, response_body_type, response_schema, ai_generated_pool,
+			record_target_url, delay_millis
 		)
-		select ms.id, upper($3), $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
+		select ms.id, upper($3), $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
 		from mock_servers ms
 		join projects p on p.id = ms.project_id and p.deleted_at is null
 		where ms.project_id = $1 and ms.id = $2 and ms.deleted_at is null
 		returning id, mock_server_id, method, path, priority, enabled, request_match,
 			response_mode, response_status, response_headers, redirect_location,
-			response_body, response_body_type, delay_millis, created_at, updated_at
+			response_body, response_body_type, response_schema, ai_generated_pool, ai_generated_at,
+			record_target_url, delay_millis, created_at, updated_at
 	`, projectID, serverID, input.Method, input.Path, input.Priority, boolValue(input.Enabled, true),
 		defaultJSON(input.RequestMatch, "{}"), input.ResponseMode, input.ResponseStatus,
 		defaultJSON(input.ResponseHeaders, "{}"), input.RedirectLocation,
-		input.ResponseBody, input.ResponseBodyType, input.DelayMillis)
+		input.ResponseBody, input.ResponseBodyType,
+		defaultJSON(input.ResponseSchema, "{}"), defaultJSON(input.AIGeneratedPool, "[]"),
+		input.RecordTargetURL, input.DelayMillis)
 	route, err := scanRoute(row)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -217,7 +221,8 @@ func (r *Repository) ListRoutes(ctx context.Context, projectID, serverID uuid.UU
 	rows, err := r.DB.Query(ctx, `
 		select mr.id, mr.mock_server_id, mr.method, mr.path, mr.priority, mr.enabled, mr.request_match,
 			mr.response_mode, mr.response_status, mr.response_headers, mr.redirect_location,
-			mr.response_body, mr.response_body_type, mr.delay_millis, mr.created_at, mr.updated_at
+			mr.response_body, mr.response_body_type, mr.response_schema, mr.ai_generated_pool, mr.ai_generated_at,
+			mr.record_target_url, mr.delay_millis, mr.created_at, mr.updated_at
 		from mock_routes mr
 		join mock_servers ms on ms.id = mr.mock_server_id and ms.deleted_at is null
 		join projects p on p.id = ms.project_id and p.deleted_at is null
@@ -239,7 +244,8 @@ func (r *Repository) ListEnabledRoutesForServer(ctx context.Context, serverID uu
 	rows, err := r.DB.Query(ctx, `
 		select mr.id, mr.mock_server_id, mr.method, mr.path, mr.priority, mr.enabled, mr.request_match,
 			mr.response_mode, mr.response_status, mr.response_headers, mr.redirect_location,
-			mr.response_body, mr.response_body_type, mr.delay_millis, mr.created_at, mr.updated_at
+			mr.response_body, mr.response_body_type, mr.response_schema, mr.ai_generated_pool, mr.ai_generated_at,
+			mr.record_target_url, mr.delay_millis, mr.created_at, mr.updated_at
 		from mock_routes mr
 		join mock_servers ms on ms.id = mr.mock_server_id and ms.deleted_at is null
 		join projects p on p.id = ms.project_id and p.deleted_at is null
@@ -273,7 +279,10 @@ func (r *Repository) UpdateRoute(ctx context.Context, projectID, serverID, route
 			redirect_location = $12,
 			response_body = $13,
 			response_body_type = $14,
-			delay_millis = $15,
+			response_schema = $15,
+			ai_generated_pool = $16,
+			record_target_url = $17,
+			delay_millis = $18,
 			updated_at = now()
 		from mock_servers ms
 		join projects p on p.id = ms.project_id and p.deleted_at is null
@@ -285,11 +294,14 @@ func (r *Repository) UpdateRoute(ctx context.Context, projectID, serverID, route
 		  and mr.deleted_at is null
 		returning mr.id, mr.mock_server_id, mr.method, mr.path, mr.priority, mr.enabled, mr.request_match,
 			mr.response_mode, mr.response_status, mr.response_headers, mr.redirect_location,
-			mr.response_body, mr.response_body_type, mr.delay_millis, mr.created_at, mr.updated_at
+			mr.response_body, mr.response_body_type, mr.response_schema, mr.ai_generated_pool, mr.ai_generated_at,
+			mr.record_target_url, mr.delay_millis, mr.created_at, mr.updated_at
 	`, projectID, serverID, routeID, input.Method, input.Path, input.Priority, boolValue(input.Enabled, true),
 		defaultJSON(input.RequestMatch, "{}"), input.ResponseMode, input.ResponseStatus,
 		defaultJSON(input.ResponseHeaders, "{}"), input.RedirectLocation,
-		input.ResponseBody, input.ResponseBodyType, input.DelayMillis)
+		input.ResponseBody, input.ResponseBodyType,
+		defaultJSON(input.ResponseSchema, "{}"), defaultJSON(input.AIGeneratedPool, "[]"),
+		input.RecordTargetURL, input.DelayMillis)
 	route, err := scanRoute(row)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -521,7 +533,8 @@ func scanRoute(row rowScanner) (*MockRoute, error) {
 		&route.ID, &route.MockServerID, &route.Method, &route.Path, &route.Priority,
 		&route.Enabled, &route.RequestMatch, &route.ResponseMode, &route.ResponseStatus,
 		&route.ResponseHeaders, &route.RedirectLocation, &route.ResponseBody,
-		&route.ResponseBodyType, &route.DelayMillis, &route.CreatedAt, &route.UpdatedAt,
+		&route.ResponseBodyType, &route.ResponseSchema, &route.AIGeneratedPool, &route.AIGeneratedAt,
+		&route.RecordTargetURL, &route.DelayMillis, &route.CreatedAt, &route.UpdatedAt,
 	); err != nil {
 		return nil, err
 	}

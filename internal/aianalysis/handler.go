@@ -611,7 +611,7 @@ func resolveAIConfig(ctx context.Context, prompts PromptService, ai AIChatServic
 		providerID = fallback
 	}
 	if providerID == uuid.Nil {
-		return uuid.Nil, "", "", fmt.Errorf("请先在「平台资源 / Prompt 管理」或 AI 提供商中配置 %s 的提供商", action)
+		return uuid.Nil, "", "", fmt.Errorf("请先在「平台资源 / AI 能力管理 → 动作 Prompt」或「AI 提供商」Tab 中配置 %s 的提供商", action)
 	}
 	return providerID, model, systemPrompt, nil
 }

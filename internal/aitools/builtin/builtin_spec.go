@@ -86,7 +86,8 @@ func importOpenAPITool(deps Deps) aitools.Tool {
             "type": "object",
             "properties": {
                 "serviceId": {"type": "string"},
-                "content":   {"type": "string", "description": "OpenAPI/Swagger 文档全文（YAML 或 JSON）"}
+                "content":   {"type": "string", "description": "OpenAPI/Swagger 文档全文（YAML 或 JSON）"},
+                "syncMode":  {"type": "string", "enum": ["merge", "overwrite"], "description": "可选：merge（默认，仅 upsert）或 overwrite（删除文档外端点及 auto 模板）"}
             },
             "required": ["serviceId", "content"],
             "additionalProperties": false
@@ -98,6 +99,7 @@ func importOpenAPITool(deps Deps) aitools.Tool {
 			var p struct {
 				ServiceID string `json:"serviceId"`
 				Content   string `json:"content"`
+				SyncMode  string `json:"syncMode"`
 			}
 			if err := json.Unmarshal(args, &p); err != nil {
 				return nil, fmt.Errorf("import_openapi: 解析参数失败: %w", err)
@@ -114,7 +116,7 @@ func importOpenAPITool(deps Deps) aitools.Tool {
 			if content == "" {
 				return nil, errors.New("import_openapi: content 不能为空")
 			}
-			summary, err := deps.SpecImporter.Import(ctx, projectID, serviceID, []byte(content))
+			summary, err := deps.SpecImporter.Import(ctx, projectID, serviceID, []byte(content), spec.ParseSyncMode(p.SyncMode))
 			if err != nil {
 				return nil, fmt.Errorf("import_openapi: 导入失败: %w", err)
 			}

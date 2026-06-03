@@ -1,6 +1,6 @@
 <template>
-  <div class="page-card ai-assistant-settings">
-    <div class="page-header">
+  <div :class="embedded ? 'ai-assistant-settings-embedded' : 'page-card ai-assistant-settings'">
+    <div v-if="!embedded" class="page-header">
       <div>
         <h2 class="page-title">AI 助理配置</h2>
         <p class="page-subtitle">
@@ -8,6 +8,13 @@
           修改后立即生效，无需重启服务。
         </p>
       </div>
+      <el-button v-if="canWrite" type="primary" :loading="saving" @click="submit">保存配置</el-button>
+    </div>
+    <div v-else class="assistant-embedded-toolbar">
+      <p class="page-subtitle">
+        平台级 AI 助理运行时参数：工具调用轮次、按需路由、场景生成闭环与向量检索等。
+        修改后立即生效，无需重启服务。
+      </p>
       <el-button v-if="canWrite" type="primary" :loading="saving" @click="submit">保存配置</el-button>
     </div>
 
@@ -100,6 +107,12 @@ function blankForm() {
 export default {
   name: 'AIAssistantSettings',
   components: { ListLoadError },
+  props: {
+    embedded: {
+      type: Boolean,
+      default: false
+    }
+  },
   data() {
     return {
       loading: false,
@@ -209,5 +222,14 @@ export default {
   margin-top: 24px;
   font-size: 13px;
   color: var(--el-text-color-secondary);
+}
+
+.assistant-embedded-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
 }
 </style>

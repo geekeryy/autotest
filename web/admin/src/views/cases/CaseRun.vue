@@ -28,22 +28,14 @@
       <div v-if="!embedded" class="debug-actions">
         <div class="environment-picker">
           <div class="environment-select-control">
-            <el-select v-model="environmentId" class="environment-select" popper-class="environment-select-dropdown"
-              placeholder="选择运行环境" filterable @change="rememberCurrentEnvironment">
-              <el-option v-for="env in environments" :key="env.id" :label="env.name" :value="env.id">
-                <div class="env-option-row">
-                  <span class="env-option-label">{{ env.name }}</span>
-                  <el-tooltip content="编辑环境" placement="right">
-                    <el-button class="env-option-edit-btn" type="primary" link @mousedown.stop
-                      @click.stop="editEnvironmentFromList(env)">
-                      <el-icon>
-                        <EditPen />
-                      </el-icon>
-                    </el-button>
-                  </el-tooltip>
-                </div>
-              </el-option>
-            </el-select>
+            <EnvironmentSelect
+              v-model="environmentId"
+              select-class="environment-select"
+              placeholder="选择运行环境"
+              :environments="environments"
+              @change="rememberCurrentEnvironment"
+              @edit="editEnvironmentFromList"
+            />
           </div>
         </div>
       </div>
@@ -52,22 +44,14 @@
     <Teleport v-if="embedded && active" to="#run-console-environment-control">
       <div class="environment-picker">
         <div class="environment-select-control">
-          <el-select v-model="environmentId" class="environment-select" popper-class="environment-select-dropdown"
-            placeholder="选择运行环境" filterable @change="rememberCurrentEnvironment">
-            <el-option v-for="env in environments" :key="env.id" :label="env.name" :value="env.id">
-              <div class="env-option-row">
-                <span class="env-option-label">{{ env.name }}</span>
-                <el-tooltip content="编辑环境" placement="right">
-                  <el-button class="env-option-edit-btn" type="primary" link @mousedown.stop
-                    @click.stop="editEnvironmentFromList(env)">
-                    <el-icon>
-                      <EditPen />
-                    </el-icon>
-                  </el-button>
-                </el-tooltip>
-              </div>
-            </el-option>
-          </el-select>
+          <EnvironmentSelect
+            v-model="environmentId"
+            select-class="environment-select"
+            placeholder="选择运行环境"
+            :environments="environments"
+            @change="rememberCurrentEnvironment"
+            @edit="editEnvironmentFromList"
+          />
         </div>
       </div>
     </Teleport>
@@ -654,6 +638,7 @@ import AssertionEditor from '../../components/AssertionEditor.vue'
 import AIGenerateDialog from '../../components/AIGenerateDialog.vue'
 import AIAnalysisDialog from '../../components/AIAnalysisDialog.vue'
 import AiSparkleIcon from '../../components/icons/AiSparkleIcon.vue'
+import EnvironmentSelect from '../../components/EnvironmentSelect.vue'
 import JsonBodyEditor from '../../components/JsonBodyEditor.vue'
 import { analyzeRunFailure } from '../../api'
 
@@ -809,7 +794,7 @@ function normalizeDraftRows(rows) {
 
 export default {
   name: 'CaseRun',
-  components: { AssertionEditor, AIGenerateDialog, AIAnalysisDialog, AiSparkleIcon, JsonBodyEditor },
+  components: { AssertionEditor, AIGenerateDialog, AIAnalysisDialog, AiSparkleIcon, EnvironmentSelect, JsonBodyEditor },
   props: {
     caseId: {
       type: String,
@@ -3564,44 +3549,5 @@ export default {
   .send-button {
     width: 100%;
   }
-}
-</style>
-
-<!-- 下拉层 teleport 到 body，类名单独作用于 environment-select-dropdown -->
-<style>
-.environment-select-dropdown .el-select-dropdown__item {
-  padding-right: 10px;
-}
-
-.environment-select-dropdown .env-option-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  width: 100%;
-  min-width: 0;
-}
-
-.environment-select-dropdown .env-option-label {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.environment-select-dropdown .env-option-edit-btn {
-  flex-shrink: 0;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.12s ease;
-}
-
-.environment-select-dropdown .env-option-edit-btn .el-icon {
-  font-size: var(--app-font-size-title);
-}
-
-.environment-select-dropdown .el-select-dropdown__item:hover .env-option-edit-btn {
-  opacity: 1;
-  pointer-events: auto;
 }
 </style>

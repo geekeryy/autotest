@@ -70,7 +70,7 @@ func ReadOnly(deps Deps) []aitools.Tool {
 // the run button themselves, so the AI's contract ends at generating the
 // scenario ready to run.
 func Mutating(deps Deps) []aitools.Tool {
-	return []aitools.Tool{
+	tools := []aitools.Tool{
 		// projects / services / environments
 		createServiceTool(deps).WithMeta("meta", "在当前项目下新建服务"),
 		updateServiceTool(deps).WithMeta("meta", "更新服务的名称与描述"),
@@ -84,6 +84,7 @@ func Mutating(deps Deps) []aitools.Tool {
 		createCaseFromEndpointTool(deps).WithMeta("cases", "为接口创建可运行的请求模板"),
 		updateCaseAssertionsTool(deps).WithMeta("cases", "覆盖测试用例的断言数组"),
 		updateCaseTool(deps).WithMeta("cases", "部分更新接口模板的名称或断言"),
+		generateCoverageCasesTool(deps).WithMeta("cases", "按覆盖维度批量生成测试用例（正向/必填缺失/类型错误/边界值）"),
 		// scenarios
 		generateCoverageScenariosTool(deps).WithMeta("scenarios", "一键生成覆盖全部接口的测试场景"),
 		createScenarioWithStepsTool(deps).WithMeta("scenarios", "一次性创建场景及其全部步骤"),
@@ -93,6 +94,7 @@ func Mutating(deps Deps) []aitools.Tool {
 		reorderScenarioStepsTool(deps).WithMeta("scenarios", "重新排列场景步骤顺序"),
 		updateScenarioTool(deps).WithMeta("scenarios", "更新场景的名称与描述"),
 		deleteScenarioTool(deps).WithMeta("scenarios", "删除整个场景及其步骤（不可恢复）"),
+		deleteScenariosTool(deps).WithMeta("scenarios", "批量删除多个场景及其步骤（不可恢复）"),
 		// mock servers
 		createMockServerTool(deps).WithMeta("mock", "创建Mock Server"),
 		updateMockServerTool(deps).WithMeta("mock", "更新Mock Server配置"),
@@ -120,7 +122,16 @@ func Mutating(deps Deps) []aitools.Tool {
 		createScriptTemplateTool(deps).WithMeta("scripts", "创建项目自定义脚本模板"),
 		updateScriptTemplateTool(deps).WithMeta("scripts", "更新项目自定义脚本模板"),
 		deleteScriptTemplateTool(deps).WithMeta("scripts", "删除项目自定义脚本模板"),
+		// factory
+		generateTestDataTool(deps).WithMeta("factory", "基于接口 Schema 语义分析智能生成测试数据"),
 	}
+	if deps.AI != nil && deps.Specs != nil {
+		tools = append(tools, describeScenarioInNLTool(NLToolDeps{
+			AI:    deps.AI,
+			Specs: deps.Specs,
+		}).WithMeta("scenarios", "将自然语言描述转换为可运行的测试场景预览"))
+	}
+	return tools
 }
 
 // All concatenates ReadOnly + Mutating + optional gated tools in a stable order.

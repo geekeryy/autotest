@@ -375,6 +375,27 @@ func (r *Repository) DeleteSaved(ctx context.Context, parentCaseID, savedCaseID 
 	return nil
 }
 
+func (r *Repository) SoftDeleteAutoCasesForEndpoints(ctx context.Context, endpointIDs []uuid.UUID) (int, error) {
+	if r.DB == nil {
+		return 0, fmt.Errorf("database unavailable")
+	}
+	if len(endpointIDs) == 0 {
+		return 0, nil
+	}
+
+	tag, err := r.DB.Exec(ctx, `
+		update test_cases
+		set deleted_at = now(), updated_at = now()
+		where source = $1
+		  and deleted_at is null
+		  and endpoint_id = any($2)
+	`, SourceAuto, endpointIDs)
+	if err != nil {
+		return 0, fmt.Errorf("soft delete auto cases for endpoints: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
+}
+
 type rowScanner interface {
 	Scan(dest ...any) error
 }

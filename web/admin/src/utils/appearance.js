@@ -106,6 +106,25 @@ export const PALETTE_OPTIONS = [
     muted: '#475569',
     border: '#cbd5e1',
     codeBg: '#f1f5f9'
+  },
+  {
+    value: 'light',
+    label: '清新浅色',
+    primary: '#2563eb',
+    secondary: '#059669',
+    accent: '#f59e0b',
+    sidebarBg: '#ffffff',
+    sidebarText: '#4b5563',
+    sidebarActive: '#1e40af',
+    sidebarActiveBg: '#eff6ff',
+    sidebarActiveAccent: '#3b82f6',
+    pageBg: '#f9fafb',
+    cardBg: '#ffffff',
+    text: '#111827',
+    muted: '#6b7280',
+    border: '#e5e7eb',
+    codeBg: '#f3f4f6',
+    isLight: true
   }
 ]
 
@@ -228,10 +247,16 @@ export function applyAppearance(appearance) {
   setVar('--app-accent-color', palette.accent)
   setVar('--app-sidebar-bg', palette.sidebarBg)
   setVar('--app-sidebar-text', palette.sidebarText)
-  setVar('--app-sidebar-active', palette.sidebarActive)
-  setVar('--app-sidebar-menu-hover-bg', mix(palette.sidebarBg, '#ffffff', 0.1))
-  setVar('--app-sidebar-menu-active-bg', mix(palette.primary, palette.sidebarBg, 0.82))
-  setVar('--app-sidebar-menu-active-accent', palette.primary)
+  setVar('--app-sidebar-active', palette.sidebarActive || palette.primary)
+  // 浅色侧边栏用深色混合，深色侧边栏用白色混合
+  const hoverMixTarget = palette.isLight ? '#000000' : '#ffffff'
+  const hoverMixWeight = palette.isLight ? 0.05 : 0.1
+  setVar('--app-sidebar-menu-hover-bg', mix(palette.sidebarBg, hoverMixTarget, hoverMixWeight))
+  // 浅色侧边栏使用专门的 active 背景色，深色侧边栏用混合色
+  setVar('--app-sidebar-menu-active-bg', palette.sidebarActiveBg || mix(palette.primary, palette.sidebarBg, 0.82))
+  setVar('--app-sidebar-menu-active-accent', palette.sidebarActiveAccent || palette.primary)
+  setVar('--app-sidebar-border', palette.isLight ? palette.border : 'rgba(255, 255, 255, 0.08)')
+  setVar('--app-sidebar-shadow', palette.isLight ? 'none' : '2px 0 8px rgba(0, 0, 0, 0.15)')
   setVar('--app-page-bg', palette.pageBg)
   setVar('--app-card-bg', palette.cardBg)
   setVar('--app-text-color', palette.text)
@@ -269,7 +294,7 @@ export function applyAppearance(appearance) {
   setVar('--el-fill-color-light', palette.codeBg)
   setVar('--el-fill-color-lighter', palette.codeBg)
   setVar('--el-fill-color-extra-light', palette.pageBg)
-  setVar('--el-menu-hover-bg-color', mix(palette.sidebarBg, '#ffffff', 0.1))
+  setVar('--el-menu-hover-bg-color', mix(palette.sidebarBg, hoverMixTarget, hoverMixWeight))
   setVar('--el-menu-active-color', palette.sidebarActive)
 
   return normalized

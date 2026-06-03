@@ -1,7 +1,6 @@
 package runner
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -260,24 +259,4 @@ func scriptStepOutput(stdout, stderr string, exitCode int, errText string) map[s
 		out["stdoutJson"] = stdoutJSON
 	}
 	return out
-}
-
-type boundedBuffer struct {
-	bytes.Buffer
-	limit int
-}
-
-func (b *boundedBuffer) Write(p []byte) (int, error) {
-	if b.limit <= 0 {
-		return b.Buffer.Write(p)
-	}
-	remaining := b.limit - b.Buffer.Len()
-	if remaining <= 0 {
-		return len(p), nil
-	}
-	if len(p) > remaining {
-		_, _ = b.Buffer.Write(p[:remaining])
-		return len(p), nil
-	}
-	return b.Buffer.Write(p)
 }

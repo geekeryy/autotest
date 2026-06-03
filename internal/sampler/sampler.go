@@ -306,10 +306,6 @@ func inferSchemaType(v any) string {
 	return ""
 }
 
-func objectSample(schema map[string]any, opts Options) map[string]any {
-	return objectSampleWithPath(schema, opts, "")
-}
-
 func objectSampleWithPath(schema map[string]any, opts Options, parentPath string) map[string]any {
 	properties, _ := schema["properties"].(map[string]any)
 	out := make(map[string]any, len(properties))

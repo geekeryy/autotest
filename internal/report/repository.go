@@ -98,6 +98,44 @@ func (r *Repository) GetRun(ctx context.Context, runID uuid.UUID) (*Run, error) 
 	return run, nil
 }
 
+// ListPassedResponsesByTestCase 查询指定测试用例最近通过的运行结果的响应快照。
+// 用于断言推断引擎的历史响应分析。
+func (r *Repository) ListPassedResponsesByTestCase(ctx context.Context, testCaseID uuid.UUID, limit int) ([]Result, error) {
+	if r.DB == nil {
+		return nil, fmt.Errorf("database unavailable")
+	}
+	if limit <= 0 {
+		limit = 10
+	}
+
+	rows, err := r.DB.Query(ctx, `
+		select rr.id, rr.run_id, rr.test_case_id, rr.step_id, rr.status,
+			rr.duration_millis, rr.request_snapshot, rr.response_snapshot,
+			rr.assertions, rr.parameter_source_snapshots, rr.error, rr.created_at
+		from test_run_results rr
+		join test_runs tr on tr.id = rr.run_id and tr.deleted_at is null
+		where rr.test_case_id = $1
+		  and rr.status = 'passed'
+		  and rr.deleted_at is null
+		order by rr.created_at desc
+		limit $2
+	`, testCaseID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list passed responses: %w", err)
+	}
+	defer rows.Close()
+
+	var results []Result
+	for rows.Next() {
+		result, err := scanResult(rows)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, *result)
+	}
+	return results, rows.Err()
+}
+
 func (r *Repository) ListResults(ctx context.Context, runID uuid.UUID) ([]Result, error) {
 	if r.DB == nil {
 		return nil, fmt.Errorf("database unavailable")

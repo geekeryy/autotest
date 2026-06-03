@@ -8,32 +8,13 @@
         </el-tag>
       </div>
       <div class="main-actions">
-        <el-select
+        <EnvironmentSelect
           v-model="runEnvId"
           placeholder="选择运行环境"
-          class="run-env-select"
-          popper-class="environment-select-dropdown"
-          filterable
-        >
-          <el-option v-for="env in environments" :key="env.id" :label="env.name" :value="env.id">
-            <div class="env-option-row">
-              <span class="env-option-label">{{ env.name }}</span>
-              <el-tooltip content="编辑环境" placement="right">
-                <el-button
-                  class="env-option-edit-btn"
-                  type="primary"
-                  link
-                  @mousedown.stop
-                  @click.stop="editEnvironmentFromList(env)"
-                >
-                  <el-icon>
-                    <EditPen />
-                  </el-icon>
-                </el-button>
-              </el-tooltip>
-            </div>
-          </el-option>
-        </el-select>
+          select-class="run-env-select"
+          :environments="environments"
+          @edit="editEnvironmentFromList"
+        />
         <el-button type="success" :loading="running" :disabled="!runEnvId" @click="runScenario">
           运行场景
         </el-button>
@@ -1176,6 +1157,7 @@ import AIGenerateDialog from '../../components/AIGenerateDialog.vue'
 import AIAnalysisDialog from '../../components/AIAnalysisDialog.vue'
 import AiSparkleIcon from '../../components/icons/AiSparkleIcon.vue'
 import JsonBodyEditor from '../../components/JsonBodyEditor.vue'
+import EnvironmentSelect from '../../components/EnvironmentSelect.vue'
 import ScenarioStepTreeNode from './ScenarioStepTreeNode.vue'
 import ScenarioStepClonePicker from './ScenarioStepClonePicker.vue'
 import ScenarioRunResultViewer from '../../components/scenario/ScenarioRunResultViewer.vue'
@@ -1295,7 +1277,8 @@ export default {
     AIGenerateDialog,
     AIAnalysisDialog,
     AiSparkleIcon,
-    JsonBodyEditor
+    JsonBodyEditor,
+    EnvironmentSelect
   },
 
   props: {

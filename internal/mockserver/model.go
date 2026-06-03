@@ -31,6 +31,12 @@ const (
 	ResponseModeBody = "body"
 	// ResponseModeRedirect issues an HTTP redirect (Location header).
 	ResponseModeRedirect = "redirect"
+	// ResponseModeSchema uses JSON Schema to auto-generate response data.
+	ResponseModeSchema = "schema"
+	// ResponseModeRecord proxies requests to a real service and records responses.
+	ResponseModeRecord = "record"
+	// ResponseModeReplay returns previously recorded responses.
+	ResponseModeReplay = "replay"
 )
 
 // MockServer stores a project-owned mock HTTP server configuration.
@@ -70,6 +76,14 @@ type MockRoute struct {
 	RedirectLocation  string          `json:"redirectLocation,omitempty"`
 	ResponseBody      string          `json:"responseBody"`
 	ResponseBodyType  string          `json:"responseBodyType"`
+	// ResponseSchema 用于 schema 模式，存储 JSON Schema 自动生成响应数据。
+	ResponseSchema    json.RawMessage `json:"responseSchema,omitempty"`
+	// AIGeneratedPool AI 预生成的数据池，手动触发生成后缓存。
+	AIGeneratedPool  json.RawMessage `json:"aiGeneratedPool,omitempty"`
+	// AIGeneratedAt AI 数据池的生成时间。
+	AIGeneratedAt    *time.Time      `json:"aiGeneratedAt,omitempty"`
+	// RecordTargetURL 录制模式下真实服务的基础 URL。
+	RecordTargetURL  string          `json:"recordTargetUrl,omitempty"`
 	DelayMillis       int             `json:"delayMillis"`
 	CreatedAt        time.Time       `json:"createdAt"`
 	UpdatedAt        time.Time       `json:"updatedAt"`
@@ -88,7 +102,35 @@ type MockRouteInput struct {
 	RedirectLocation  string          `json:"redirectLocation"`
 	ResponseBody      string          `json:"responseBody"`
 	ResponseBodyType  string          `json:"responseBodyType"`
+	// ResponseSchema 用于 schema 模式，存储 JSON Schema 自动生成响应数据。
+	ResponseSchema    json.RawMessage `json:"responseSchema"`
+	// AIGeneratedPool AI 预生成的数据池。
+	AIGeneratedPool  json.RawMessage `json:"aiGeneratedPool"`
+	// RecordTargetURL 录制模式下真实服务的基础 URL。
+	RecordTargetURL  string          `json:"recordTargetUrl"`
 	DelayMillis       int             `json:"delayMillis"`
+}
+
+// RouteInputFromRoute builds an update payload from an existing route.
+func RouteInputFromRoute(route MockRoute) MockRouteInput {
+	enabled := route.Enabled
+	return MockRouteInput{
+		Method:           route.Method,
+		Path:             route.Path,
+		Priority:         route.Priority,
+		Enabled:          &enabled,
+		RequestMatch:     route.RequestMatch,
+		ResponseMode:     route.ResponseMode,
+		ResponseStatus:   route.ResponseStatus,
+		ResponseHeaders:  route.ResponseHeaders,
+		RedirectLocation: route.RedirectLocation,
+		ResponseBody:     route.ResponseBody,
+		ResponseBodyType: route.ResponseBodyType,
+		ResponseSchema:   route.ResponseSchema,
+		AIGeneratedPool:  route.AIGeneratedPool,
+		RecordTargetURL:  route.RecordTargetURL,
+		DelayMillis:      route.DelayMillis,
+	}
 }
 
 // RequestMatch describes supported request matching conditions.

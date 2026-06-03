@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"autotest/internal/store"
 
@@ -66,6 +67,7 @@ func (r *Repository) ListSpecs(ctx context.Context, projectID, serviceID uuid.UU
 		join projects p on p.id = s.project_id and p.deleted_at is null
 		where p.id = $1 and sp.service_id = $2 and sp.deleted_at is null
 		order by sp.version desc
+		limit 5
 	`, projectID, serviceID)
 	if err != nil {
 		return nil, fmt.Errorf("list api specs: %w", err)
@@ -287,4 +289,72 @@ func (r *Repository) ListEndpoints(ctx context.Context, projectID, serviceID uui
 		endpoints = append(endpoints, endpoint)
 	}
 	return endpoints, rows.Err()
+}
+
+func (r *Repository) PruneSpecs(ctx context.Context, serviceID uuid.UUID, keep int) error {
+	if r.DB == nil {
+		return fmt.Errorf("database unavailable")
+	}
+	if keep <= 0 {
+		return fmt.Errorf("keep must be positive")
+	}
+
+	_, err := r.DB.Exec(ctx, `
+		update api_specs
+		set deleted_at = now()
+		where service_id = $1
+		  and deleted_at is null
+		  and id not in (
+			select id
+			from api_specs
+			where service_id = $1 and deleted_at is null
+			order by version desc
+			limit $2
+		  )
+	`, serviceID, keep)
+	if err != nil {
+		return fmt.Errorf("prune api specs: %w", err)
+	}
+	return nil
+}
+
+func (r *Repository) PruneEndpointsNotIn(ctx context.Context, serviceID uuid.UUID, keep []Endpoint) ([]uuid.UUID, error) {
+	if r.DB == nil {
+		return nil, fmt.Errorf("database unavailable")
+	}
+
+	methods := make([]string, len(keep))
+	paths := make([]string, len(keep))
+	for i, endpoint := range keep {
+		methods[i] = strings.ToUpper(endpoint.Method)
+		paths[i] = endpoint.Path
+	}
+
+	rows, err := r.DB.Query(ctx, `
+		update api_endpoints
+		set deleted_at = now(), updated_at = now()
+		where service_id = $1
+		  and deleted_at is null
+		  and not exists (
+			select 1
+			from unnest($2::text[], $3::text[]) as kept(method, path)
+			where upper(api_endpoints.method) = kept.method
+			  and api_endpoints.path = kept.path
+		  )
+		returning id
+	`, serviceID, methods, paths)
+	if err != nil {
+		return nil, fmt.Errorf("prune endpoints not in import: %w", err)
+	}
+	defer rows.Close()
+
+	var pruned []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan pruned endpoint id: %w", err)
+		}
+		pruned = append(pruned, id)
+	}
+	return pruned, rows.Err()
 }

@@ -273,7 +273,7 @@ const assistantChatSystem = `你是接口自动化测试平台的全局 AI 助�
   1. 先调用 ` + "`find_tools`" + `（入参 query，可选 domain）按关键词检索候选工具，得到 ` + "`{name, domain, summary}`" + ` 列表；
   2. 再调用 ` + "`describe_tools`" + `（入参 names 数组）获取这些工具的完整参数 Schema；
   3. 拿到准确参数后再正式调用目标工具。**严禁在未通过 describe_tools 确认参数的情况下凭空猜测写工具的入参。**
-- domain 取值：` + "`meta|cases|scenarios|mock|mockset|testdata|paramsource|scripts|runs|spec`" + `。
+- domain 取值：` + "`meta|cases|scenarios|mock|mockset|testdata|paramsource|scripts|runs|spec|factory`" + `。
 
 【工具策略】
 1. 只读工具：补充上下文用，需要时直接调用，不必询问用户。
@@ -431,6 +431,7 @@ const plannerSystem = `你是接口自动化测试平台的「请求路由规划
 - paramsource：数据库数据源与 SQL 参数源的查询、预览与增删改。
 - scripts：脚本模板库的查询与增删改。
 - runs：场景/接口运行历史与结果的查询（平台不提供”运行”动作）。
+- factory：基于接口 Schema 语义分析智能生成测试数据。
 
 【输出格式】
 只输出单个 JSON 对象，禁止输出任何解释、注释或 Markdown 围栏：

@@ -47,8 +47,22 @@ func NewDefault() *Generator {
 			HappyPathRule{},
 			RequiredMissingRule{},
 			TypeMismatchRule{},
+			EdgeCasesRule{},
 		},
 	}
+}
+
+// NewWithRules 创建一个仅包含指定规则的生成器。
+func NewWithRules(rules []Rule) *Generator {
+	return &Generator{rules: rules}
+}
+
+// WithRule 返回追加了一条规则的新生成器副本。
+func (g *Generator) WithRule(r Rule) *Generator {
+	newRules := make([]Rule, len(g.rules)+1)
+	copy(newRules, g.rules)
+	newRules[len(g.rules)] = r
+	return &Generator{rules: newRules, profile: g.profile}
 }
 
 // WithProfile returns a copy of the generator configured with a project profile.

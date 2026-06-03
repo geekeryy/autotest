@@ -16,15 +16,6 @@ func jsonRequestOverride(parts map[string]any) json.RawMessage {
 	return raw
 }
 
-func loginRequestOverride(username, password string) json.RawMessage {
-	return jsonRequestOverride(map[string]any{
-		"body": map[string]any{
-			"username": username,
-			"password": password,
-		},
-	})
-}
-
 func bearerAuthOverride() json.RawMessage {
 	return jsonRequestOverride(map[string]any{
 		"headers": map[string]string{
@@ -103,11 +94,6 @@ func mergeOverrides(parts ...json.RawMessage) json.RawMessage {
 		return nil
 	}
 	raw, _ := json.Marshal(out)
-	return raw
-}
-
-func statusAssertion(expected int) json.RawMessage {
-	raw, _ := json.Marshal([]map[string]any{{"type": "status_code", "expected": expected}})
 	return raw
 }
 

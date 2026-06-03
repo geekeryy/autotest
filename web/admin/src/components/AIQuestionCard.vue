@@ -185,22 +185,22 @@ export default {
 .ai-question {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 12px 14px;
-  border: 1px solid color-mix(in srgb, var(--el-color-primary) 30%, var(--el-border-color-lighter));
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--el-color-primary-light-9) 40%, var(--el-fill-color-blank));
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--el-border-color-light, #e4e7ed);
+  border-radius: 8px;
+  background: var(--el-fill-color-blank, #fff);
 }
 
 .ai-question__header {
   display: flex;
   align-items: flex-start;
-  gap: 8px;
+  gap: 10px;
 }
 
 .ai-question__icon {
   font-size: 18px;
-  color: var(--el-color-primary);
+  color: var(--el-color-primary, #409eff);
   flex-shrink: 0;
   margin-top: 1px;
 }
@@ -208,34 +208,33 @@ export default {
 .ai-question__text {
   font-size: 14px;
   font-weight: 500;
-  color: var(--el-text-color-primary);
+  color: var(--el-text-color-primary, #303133);
   line-height: 1.5;
 }
 
 .ai-question__options {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
 
 .ai-question__option {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 10px;
-  background: var(--el-fill-color-blank);
+  gap: 12px;
+  padding: 12px 16px;
+  border: 1px solid var(--el-border-color-light, #e4e7ed);
+  border-radius: 6px;
+  background: var(--el-fill-color-blank, #fff);
   cursor: pointer;
-  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+  transition: border-color 0.2s ease, background 0.2s ease;
   text-align: left;
   width: 100%;
 }
 
 .ai-question__option:hover:not(:disabled) {
-  border-color: var(--el-color-primary-light-5);
-  background: var(--el-color-primary-light-9);
-  box-shadow: 0 2px 8px rgba(64, 158, 255, 0.08);
+  border-color: var(--el-color-primary, #409eff);
+  background: var(--el-color-primary-light-9, #ecf5ff);
 }
 
 .ai-question__option:disabled {
@@ -244,9 +243,8 @@ export default {
 }
 
 .ai-question__option--selected {
-  border-color: var(--el-color-primary);
-  background: var(--el-color-primary-light-9);
-  box-shadow: 0 0 0 1px var(--el-color-primary-light-7);
+  border-color: var(--el-color-primary, #409eff);
+  background: var(--el-color-primary-light-9, #ecf5ff);
 }
 
 .ai-question__option--checkable {
@@ -254,20 +252,20 @@ export default {
 }
 
 .ai-question__option--checked {
-  border-color: var(--el-color-primary);
-  background: color-mix(in srgb, var(--el-color-primary-light-9) 60%, var(--el-fill-color-blank));
+  border-color: var(--el-color-primary, #409eff);
+  background: var(--el-color-primary-light-9, #ecf5ff);
 }
 
 .ai-question__option-label {
   font-size: 13px;
   font-weight: 500;
-  color: var(--el-text-color-primary);
+  color: var(--el-text-color-primary, #303133);
   flex: 1;
 }
 
 .ai-question__option-desc {
   font-size: 12px;
-  color: var(--el-text-color-secondary);
+  color: var(--el-text-color-secondary, #909399);
   line-height: 1.4;
 }
 
@@ -280,7 +278,7 @@ export default {
 .ai-question__input-area {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
 }
 
 .ai-question__input-actions {
@@ -291,7 +289,7 @@ export default {
 
 .ai-question__input-hint {
   font-size: 11px;
-  color: var(--el-text-color-placeholder);
+  color: var(--el-text-color-placeholder, #a8abb2);
 }
 
 .ai-question__skip {
@@ -302,17 +300,17 @@ export default {
 .ai-question__skip-btn {
   border: none;
   background: transparent;
-  color: var(--el-text-color-secondary);
+  color: var(--el-text-color-secondary, #909399);
   font-size: 12px;
   cursor: pointer;
-  padding: 2px 6px;
+  padding: 4px 8px;
   border-radius: 4px;
-  transition: color 0.15s, background 0.15s;
+  transition: color 0.2s ease, background 0.2s ease;
 }
 
 .ai-question__skip-btn:hover:not(:disabled) {
-  color: var(--el-color-primary);
-  background: var(--el-color-primary-light-9);
+  color: var(--el-color-primary, #409eff);
+  background: var(--el-color-primary-light-9, #ecf5ff);
 }
 
 .ai-question__skip-btn:disabled {

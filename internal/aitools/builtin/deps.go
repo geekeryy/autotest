@@ -43,6 +43,7 @@ type Deps struct {
 	Scripts      ScriptLibraryService
 	Runs         RunsService
 	GenAgent     GenAgentService
+	AI           ChatProvider // 自然语言编排等 LLM 工具
 }
 
 // CaseService is the slice of `internal/case.Service` we depend on.
@@ -83,7 +84,7 @@ type SpecRepository interface {
 
 // SpecImporter is the slice of `internal/spec.Service` used for OpenAPI import.
 type SpecImporter interface {
-	Import(ctx context.Context, projectID, serviceID uuid.UUID, data []byte) (*spec.ImportSummary, error)
+	Import(ctx context.Context, projectID, serviceID uuid.UUID, data []byte, syncMode spec.SyncMode) (*spec.ImportSummary, error)
 }
 
 // ProjectService is the slice of `internal/project.ServiceLayer` we depend on.
@@ -177,6 +178,12 @@ type RunsService interface {
 }
 
 // GenAgentService runs async generate-and-verify jobs (gated by AI_SCENARIO_AUTORUN).
-type GenAgentService interface {
+type 	GenAgentService interface {
 	RunAsync(ctx context.Context, cfg genagent.RunConfig) (*genagent.Job, error)
+}
+
+// ChatProvider 是调用 LLM 的接口，由 aiprovider.Service 的适配器实现。
+type ChatProvider interface {
+	Chat(ctx context.Context, projectID uuid.UUID, req any) (any, error)
+	ResolveDefaultChatProvider(ctx context.Context) (uuid.UUID, string, error)
 }

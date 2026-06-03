@@ -56,7 +56,7 @@
                 <el-icon><Operation /></el-icon>
               </button>
             </template>
-            <div class="ai-history">
+            <div class="ai-history" ref="sessionListEl" @scroll="onSessionListScroll">
               <div v-if="!state.sessions.length" class="ai-history-empty">暂无历史会话</div>
               <SessionListItem
                 v-for="session in state.sessions"
@@ -69,6 +69,9 @@
                 @rename="onRenameSession"
                 @delete="onDeleteSession"
               />
+              <div v-if="assistantState.loadingMoreSessions" class="ai-history-loading">
+                <span>加载中...</span>
+              </div>
             </div>
           </el-popover>
           <ModelSettingsPopover
@@ -509,6 +512,7 @@ import {
   removeWorkspacePane,
   workspacePaneLabel,
   parseAssistantToolCalls,
+  loadMoreSessions,
 } from '../stores/aiAssistant'
 import { authState } from '../auth'
 import { projectState } from '../utils/currentProject'
@@ -1063,6 +1067,13 @@ export default {
       if (!el) return
       el.scrollTop = el.scrollHeight
     },
+    onSessionListScroll(e) {
+      const el = e.target
+      if (!el || assistantState.loadingMoreSessions || !assistantState.hasMoreSessions) return
+      if (el.scrollTop + el.clientHeight >= el.scrollHeight - 20) {
+        loadMoreSessions()
+      }
+    },
     roleLabel(role) {
       switch (role) {
         case 'assistant': return 'AI'
@@ -1614,6 +1625,13 @@ export default {
 .ai-history {
   max-height: 320px;
   overflow-y: auto;
+  padding: 4px 2px;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.ai-history::-webkit-scrollbar {
+  display: none;
 }
 
 .ai-history-empty {
@@ -1634,19 +1652,19 @@ export default {
 }
 
 .ai-history-row:hover {
-  background: var(--el-fill-color-light, #f5f7fa);
+  background: #e8f0fe;
 }
 
 .ai-history-row.active {
-  background: var(--el-color-primary-light-9, #ecf5ff);
+  background: #d2e3fc;
 }
 
 .ai-history-title {
   flex: 1;
   min-width: 0;
   font-size: 13px;
-  font-weight: 500;
-  color: var(--el-text-color-primary, #303133);
+  font-weight: 400;
+  color: #333;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1679,6 +1697,14 @@ export default {
   color: var(--el-color-danger, #f56c6c);
 }
 
+.ai-history-loading {
+  display: flex;
+  justify-content: center;
+  padding: 6px 0;
+  font-size: 12px;
+  color: var(--el-text-color-placeholder, #a8abb2);
+}
+
 /* Body */
 .ai-body {
   flex: 1 1 auto;
@@ -1691,6 +1717,7 @@ export default {
   gap: 12px;
   -webkit-overflow-scrolling: touch;
 }
+
 
 .ai-panel:not(.ai-panel--page) .ai-body {
   padding: 18px 18px 16px;
@@ -1740,21 +1767,13 @@ export default {
   text-overflow: ellipsis;
 }
 
+.ai-body {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
 .ai-body::-webkit-scrollbar {
-  width: 6px;
-}
-
-.ai-body::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.ai-body::-webkit-scrollbar-thumb {
-  background: var(--el-border-color, #dcdfe6);
-  border-radius: 3px;
-}
-
-.ai-body::-webkit-scrollbar-thumb:hover {
-  background: var(--el-text-color-placeholder, #a8abb2);
+  display: none;
 }
 
 /* Empty state */

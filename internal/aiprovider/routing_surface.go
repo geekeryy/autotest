@@ -168,7 +168,7 @@ func (cfg *streamConfig) hopActiveNames() []string {
 }
 
 // narrowedNames computes union(CoreDiscovery, [ActiveTools], DescribedTools,
-// {find_tools, describe_tools}) filtered to names present in cfg.Tools.
+// {find_tools, describe_tools, ask_question}) filtered to names present in cfg.Tools.
 // includeRouter toggles whether the Router's ActiveTools are folded in
 // (false for meta-only mode).
 func (cfg *streamConfig) narrowedNames(includeRouter bool) []string {
@@ -183,6 +183,7 @@ func (cfg *streamConfig) narrowedNames(includeRouter bool) []string {
 	}
 	add(aitools.FindToolsName)
 	add(aitools.DescribeToolsName)
+	add(aitools.AskQuestionName) // always available for interactive Q&A
 	if includeRouter {
 		for n := range cfg.ActiveTools {
 			add(n)
@@ -204,7 +205,7 @@ func (cfg *streamConfig) narrowedNames(includeRouter bool) []string {
 // fall back to the full set.
 func (cfg *streamConfig) routerHasDomainTools() bool {
 	for n := range cfg.ActiveTools {
-		if n == aitools.FindToolsName || n == aitools.DescribeToolsName {
+		if n == aitools.FindToolsName || n == aitools.DescribeToolsName || n == aitools.AskQuestionName {
 			continue
 		}
 		if isCoreDiscovery(n) {

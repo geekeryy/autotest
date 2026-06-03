@@ -105,3 +105,82 @@ func deleteScenarioTool(deps Deps) aitools.Tool {
 			}, nil
 		})
 }
+
+func deleteScenariosTool(deps Deps) aitools.Tool {
+	return deleteTool("delete_scenarios",
+		"批量删除多个测试场景（含全部步骤，不可恢复）。用于删除当前服务下的全部或部分场景。",
+		rawSchema(`{
+            "type": "object",
+            "properties": {
+                "scenarioIds": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "要删除的场景ID列表"
+                }
+            },
+            "required": ["scenarioIds"],
+            "additionalProperties": false
+        }`),
+		func(ctx context.Context, args json.RawMessage) (any, error) {
+			if deps.Scenarios == nil {
+				return nil, errors.New("delete_scenarios: scenario 服务未配置")
+			}
+			var p struct {
+				ScenarioIDs []string `json:"scenarioIds"`
+			}
+			if err := json.Unmarshal(args, &p); err != nil {
+				return nil, fmt.Errorf("delete_scenarios: 解析参数失败: %w", err)
+			}
+			if len(p.ScenarioIDs) == 0 {
+				return nil, errors.New("delete_scenarios: scenarioIds 不能为空")
+			}
+
+			var deleted []string
+			var failed []map[string]any
+
+			for _, idStr := range p.ScenarioIDs {
+				scenarioID, err := uuid.Parse(strings.TrimSpace(idStr))
+				if err != nil {
+					failed = append(failed, map[string]any{
+						"scenarioId": idStr,
+						"error":      "不是合法的UUID",
+					})
+					continue
+				}
+
+				sc, err := deps.Scenarios.Get(ctx, scenarioID)
+				if err != nil {
+					failed = append(failed, map[string]any{
+						"scenarioId": idStr,
+						"error":      fmt.Sprintf("查询失败: %v", err),
+					})
+					continue
+				}
+
+				if err := aitools.RequireProjectAccess(ctx, sc.ProjectID); err != nil {
+					failed = append(failed, map[string]any{
+						"scenarioId": idStr,
+						"error":      fmt.Sprintf("权限校验失败: %v", err),
+					})
+					continue
+				}
+
+				if err := deps.Scenarios.Delete(ctx, scenarioID); err != nil {
+					failed = append(failed, map[string]any{
+						"scenarioId": idStr,
+						"error":      fmt.Sprintf("删除失败: %v", err),
+					})
+					continue
+				}
+
+				deleted = append(deleted, idStr)
+			}
+
+			return map[string]any{
+				"deleted":     deleted,
+				"failed":      failed,
+				"deleteCount": len(deleted),
+				"failCount":   len(failed),
+			}, nil
+		})
+}

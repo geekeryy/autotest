@@ -36,6 +36,22 @@ func (s *Service) ListSessions(ctx context.Context, projectID, userID uuid.UUID)
 	return s.repo.ListSessions(ctx, projectID, userID)
 }
 
+// ListSessionsPage returns a paginated slice of sessions.
+func (s *Service) ListSessionsPage(ctx context.Context, projectID, userID uuid.UUID, offset, limit int) ([]Session, bool, error) {
+	if projectID == uuid.Nil || userID == uuid.Nil {
+		return nil, false, errors.New("projectId 与 userId 不能为空")
+	}
+	if limit <= 0 {
+		limit = 10
+	}
+	sessions, err := s.repo.ListSessionsPage(ctx, projectID, userID, offset, limit)
+	if err != nil {
+		return nil, false, err
+	}
+	hasMore := len(sessions) == limit
+	return sessions, hasMore, nil
+}
+
 // GetTokenUsageSummary aggregates usage_details for the user's assistant
 // messages. When projectID is uuid.Nil, all projects for the user are included.
 func (s *Service) GetTokenUsageSummary(ctx context.Context, projectID, userID uuid.UUID) (SessionTokenUsageStats, error) {

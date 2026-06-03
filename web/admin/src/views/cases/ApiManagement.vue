@@ -12,7 +12,7 @@
         <div class="section-header">
           <div>
             <h3 class="section-title">OpenAPI/Swagger 导入</h3>
-            <p class="section-subtitle">选择或粘贴文档内容，导入后自动刷新接口列表。</p>
+            <p class="section-subtitle">选择或粘贴文档内容，导入后自动刷新接口列表。导入历史仅展示最近 5 次导入。</p>
           </div>
           <el-tag v-if="!canImportSpec" type="warning" effect="plain">无导入权限</el-tag>
         </div>
@@ -66,6 +66,13 @@
           :disabled="!canImportSpec"
           placeholder="粘贴 OpenAPI/Swagger JSON 或 YAML 内容"
         />
+        <div class="import-sync-mode">
+          <span class="import-sync-label">同步模式</span>
+          <el-radio-group v-model="syncMode" :disabled="!canImportSpec">
+            <el-radio value="merge">合并（保留文档外已有接口）</el-radio>
+            <el-radio value="overwrite">覆盖（删除文档外接口及自动模板）</el-radio>
+          </el-radio-group>
+        </div>
         <div class="actions">
           <el-button type="primary" :disabled="!canSubmitImport" :loading="importing" @click="submitImport">
             导入并生成接口
@@ -74,11 +81,14 @@
 
         <el-alert v-if="summary" type="success" show-icon :closable="false" class="summary">
           <template #title>
-            导入成功：文档中共 {{ summary.apiCount }} 个接口，端点新增 {{ summary.createdEndpoints }}、更新
-            {{ summary.updatedEndpoints }}，写入请求模板 {{ summary.generatedCases }} 条（spec v{{ summary.specVersion }}）
+            导入成功（{{ summary.syncMode === 'overwrite' ? '覆盖' : '合并' }}）：文档中共 {{ summary.apiCount }} 个接口，端点新增
+            {{ summary.createdEndpoints }}、更新 {{ summary.updatedEndpoints
+            }}<template v-if="summary.deletedEndpoints">、删除 {{ summary.deletedEndpoints }}</template>，写入请求模板
+            {{ summary.generatedCases }} 条（spec v{{ summary.specVersion }}）
           </template>
         </el-alert>
 
+        <p v-if="specs.length" class="spec-history-hint">仅展示最近 5 次导入</p>
         <el-table :data="specs" border size="small" empty-text="暂无导入记录">
           <el-table-column prop="version" label="版本" width="80" />
           <el-table-column prop="contentHash" label="内容 Hash" min-width="220" show-overflow-tooltip />
@@ -171,6 +181,7 @@
 
 <script>
 import { Upload } from '@element-plus/icons-vue'
+import { ElMessageBox } from 'element-plus'
 import {
   analyzeSpecChanges,
   createCase,
@@ -199,6 +210,7 @@ export default {
       cases: [],
       endpoints: [],
       content: '',
+      syncMode: 'merge',
       summary: null,
       importing: false,
       fileName: '',
@@ -307,9 +319,20 @@ export default {
       event.target.value = ''
     },
     async submitImport() {
+      if (this.syncMode === 'overwrite') {
+        try {
+          await ElMessageBox.confirm(
+            '覆盖导入将软删除不在文档中的 API 端点，并仅删除关联的自动生成的请求模板；手工模板不受影响。是否继续？',
+            '确认覆盖导入',
+            { type: 'warning', confirmButtonText: '覆盖导入', cancelButtonText: '取消' }
+          )
+        } catch {
+          return
+        }
+      }
       this.importing = true
       try {
-        this.summary = await importSpec(this.projectId, this.serviceId, this.content)
+        this.summary = await importSpec(this.projectId, this.serviceId, this.content, this.syncMode)
         this.$message.success('导入完成')
         await this.loadServiceData()
       } finally {
@@ -510,6 +533,25 @@ export default {
 
 .actions {
   margin: 16px 0;
+}
+
+.import-sync-mode {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.import-sync-label {
+  color: var(--app-secondary-text);
+  font-size: var(--app-font-size-small);
+}
+
+.spec-history-hint {
+  margin: 0 0 8px;
+  color: var(--app-secondary-text);
+  font-size: var(--app-font-size-small);
 }
 
 .summary {

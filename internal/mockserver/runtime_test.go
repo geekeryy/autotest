@@ -11,7 +11,7 @@ import (
 )
 
 func TestMockHandlerHandlesCORSPreflight(t *testing.T) {
-	runtime := NewRuntime(nil, nil)
+	runtime := NewRuntime(nil, nil, nil, nil)
 	req := httptest.NewRequest(http.MethodOptions, "/api/users", nil)
 	req.Header.Set("Origin", "http://localhost:5173")
 	req.Header.Set("Access-Control-Request-Headers", "content-type,x-mock-case")

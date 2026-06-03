@@ -13,6 +13,7 @@ export const menuRoutes = [
   { path: '/projects', component: () => import('../views/projects/ProjectManagement.vue'), meta: { title: '项目管理', permission: 'projects:read' } },
   {
     path: '/test-data',
+    component: () => import('../layout/RouterViewLayout.vue'),
     redirect: '/sql-parameter-sources',
     meta: { title: '测试数据', permission: 'projects:read' },
     children: [
@@ -62,6 +63,7 @@ export const menuRoutes = [
   },
   {
     path: '/reports',
+    component: () => import('../layout/RouterViewLayout.vue'),
     redirect: '/reports/runs',
     meta: { title: '测试报告', permission: 'cases:read' },
     children: [
@@ -70,25 +72,39 @@ export const menuRoutes = [
   },
   {
     path: '/platform',
+    component: () => import('../layout/RouterViewLayout.vue'),
     redirect: '/script-library',
     meta: { title: '平台资源' },
     children: [
       { path: '/script-library', component: () => import('../views/scriptlib/ScriptLibraryList.vue'), meta: { title: '脚本库', permission: 'cases:read' } },
       { path: '/platform/data-sources', component: () => import('../views/data/DataSourceList.vue'), meta: { title: '业务数据源', permission: 'projects:read' } },
-      { path: '/platform/ai-providers', component: () => import('../views/platform/AIProviderList.vue'), meta: { title: 'AI 提供商', permission: 'projects:read' } },
-      { path: '/platform/ai-assistant-settings', component: () => import('../views/platform/AIAssistantSettings.vue'), meta: { title: 'AI 助理配置', permission: 'projects:read' } },
-      { path: '/platform/ai-prompts', component: () => import('../views/projects/ProjectPromptList.vue'), meta: { title: 'Prompt 管理', permission: 'projects:read' } },
       { path: '/platform/ai-management', component: () => import('../views/platform/AIManagement.vue'), meta: { title: 'AI 能力管理', permission: 'projects:read' } },
+      {
+        path: '/platform/ai-providers',
+        redirect: (to) => ({ path: '/platform/ai-management', query: { ...to.query, tab: 'providers' } }),
+        meta: { hidden: true }
+      },
+      {
+        path: '/platform/ai-assistant-settings',
+        redirect: (to) => ({ path: '/platform/ai-management', query: { ...to.query, tab: 'assistant' } }),
+        meta: { hidden: true }
+      },
+      {
+        path: '/platform/ai-prompts',
+        redirect: (to) => ({ path: '/platform/ai-management', query: { ...to.query, tab: 'action-prompts' } }),
+        meta: { hidden: true }
+      },
       { path: '/mock-value-sets', component: () => import('../views/platform/MockValueSetList.vue'), meta: { title: '命名值集合', permission: 'projects:read' } },
-      { path: '/template-reference', component: () => import('../views/platform/TemplateReference.vue'), meta: { title: '模板与变量参考' } }
+      { path: '/template-reference', component: () => import('../views/platform/TemplateReference.vue'), meta: { title: '模板参考' } }
     ]
   },
   {
     path: '/ai-providers',
-    redirect: '/platform/ai-providers'
+    redirect: (to) => ({ path: '/platform/ai-management', query: { ...to.query, tab: 'providers' } })
   },
   {
     path: '/system',
+    component: () => import('../layout/RouterViewLayout.vue'),
     redirect: '/users',
     meta: { title: '系统管理' },
     children: [

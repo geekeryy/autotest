@@ -100,6 +100,11 @@ const (
 	FindToolsName     = "find_tools"
 	DescribeToolsName = "describe_tools"
 
+	// AskQuestionName is the wire name of the interactive question tool.
+	// It is always mounted so the LLM can prompt the user via UI cards
+	// regardless of which domains the Router selects.
+	AskQuestionName = "ask_question"
+
 	defaultFindToolsLimit = 8
 	maxFindToolsLimit     = 30
 )

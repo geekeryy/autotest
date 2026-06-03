@@ -16,11 +16,11 @@
 
 | 文档 | 主题 |
 |------|------|
-| [platform-core.md](design/platform-core.md) | 术语、项目/服务/环境、Runner、断言、报告 |
+| [platform-core.md](design/platform-core.md) | 术语、项目/服务/环境、Runner、断言、报告、AI 能力模块概览 |
 | [api-management-and-runner.md](design/api-management-and-runner.md) | OpenAPI 导入、API 管理、运行控制台 |
 | [scenario-orchestration.md](design/scenario-orchestration.md) | 场景编排、控制流、运行报告 |
-| [mock-template-and-test-data.md](design/mock-template-and-test-data.md) | Mock Server、模板变量、测试数据 |
-| [ai-capabilities.md](design/ai-capabilities.md) | AI 提供商、生成、分析、助理浮窗 |
+| [mock-template-and-test-data.md](design/mock-template-and-test-data.md) | Mock Server、模板变量、测试数据、Schema Mock 生成、录制回放 |
+| [ai-capabilities.md](design/ai-capabilities.md) | AI 提供商、生成、分析、助理浮窗、断言推断、语义数据工厂、NL 编排、记忆/技能/反馈/自评估 |
 | [admin-and-access.md](design/admin-and-access.md) | 登录、RBAC、菜单、API Key、通知 |
 
 ## 维护约定
@@ -48,8 +48,8 @@
 ### API 导入与运行控制台
 
 - [MCP Swagger 导入](design/mcp-swagger-import.md)：涉及 Cursor/Claude Desktop 等 MCP 客户端通过 `cmd/mcp` 调用 `import_swagger` / `import_swagger_from_url`、环境变量 `AUTOTEST_*` 或 API Key `specs:import` 的请求，先确认与 HTTP `POST .../specs/import` 语义一致且不扩大 API Key 白名单。
-- [OpenAPI/Swagger 导入](design/api-management-and-runner.md)：涉及 spec 上传、导入响应、幂等刷新、端点写入、模板自动生成或 schema 约束保留的请求，优先检查导入是否会产生重复数据或返回过大字段；当前导入响应为统计摘要，但 spec 列表仍可能返回 `normalizedSnapshot`。
-- [API 管理](design/api-management-and-runner.md)：涉及导入历史、接口请求模板列表、手工模板、新增/编辑入口或页面权限的请求，先判断目标是 `api_endpoints` 还是可运行模板 `test_cases`；`cases:read`、`cases:write`、`specs:import` 当前主要用于前端路由/按钮权限，后端 cases/spec 扁平路由未全部强制这些权限。
+- [OpenAPI/Swagger 导入](design/api-management-and-runner.md)：涉及 spec 上传、导入响应、幂等刷新、端点写入、模板自动生成或 schema 约束保留的请求，优先检查导入是否会产生重复数据或返回过大字段；当前导入响应为统计摘要（含 `syncMode`、可选 `deletedEndpoints`），spec 列表最多 5 条活跃版本。
+- [API 管理](design/api-management-and-runner.md)：涉及导入历史、接口请求模板列表、手工模板、新增/编辑入口或页面权限的请求，先判断目标是 `api_endpoints` 还是可运行模板 `test_cases`；导入支持 merge/overwrite 同步模式，覆盖时仅软删文档外端点及 `auto` 模板；`cases:read`、`cases:write`、`specs:import` 当前主要用于前端路由/按钮权限，后端 cases/spec 扁平路由未全部强制这些权限。
 - [运行控制台请求编辑](design/api-management-and-runner.md)：涉及接口 Tab、Path/Query/Header/Body/断言分区、默认参数、保存用例或请求快照的请求，先判断是否改变用户可编辑请求模型；当前无独立「变量」Tab，路径模板和路径参数值必须保持分离。
 - [运行结果展示](design/api-management-and-runner.md)：涉及响应 Body、响应头、实际请求 curl、状态码、错误标签、耗时颜色或运行后默认 Tab 的请求，优先判断是展示调整还是运行快照结构变化；底层网络错误才额外展示错误原因标签。
 - [环境认证继承](design/api-management-and-runner.md)：涉及 OpenAPI security、auth profile、defaultProfile、legacy 认证、Headers/Query 继承行或用户覆盖的请求，先判断继承值是否应写入请求覆盖；前端运行控制台/场景编辑与后端 Runner 各有实现，需保持语义一致。
@@ -73,14 +73,20 @@
 - [模板变量规范](design/mock-template-and-test-data.md)：涉及 `$mock`、`$steps`、`$ds`、`$sql`、`$req`、普通变量、deprecated 旧语法或渲染顺序的请求，优先检查是否应统一走 `internal/templating`，避免在调用方新增正则。
 - [SQL 参数源](design/mock-template-and-test-data.md)：涉及业务数据源、SQL 参数源、`{{$sql.*}}` 内联引用、过滤表达式、预览或执行快照的请求，先判断**业务数据源为全局平台资源**（HTTP API 使用 `projects:read` / `projects:write`）、SQL 参数源仍按项目+服务维护、SQL 是否只读、找不到来源/行/列时是否返回明确错误；SQL 参数源 HTTP 层主要仍依赖登录态和 `projectId` 参数，未像 Mock/TestData 一样统一挂项目角色中间件。
 - [测试数据表](design/mock-template-and-test-data.md)：涉及项目级测试数据表、列生成方式、`{{$ds.*}}` 引用、AI 生成测试数据或权限的请求，先判断数据应来自表行快照还是运行时解析；权限与 SQL 参数源、Mock Server 保持 viewer/developer 分层。
+- [Schema Mock 数据生成](design/mock-template-and-test-data.md)：涉及 `internal/mockgen` 基于 JSON Schema 自动生成 Mock 数据的请求，先判断生成优先级为 enum > example > default > type 约束 > 语义推断；语义推断覆盖 email、phone、name、idCard 等 30+ 种字段名模式；最大递归深度 8 层；Mock Server 的 `responseMode=schema` 路由每次请求实时生成。
+- [Mock 录制与回放](design/mock-template-and-test-data.md)：涉及 `internal/mockrecord` Mock 路由级别录制与回放的请求，先判断录制模式需指定 `recordTargetURL`（真实服务地址），回放按 method+path+queryHash 精确匹配；录制数据持久化到 `mock_recordings` 表；管理 API 挂载在 `/projects/{projectID}/mock-servers/{serverID}/routes/{routeID}` 下；viewer 可查看录制列表，developer 可录制/回放/清空。
 
 ### AI 能力
 
-- [AI 提供商](design/ai-capabilities.md)：涉及 provider 类型、Base URL、API Key 脱敏、文本/多模态默认模型（`modalityModels`）、模型能力标签、extraConfig、thinking/reasoning、启用状态或默认提供商的请求，先判断配置为**全局平台资源**（`/ai-providers`，不按项目隔离）；API 不应返回明文 Key。模型列表应通过上游 list-models 动态获取；`capabilities` 仅来自上游元数据（无则空），多模态路由依赖用户配置的 `modalityModels`，不按模型 id 推断能力。`/ai-provider-types` 仅保留类型元数据与离线 fallback。
-- [AI 助理平台配置](design/ai-capabilities.md)：涉及工具调用最大轮次、按需工具路由模式、路由置信度阈值、场景生成真实环境验证开关、场景闭环默认轮次、`find_tools` 向量检索端点等运行时参数的请求，先判断是否为**全局平台资源**（`/platform/ai-assistant-settings`）；**登录凭据不在此配置**，应通过 `generate_*` 场景工具挂起确认卡片收集，而非在对话中逐条追问。
+- [AI 提供商](design/ai-capabilities.md)：涉及 provider 类型、Base URL、API Key 脱敏、文本/多模态默认模型（`modalityModels`）、模型能力标签、extraConfig、thinking/reasoning、启用状态或默认提供商的请求，先判断配置为**全局平台资源**（`/platform/ai-management?tab=providers`，不按项目隔离）；API 不应返回明文 Key。模型列表应通过上游 list-models 动态获取；`capabilities` 仅来自上游元数据（无则空），多模态路由依赖用户配置的 `modalityModels`，不按模型 id 推断能力。`/ai-provider-types` 仅保留类型元数据与离线 fallback。
+- [AI 助理平台配置](design/ai-capabilities.md)：涉及工具调用最大轮次、按需工具路由模式、路由置信度阈值、场景生成真实环境验证开关、场景闭环默认轮次、`find_tools` 向量检索端点等运行时参数的请求，先判断是否为**全局平台资源**（`/platform/ai-management?tab=assistant`）；**登录凭据不在此配置**，应通过 `generate_*` 场景工具挂起确认卡片收集，而非在对话中逐条追问。
 - [平台 Prompt](design/ai-capabilities.md)：涉及 action 级 System Prompt、默认模型、provider 绑定或回退逻辑的请求，先判断 providerId 为空是否应跟随**平台**默认提供商；绑定 provider 须为未删除的全局提供商；每个 action 全局至多一条有效配置。
+- [Prompt 分层系统](design/ai-capabilities.md)：涉及 prompt 分层管理、平台基础层/项目画像层/行为特定层叠加或独立更新的请求，先判断变更是否影响其他层或改变现有 action 的 prompt 结构；分层设计降低 prompt 维护耦合度。
 - [AI 生成请求参数](design/ai-capabilities.md)：涉及 `generate_params`、上下文构造、pathVarNames、currentRequest 保留、Mock Value Sets 注入或模型输出格式的请求，先区分非 LLM 的 `GET /cases/{id}/generate-params` 采样接口与 LLM `/ai/chat` action，并注意下方覆盖范围冲突仍待决策。
 - [AI 生成断言与测试数据](design/ai-capabilities.md)：涉及 `generate_assertion` 或 `generate_case_data` 的请求，先判断是否需要非空测试意图、平台 Prompt/provider 配置和明确中文错误；生成结果应由用户预览或追加，不应静默覆盖已有内容。
+- [AI 断言推断](design/ai-capabilities.md)：涉及 `internal/aiassert` 三层推断引擎（Schema 规则/历史分析/语义推断）的请求，先判断推断来源是否可用（endpoint schema、历史运行数据）；推断结果按置信度排序去重，应用时支持追加或替换模式；`POST /cases/{caseID}/infer-assertions` 与 `POST /cases/{caseID}/apply-assertions` 为独立 HTTP 入口，AI 工具 `generate_assertions_from_schema` 暴露给浮窗。
+- [语义测试数据工厂](design/ai-capabilities.md)：涉及 `internal/aifactory` 语义感知数据生成的请求，先判断输入应来自 Endpoint RequestSchema 还是列定义；支持 normal/boundary/stress 三种场景、zh_CN/en_US 两种 locale；生成行数 1-1000；AI 工具 `generate_test_data` 暴露给浮窗。
+- [自然语言场景编排](design/ai-capabilities.md)：涉及 `internal/ainl` 自然语言→测试场景编排的请求，先判断描述是否足够明确、目标服务是否有已导入端点；编排结果包含场景预览和匹配置信度警告，用户确认后再创建；AI 工具 `describe_scenario_in_natural_language` 暴露给浮窗。
 - [AI 智能分析](design/ai-capabilities.md)：涉及失败原因分析或 spec 变更影响分析的请求，先判断输入应来自本次运行快照、断言失败明细或 spec diff 摘要；分析结果当前不写库，且分析输出统一为中文 Markdown 由前端 `MarkdownView` 渲染。
 - [AI Tool Calling 框架](design/ai-capabilities.md)：涉及让 AI 通过内置工具拉系统状态、扩展工具集、改变工具权限边界或写工具确认机制的请求，先判断目标是否落在 `internal/aitools` Registry；分析类 action 仅允许只读工具；浮窗对话中 **create/update/import 类写工具自动执行**，**delete_* 类工具**须经用户 confirm；不暴露用户/角色/权限/登录方式/API Key 等系统管理写工具。
 - [全局 AI 助理浮窗](design/ai-capabilities.md)：涉及登录后管理后台 AI 助理浮窗、provider/model 选择、深度思考/联网搜索开关、Token 用量持久化与汇总（仪表盘/会话详情）、Debug 开关下浮窗每轮 token/缓存详情展示、会话列表查看会话详情（对话统计与 Token 汇总）、Xiaomi 图片上传与多模态消息、SSE 对话流、会话/消息持久化、空会话时「新对话」静默复用（不重复创建）、跨用户隔离或 mutating 工具人在回路确认的请求，先判断需求是否会改变 `ai_sessions`/`ai_messages` 表结构、SSE 事件 schema 或会话隔离边界；浮窗会话按 `(project_id, user_id)` 严格隔离，分析类 action 不暴露写工具。
@@ -90,11 +96,15 @@
 - [AI 会话权限与项目隔离](design/ai-capabilities.md)：涉及 AI 工具调用是否能跨项目、是否能越用户访问数据的请求，先确认每个 SSE 会话由 `(projectId, userId)` 绑定；任何接受 `projectId` 的工具均通过 `aitools.ResolveProjectID` 校验，按 `caseId/scenarioId/stepId` 操作的工具在查到对象后反向校验其 `projectId` 必须等于会话项目，违反时直接拒绝执行。
 - [AI 助理页面上下文](design/ai-capabilities.md)：涉及 AI 浮窗感知用户当前页面、把 `scenarioId/caseId/serviceId` 等当作默认对象的请求，先确认前端按路由切换调 `bindPage` 写入 `assistantState.pageContext`，每次 `POST /ai/chat/stream` 与 `/tool-calls/{id}/confirm` 都附带这份快照；后端把它作为额外 system 消息注入 LLM 上下文，但工具仍以参数为权威，页面上下文不参与权限判定。
 - [项目测试画像](design/ai-capabilities.md)：平台从项目历史运行数据中自动学习项目特征（响应约定、字段枚举、接口依赖、认证模式），形成「项目测试画像」（`project_test_profiles` 表），并注入到 AI 助理 prompt 和测试用例生成器中，使生成结果适配项目差异。画像通过 `POST /projects/{id}/test-profile/build` 触发构建，`GET /projects/{id}/test-profile/` 查看，`GET /projects/{id}/test-profile/prompt-context` 获取格式化上下文。
+- [AI 记忆系统](design/ai-capabilities.md)：涉及 AI 助理持久化记忆（用户偏好、项目约定、历史决策）的请求，先判断记忆按 `(project_id, user_id)` 隔离；记忆在对话中作为额外上下文注入；管理 API 为 `GET/POST/DELETE /projects/{id}/ai-memory`。
+- [AI 技能发现](design/ai-capabilities.md)：涉及从路由观测日志和工具调用结果中自动发现高频操作模式的请求，先判断技能发现基于 `ai_routing_logs` 的 `per_hop` 数据和工具调用成功率；发现的技能可被 Planner/Router 引用提升路由置信度；后台任务定期执行（默认每天一次）。
+- [AI 反馈与自进化](design/ai-capabilities.md)：涉及用户对 AI 回复反馈收集的请求，先判断反馈关联到具体会话和消息；反馈指标纳入自评估报告驱动 prompt 迭代；管理 API 为 `POST /projects/{id}/ai-feedback`。
+- [自评估代理](design/ai-capabilities.md)：涉及 AI 助理质量自动评估的请求，先判断评估基于 Golden Set（`testdata/ai_assistant_eval/*.yaml`）运行，指标包括 Tool Recall、Mis-route Rate、describe 扩展率等；后台任务定期执行（默认每周一次），指标回归时触发告警。
 
 ### 管理后台与访问控制
 
 - [登录与后台基础](design/admin-and-access.md)：涉及登录、路由守卫、默认管理员账号密码对齐、首次改密或后台技术栈的请求，先判断是认证流程、权限导航还是启动初始化；默认管理员为 `admin`/`admin`（代码内 bootstrap），首次本地密码登录须改密后重新登录；`APP_ENV=production` 启动时校验 JWT 与数据库密码强度。支持本地用户名密码登录（bootstrap，不可关闭）与可配置 OAuth（GitHub/GitLab/Google，**用户管理 → 登录方式** Tab CRUD，`users:manage`）并存；OAuth 统一回调页 `/login/oauth/callback`（旧 `/login/github/callback` 重定向）；回跳前端地址由登录请求 `frontendUrl`（signed state）与**各登录方式**配置的 `trustedFrontendOrigins` 校验（**仅 OAuth 回跳，不用于 CORS**）。前后端分离部署时 CORS 白名单由环境变量 `CORS_ALLOWED_ORIGINS` 配置（逗号分隔）。`GET /auth/login-providers` 动态展示已启用且 `callbackUrl` 域名与当前 API 请求域名一致的 IdP。
-- [全局项目上下文](design/admin-and-access.md)：涉及顶部项目选择、页面间项目复用、上次项目/环境恢复或未选择项目提示的请求，先判断是否应依赖全局项目，避免在页面内重复选择项目；项目管理页承载服务与环境管理；业务数据源、AI 提供商、AI 助理配置、Prompt 管理已归入「平台资源」菜单。
+- [全局项目上下文](design/admin-and-access.md)：涉及顶部项目选择、页面间项目复用、上次项目/环境恢复或未选择项目提示的请求，先判断是否应依赖全局项目，避免在页面内重复选择项目；项目管理页承载服务与环境管理；业务数据源、AI 能力管理（含提供商、助理配置与动作 Prompt）已归入「平台资源」菜单。
 - [服务与环境管理](design/admin-and-access.md)：涉及服务/环境树、环境变量 JSON、认证 JSON、编辑弹窗、提示图标或失焦格式化的请求，先判断变更是否影响运行控制台的环境编辑复用。
 - [菜单、布局与视觉品牌](design/admin-and-access.md)：涉及侧边栏菜单、收起、滚动区域、字体、配色、头像、退出登录或 logo 的请求，先判断是全局布局约束还是单页样式调整；左侧导航不应单独滚动。
 - [脚本库](design/admin-and-access.md)：涉及断言编辑器、场景脚本步骤、内置模板、项目自定义模板或 AI 生成脚本入口的请求，先判断模板作用域是全平台共享还是当前项目。

@@ -50,6 +50,23 @@ type ImportResult struct {
 	Snapshot  json.RawMessage `json:"snapshot"`
 }
 
+type SyncMode string
+
+const (
+	SyncModeMerge     SyncMode = "merge"
+	SyncModeOverwrite SyncMode = "overwrite"
+)
+
+// ParseSyncMode normalizes the import sync query param; unknown values default to merge.
+func ParseSyncMode(raw string) SyncMode {
+	switch raw {
+	case string(SyncModeOverwrite):
+		return SyncModeOverwrite
+	default:
+		return SyncModeMerge
+	}
+}
+
 // ImportSummary 为导入接口的 HTTP 响应体：仅含统计与小体量标识，不含端点列表或 snapshot。
 type ImportSummary struct {
 	SpecID           uuid.UUID `json:"specId"`
@@ -59,4 +76,6 @@ type ImportSummary struct {
 	CreatedEndpoints int       `json:"createdEndpoints"`
 	UpdatedEndpoints int       `json:"updatedEndpoints"`
 	GeneratedCases   int       `json:"generatedCases"`
+	DeletedEndpoints int       `json:"deletedEndpoints,omitempty"`
+	SyncMode         string    `json:"syncMode"`
 }

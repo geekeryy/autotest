@@ -2,13 +2,17 @@ import { defineConfig, loadEnv } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { resolveDevApiProxyTarget } from './scripts/resolveDevApiProxy.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, __dirname, '')
-  // 可选：未配置 VITE_API_BASE_URL 时 dev 代理目标；配置了 VITE_API_BASE_URL 则前端直连 API，代理可忽略
-  const proxyTarget = (env.VITE_DEV_API_PROXY || 'http://localhost:8080').replace(/\/$/, '')
+  // 未配置 VITE_API_BASE_URL 时走 /api 代理；目标默认识别局域网 IP，避免 localhost:8080 被 IDE 占用
+  const proxyTarget = resolveDevApiProxyTarget(env.VITE_DEV_API_PROXY)
+  if (mode === 'development') {
+    console.log(`[vite] API proxy target: ${proxyTarget}`)
+  }
 
   if (mode === 'production' && !env.VITE_API_BASE_URL?.trim()) {
     console.warn(
@@ -19,6 +23,11 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [vue()],
+    resolve: {
+      alias: {
+        '@': resolve(__dirname, 'src'),
+      },
+    },
     build: {
       chunkSizeWarningLimit: 1200,
       rollupOptions: {

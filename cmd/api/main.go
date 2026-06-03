@@ -2,15 +2,18 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"os"
 	"strings"
 	"time"
 
 	"autotest/internal/aianalysis"
+	"autotest/internal/aiassert"
 	"autotest/internal/aiconfig"
 	"autotest/internal/aifeedback"
 	"autotest/internal/aimemory"
+	ainladapter "autotest/internal/ainl/adapter"
 	"autotest/internal/aiprovider"
 	"autotest/internal/aisession"
 	"autotest/internal/aiskill"
@@ -27,6 +30,7 @@ import (
 	"autotest/internal/genagent"
 	"autotest/internal/httpx"
 	"autotest/internal/logx"
+	"autotest/internal/mockrecord"
 	"autotest/internal/mockserver"
 	"autotest/internal/mockset"
 	"autotest/internal/notification"
@@ -114,7 +118,10 @@ func main() {
 	mockSetRepo := mockset.NewRepository(repo)
 	mockSetSvc := mockset.NewService(mockSetRepo)
 	mockServerRepo := mockserver.NewRepository(repo)
-	mockServerRuntime := mockserver.NewRuntime(mockServerRepo, mockSetSvc)
+	mockRecordRepo := mockrecord.NewRepository(repo)
+	mockRecorder := mockrecord.NewRecorder(mockRecordRepo)
+	mockPlayer := mockrecord.NewPlayer(mockRecordRepo)
+	mockServerRuntime := mockserver.NewRuntime(mockServerRepo, mockSetSvc, &recordProxyAdapter{rec: mockRecorder}, &replayPlayerAdapter{player: mockPlayer})
 	mockServerSvc := mockserver.NewService(mockServerRepo, mockServerRuntime)
 	if err := mockServerSvc.AutoStartAll(ctx); err != nil {
 		logx.Warn("auto-start mock servers", "err", err)
@@ -242,9 +249,18 @@ func main() {
 		testcase.NewHandler(caseSvc).Register(r)
 		specHandler.Register(r)
 		scenario.NewHandler(scenarioSvc).Register(r)
+
+		// 智能断言推断引擎：从 OpenAPI schema 和历史响应自动生成断言
+		aiAssertEngine := aiassert.NewInferEngine(
+			&aiAssertEndpointGetter{repo: specRepo},
+			&aiAssertCaseGetter{repo: caseRepo},
+			&aiAssertHistoryCollector{repo: reportRepo},
+		)
+		aiassert.NewHandler(aiassert.NewInferService(aiAssertEngine, &aiAssertCasePatcher{svc: caseSvc})).Register(r)
 		paramsource.NewHandler(paramSourceSvc, authSvc).Register(r)
 		scriptlibrary.NewHandler(scriptLibrarySvc).Register(r)
 		mockserver.NewHandler(mockServerSvc, projectHandler).Register(r)
+		mockrecord.NewHandler(mockPlayer, &routeModeAdapter{svc: mockServerSvc}, projectHandler).Register(r)
 		mockset.NewHandler(mockSetSvc, projectHandler).Register(r)
 		projectprompt.NewHandler(projectPromptSvc, authSvc).Register(r)
 		aiconfig.NewHandler(aiConfigSvc, authSvc).Register(r)
@@ -271,6 +287,7 @@ func main() {
 			Scripts:      scriptLibrarySvc,
 			Runs:         runSvc,
 			GenAgent:     genAgent,
+			AI:           &ainladapter.ChatProviderAdapter{AI: aiProviderSvc},
 		}
 		aiReadOnly := builtin.ReadOnly(toolDeps)
 		mutatingTools := builtin.Mutating(toolDeps)
@@ -459,6 +476,137 @@ type toolOutcomeQuerierAdapter struct {
 func (a *toolOutcomeQuerierAdapter) AggregateSuccessByToolSequence(ctx context.Context, since time.Time) ([]aiskill.ToolSequenceSuccess, error) {
 	// Placeholder: aggregate from ai_tool_outcomes
 	return nil, nil
+}
+
+// aiAssertHistoryCollector bridges report.Repository to aiassert.HistoryCollector.
+type aiAssertHistoryCollector struct {
+	repo *report.Repository
+}
+
+func (a *aiAssertHistoryCollector) ListPassedResponsesByTestCase(ctx context.Context, testCaseID uuid.UUID, limit int) ([]aiassert.HistoryResult, error) {
+	results, err := a.repo.ListPassedResponsesByTestCase(ctx, testCaseID, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]aiassert.HistoryResult, 0, len(results))
+	for _, r := range results {
+		out = append(out, aiassert.HistoryResult{
+			ResponseSnapshot: r.ResponseSnapshot,
+			Status:           string(r.Status),
+		})
+	}
+	return out, nil
+}
+
+// aiAssertEndpointGetter bridges spec.Repository to aiassert.EndpointGetter.
+type aiAssertEndpointGetter struct {
+	repo *spec.Repository
+}
+
+func (a *aiAssertEndpointGetter) GetEndpointByID(ctx context.Context, endpointID uuid.UUID) (*aiassert.EndpointInfo, error) {
+	ep, err := a.repo.GetEndpointByID(ctx, endpointID)
+	if err != nil {
+		return nil, err
+	}
+	return &aiassert.EndpointInfo{
+		ID:             ep.ID,
+		Method:         ep.Method,
+		Path:           ep.Path,
+		OperationID:    ep.OperationID,
+		Summary:        ep.Summary,
+		Tags:           ep.Tags,
+		ResponseSchema: ep.ResponseSchema,
+	}, nil
+}
+
+// aiAssertCaseGetter bridges testcase.Repository to aiassert.CaseGetter.
+type aiAssertCaseGetter struct {
+	repo *testcase.Repository
+}
+
+func (a *aiAssertCaseGetter) Get(ctx context.Context, id uuid.UUID) (*aiassert.TestCaseInfo, error) {
+	tc, err := a.repo.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return &aiassert.TestCaseInfo{
+		ID:                   tc.ID,
+		ProjectID:            tc.ProjectID,
+		ServiceID:            tc.ServiceID,
+		EndpointID:           tc.EndpointID,
+		Method:               tc.Method,
+		Path:                 tc.Path,
+		Assertions:           tc.Assertions,
+		LastResponseSnapshot: tc.LastResponseSnapshot,
+	}, nil
+}
+
+// aiAssertCasePatcher bridges testcase.Service to aiassert.CasePatcher.
+type aiAssertCasePatcher struct {
+	svc *testcase.Service
+}
+
+func (a *aiAssertCasePatcher) PatchAssertions(ctx context.Context, caseID uuid.UUID, assertions json.RawMessage) error {
+	_, err := a.svc.Patch(ctx, caseID, testcase.PatchInput{Assertions: assertions})
+	return err
+}
+
+type recordProxyAdapter struct {
+	rec *mockrecord.Recorder
+}
+
+func (a *recordProxyAdapter) RecordAndProxy(ctx context.Context, projectID, serverID, routeID uuid.UUID, targetURL string, originalReq *http.Request, reqBody []byte) (*http.Response, error) {
+	_, resp, err := a.rec.RecordAndProxy(ctx, projectID, serverID, routeID, targetURL, originalReq, reqBody)
+	return resp, err
+}
+
+type replayPlayerAdapter struct {
+	player *mockrecord.Player
+}
+
+func (a *replayPlayerAdapter) Replay(ctx context.Context, serverID, routeID uuid.UUID, r *http.Request, reqBody []byte) (*http.Response, error) {
+	resp, _, err := a.player.Replay(ctx, serverID, routeID, r, reqBody)
+	return resp, err
+}
+
+type routeModeAdapter struct {
+	svc *mockserver.Service
+}
+
+func (a *routeModeAdapter) EnableRecordMode(ctx context.Context, projectID, serverID, routeID uuid.UUID, targetURL string) (mockrecord.RouteModeResult, error) {
+	route, err := a.svc.GetRoute(ctx, projectID, serverID, routeID)
+	if err != nil {
+		return mockrecord.RouteModeResult{}, err
+	}
+	update := mockserver.RouteInputFromRoute(*route)
+	update.ResponseMode = mockserver.ResponseModeRecord
+	update.RecordTargetURL = strings.TrimRight(strings.TrimSpace(targetURL), "/")
+	updated, err := a.svc.UpdateRoute(ctx, projectID, serverID, routeID, update)
+	if err != nil {
+		return mockrecord.RouteModeResult{}, err
+	}
+	return mockrecord.RouteModeResult{
+		RouteID:         updated.ID,
+		ResponseMode:    updated.ResponseMode,
+		RecordTargetURL: updated.RecordTargetURL,
+	}, nil
+}
+
+func (a *routeModeAdapter) EnableReplayMode(ctx context.Context, projectID, serverID, routeID uuid.UUID) (mockrecord.RouteModeResult, error) {
+	route, err := a.svc.GetRoute(ctx, projectID, serverID, routeID)
+	if err != nil {
+		return mockrecord.RouteModeResult{}, err
+	}
+	update := mockserver.RouteInputFromRoute(*route)
+	update.ResponseMode = mockserver.ResponseModeReplay
+	updated, err := a.svc.UpdateRoute(ctx, projectID, serverID, routeID, update)
+	if err != nil {
+		return mockrecord.RouteModeResult{}, err
+	}
+	return mockrecord.RouteModeResult{
+		RouteID:      updated.ID,
+		ResponseMode: updated.ResponseMode,
+	}, nil
 }
 
 // timeoutExceptStream wraps the standard chi Timeout middleware but lets

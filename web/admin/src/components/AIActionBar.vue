@@ -165,7 +165,13 @@ export default {
       return this.nonQuestionCalls.filter((c) => COMPLEX_TOOLS.has(c.name))
     },
     simpleGroups() {
-      if (this.simpleCalls.length <= 1) return []
+      if (this.simpleCalls.length === 0) return []
+      if (this.simpleCalls.length === 1) {
+        // Single call: show as a standalone approve button (no grouping).
+        const call = this.simpleCalls[0]
+        const cat = categorize(call.name)
+        return [{ key: cat.key, label: '允许执行', calls: [call] }]
+      }
       const map = new Map()
       for (const call of this.simpleCalls) {
         const cat = categorize(call.name)
@@ -221,19 +227,19 @@ export default {
 <style scoped>
 .ai-action-bar {
   flex-shrink: 0;
-  border-top: 1px solid var(--el-border-color-lighter, #ebeef5);
+  border-top: 1px solid var(--el-border-color-light, #e4e7ed);
   background: var(--el-fill-color-blank, #fff);
-  padding: 12px 16px;
+  padding: 16px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
 }
 
 .ai-action-bar__queue {
   font-size: 12px;
-  color: var(--el-text-color-secondary);
+  color: var(--el-text-color-secondary, #909399);
   text-align: center;
-  padding: 2px 0;
+  padding: 4px 0;
 }
 
 .ai-action-bar__options {
@@ -245,23 +251,22 @@ export default {
 .ai-action-bar__option {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 14px;
-  border: 1px solid color-mix(in srgb, var(--el-color-primary) 30%, var(--el-border-color-lighter));
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--el-color-primary-light-9) 60%, var(--el-fill-color-blank));
-  color: var(--el-color-primary);
+  gap: 8px;
+  padding: 10px 16px;
+  border: 1px solid var(--el-border-color-light, #e4e7ed);
+  border-radius: 6px;
+  background: var(--el-fill-color-blank, #fff);
+  color: var(--el-color-primary, #409eff);
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
-  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+  transition: border-color 0.2s ease, background 0.2s ease;
   white-space: nowrap;
 }
 
 .ai-action-bar__option:hover:not(:disabled) {
-  border-color: var(--el-color-primary);
-  background: var(--el-color-primary-light-9);
-  box-shadow: 0 2px 8px rgba(64, 158, 255, 0.12);
+  border-color: var(--el-color-primary, #409eff);
+  background: var(--el-color-primary-light-9, #ecf5ff);
 }
 
 .ai-action-bar__option:disabled {
@@ -291,19 +296,25 @@ export default {
   height: 20px;
   padding: 0 6px;
   border-radius: 10px;
-  background: color-mix(in srgb, var(--el-color-primary) 15%, transparent);
+  background: var(--el-color-primary-light-9, #ecf5ff);
   font-size: 11px;
   font-weight: 600;
+  color: var(--el-color-primary, #409eff);
 }
 
 .ai-action-bar__item {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 10px 12px;
-  border: 1px solid color-mix(in srgb, var(--el-color-warning) 40%, var(--el-border-color-lighter));
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--el-color-warning-light-9) 50%, var(--el-fill-color-blank));
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--el-border-color-light, #e4e7ed);
+  border-radius: 8px;
+  background: var(--el-fill-color-blank, #fff);
+  transition: border-color 0.2s ease;
+}
+
+.ai-action-bar__item:hover {
+  border-color: var(--el-border-color, #dcdfe6);
 }
 
 .ai-action-bar__row {
@@ -317,21 +328,21 @@ export default {
 .ai-action-bar__info {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
   flex-shrink: 0;
 }
 
 .ai-action-bar__warn {
   font-size: 16px;
-  color: var(--el-color-warning);
+  color: var(--el-color-warning, #e6a23c);
   flex-shrink: 0;
 }
 
 .ai-action-bar__tool-name {
   font-size: 13px;
   font-weight: 600;
-  color: var(--el-text-color-primary);
+  color: var(--el-text-color-primary, #303133);
   white-space: nowrap;
 }
 
@@ -361,50 +372,50 @@ export default {
 .ai-action-bar__link-btn {
   border: none;
   background: transparent;
-  color: var(--el-text-color-secondary);
+  color: var(--el-text-color-secondary, #909399);
   font-size: 12px;
   cursor: pointer;
-  padding: 2px 4px;
+  padding: 4px 8px;
   border-radius: 4px;
-  transition: color 0.15s, background 0.15s;
+  transition: color 0.2s ease, background 0.2s ease;
 }
 
 .ai-action-bar__link-btn:hover {
-  color: var(--el-color-primary);
-  background: var(--el-color-primary-light-9);
+  color: var(--el-color-primary, #409eff);
+  background: var(--el-color-primary-light-9, #ecf5ff);
 }
 
 .ai-action-bar__detail-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 4px 0 0;
+  gap: 8px;
+  padding: 8px 0 0;
 }
 
 .ai-action-bar__detail-item {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 8px;
 }
 
 .ai-action-bar__detail-name {
   font-size: 12px;
   font-weight: 600;
-  color: var(--el-text-color-regular);
+  color: var(--el-text-color-regular, #606266);
 }
 
 .ai-action-bar__detail-args {
   margin: 0;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Courier New', monospace;
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Courier New', monospace;
   font-size: 12px;
-  background: var(--el-fill-color-light);
-  border: 1px solid var(--el-border-color-lighter);
+  line-height: 1.6;
+  background: #1e1e1e;
   border-radius: 6px;
-  padding: 6px 8px;
+  padding: 12px;
   max-height: 160px;
   overflow: auto;
   white-space: pre-wrap;
   word-break: break-word;
-  color: var(--el-text-color-regular);
+  color: #d4d4d4;
 }
 </style>

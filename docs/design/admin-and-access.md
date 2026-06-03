@@ -49,16 +49,16 @@
 - 服务与环境以树形展示，环境作为服务子级节点。
 - 当前项目下上次选择的服务本地持久化。
 - 环境配置弹窗中的变量 JSON 与认证 JSON 提供提示图标、格式化示例、自适应高度，并在失焦后自动格式化。
-- 业务数据源、AI 提供商、Prompt 管理已归入「平台资源」分组；历史 `/data-sources`、`/ai-providers` 重定向到 `/platform/data-sources`、`/platform/ai-providers` 等。
+- 业务数据源、AI 能力管理（含原 AI 提供商、AI 助理配置、Prompt 管理）已归入「平台资源」分组；历史 `/data-sources` 重定向到 `/platform/data-sources` 等；`/platform/ai-providers`、`/ai-providers`、`/platform/ai-assistant-settings`、`/platform/ai-prompts` 重定向到 `/platform/ai-management` 对应 Tab。
 
 ## 菜单与布局
 
 - **用户管理**页（`/users`）以 Tab 聚合：用户、角色、权限、登录方式；历史路径 `/roles`、`/permissions`、`/auth-providers` 重定向到 `/users?tab=...`。
 - 侧边栏「项目管理」仅维护服务与环境（主从布局：左侧项目列表 + 右侧服务环境树）。
-- 「平台资源」分组包含：脚本库、业务数据源、AI 提供商、Prompt 管理、命名值集合、模板与变量参考。
-- 历史路径 `/services` 重定向到项目管理；`/data-sources`、`/ai-providers` 重定向到平台资源对应页。
+- 「平台资源」分组包含：脚本库、业务数据源、AI 能力管理、命名值集合、模板参考。
+- 历史路径 `/services` 重定向到项目管理；`/data-sources` 重定向到平台资源对应页。
 - 左侧菜单包含项目管理、测试数据、平台资源、API 管理、运行控制台、场景编排、系统管理等。
-- 「模板与变量参考」当前无单独路由 permission，登录用户可见。
+- 「模板参考」当前无单独路由 permission，登录用户可见。
 - 侧边栏支持手动收起。
 - 主应用左侧导航菜单区域不允许单独滚动。
 - 主布局限制在视口高度内，主内容过长时仅右侧主内容区滚动。

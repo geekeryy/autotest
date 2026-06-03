@@ -7,12 +7,12 @@
 | 文档 | 内容 |
 |------|------|
 | [architecture.md](architecture.md) | 系统架构、配置与环境变量、部署（Firebase 分离为默认，All-in-One 可选） |
-| [platform-core.md](platform-core.md) | 术语、项目/服务/环境、Runner、断言、报告、示例服务 |
+| [platform-core.md](platform-core.md) | 术语、项目/服务/环境、Runner、断言、报告、示例服务、AI 能力模块概览 |
 | [api-management-and-runner.md](api-management-and-runner.md) | OpenAPI/Swagger 导入、API 管理、运行控制台、环境认证 |
 | [mcp-swagger-import.md](mcp-swagger-import.md) | MCP 服务（stdio）、Swagger/OpenAPI 导入工具与 Cursor 配置 |
 | [scenario-orchestration.md](scenario-orchestration.md) | 场景步骤、变量传递、控制流、克隆、运行报告 |
-| [mock-template-and-test-data.md](mock-template-and-test-data.md) | Mock Server、Mock Value Sets、模板变量、SQL 参数源、测试数据 |
-| [ai-capabilities.md](ai-capabilities.md) | AI 提供商、Prompt、生成/分析、Tool Calling、全局助理浮窗 |
+| [mock-template-and-test-data.md](mock-template-and-test-data.md) | Mock Server、Mock Value Sets、模板变量、SQL 参数源、测试数据、Schema Mock 生成、录制回放 |
+| [ai-capabilities.md](ai-capabilities.md) | AI 提供商、Prompt、生成/分析、Tool Calling、全局助理浮窗、断言推断、语义数据工厂、NL 编排、记忆/技能/反馈/自评估 |
 | [admin-and-access.md](admin-and-access.md) | 登录与 OAuth、RBAC、菜单、通知、API Key |
 
 ## 待用户决策

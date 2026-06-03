@@ -21,6 +21,8 @@
   --app-sidebar-menu-hover-bg: rgba(255, 255, 255, 0.1);
   --app-sidebar-menu-active-bg: color-mix(in srgb, var(--app-primary-color) 18%, var(--app-sidebar-bg));
   --app-sidebar-menu-active-accent: var(--app-primary-color);
+  --app-sidebar-border: rgba(255, 255, 255, 0.08);
+  --app-sidebar-shadow: 2px 0 8px rgba(0, 0, 0, 0.15);
   --app-page-bg: #f8fafc;
   --app-card-bg: #ffffff;
   --app-text-color: #0f172a;
@@ -329,4 +331,41 @@ select {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+/* 环境选择下拉：名称居左，编辑按钮居右（popper teleport 到 body，需全局样式） */
+.environment-select-dropdown .el-select-dropdown__item {
+  padding-right: 10px;
+}
+
+.environment-select-dropdown .env-option-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+
+.environment-select-dropdown .env-option-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.environment-select-dropdown .env-option-edit-btn {
+  flex-shrink: 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+}
+
+.environment-select-dropdown .env-option-edit-btn .el-icon {
+  font-size: 16px;
+}
+
+.environment-select-dropdown .el-select-dropdown__item:hover .env-option-edit-btn {
+  opacity: 1;
+  pointer-events: auto;
 }

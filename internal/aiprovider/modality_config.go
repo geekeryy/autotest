@@ -90,14 +90,3 @@ func resolveConfiguredModelID(configured string, gatewayModels []client.ModelInf
 	}
 	return configured
 }
-
-func modelInfoByID(gatewayModels []client.ModelInfo, modelID string) *client.ModelInfo {
-	want := normalizeModelID(modelID)
-	for i := range gatewayModels {
-		id := strings.TrimSpace(gatewayModels[i].ID)
-		if id == modelID || normalizeModelID(id) == want {
-			return &gatewayModels[i]
-		}
-	}
-	return nil
-}

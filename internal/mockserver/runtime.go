@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"autotest/internal/logx"
+	"autotest/internal/mockgen"
 	"autotest/internal/templating"
 
 	"github.com/google/uuid"
@@ -27,6 +28,16 @@ type MockSetService interface {
 	Lookup(ctx context.Context, projectID uuid.UUID, key string) (values []json.RawMessage, weights []float64, ok bool)
 }
 
+// RecordProxy 将请求转发到真实服务并录制响应。
+type RecordProxy interface {
+	RecordAndProxy(ctx context.Context, projectID, serverID, routeID uuid.UUID, targetURL string, originalReq *http.Request, reqBody []byte) (*http.Response, error)
+}
+
+// ReplayPlayer 从录制数据回放响应。
+type ReplayPlayer interface {
+	Replay(ctx context.Context, serverID, routeID uuid.UUID, r *http.Request, reqBody []byte) (*http.Response, error)
+}
+
 type runtimeRepository interface {
 	GetServerByID(ctx context.Context, serverID uuid.UUID) (*MockServer, error)
 	ListEnabledRoutesForServer(ctx context.Context, serverID uuid.UUID) ([]MockRoute, error)
@@ -37,6 +48,8 @@ type runtimeRepository interface {
 type Runtime struct {
 	repo     runtimeRepository
 	mockSets MockSetService
+	recorder RecordProxy
+	player   ReplayPlayer
 	mu       sync.Mutex
 	running  map[uuid.UUID]*runningServer
 }
@@ -50,12 +63,13 @@ type runningServer struct {
 // NewRuntime creates a Runtime backed by the repository used for live rule reads.
 //
 // mockSets 可选；非 nil 时启用 `{{$mock.set.<key>}}` 在 Mock 响应体里的解析。
-// 每个 HTTP 请求获得独立的游标 map，意味着同一个请求内多次出现
-// `{{$mock.set.<key>[*]}}` 会按顺序循环；不同请求互不影响。
-func NewRuntime(repo runtimeRepository, mockSets MockSetService) *Runtime {
+// recorder/player 可选；非 nil 时启用 record/replay 响应模式。
+func NewRuntime(repo runtimeRepository, mockSets MockSetService, recorder RecordProxy, player ReplayPlayer) *Runtime {
 	return &Runtime{
 		repo:     repo,
 		mockSets: mockSets,
+		recorder: recorder,
+		player:   player,
 		running:  map[uuid.UUID]*runningServer{},
 	}
 }
@@ -211,8 +225,80 @@ func (rt *Runtime) mockHandler(serverID uuid.UUID) http.Handler {
 		}
 		matched = true
 		mockCfg := rt.buildRequestMockConfig(server.ProjectID)
-		writeMockResponse(rec, r, *route, reqBody, mockCfg)
+		if err := rt.writeRouteResponse(rec, r, serverID, server.ProjectID, *route, reqBody, mockCfg); err != nil {
+			errMsg = err.Error()
+			writeRuntimeError(rec, http.StatusBadGateway, errMsg)
+		}
 	})
+}
+
+func (rt *Runtime) writeRouteResponse(
+	w http.ResponseWriter,
+	r *http.Request,
+	serverID, projectID uuid.UUID,
+	route MockRoute,
+	reqBody []byte,
+	mockCfg *templating.MockExpanderConfig,
+) error {
+	switch route.ResponseMode {
+	case ResponseModeRecord:
+		return rt.writeRecordedResponse(w, r, projectID, serverID, route, reqBody)
+	case ResponseModeReplay:
+		return rt.writeReplayResponse(w, r, serverID, route, reqBody)
+	default:
+		writeMockResponse(w, r, route, reqBody, mockCfg)
+		return nil
+	}
+}
+
+func (rt *Runtime) writeRecordedResponse(
+	w http.ResponseWriter,
+	r *http.Request,
+	projectID, serverID uuid.UUID,
+	route MockRoute,
+	reqBody []byte,
+) error {
+	if rt.recorder == nil {
+		return fmt.Errorf("mock recorder is not configured")
+	}
+	proxyResp, err := rt.recorder.RecordAndProxy(r.Context(), projectID, serverID, route.ID, route.RecordTargetURL, r, reqBody)
+	if err != nil {
+		return err
+	}
+	defer proxyResp.Body.Close()
+	return copyHTTPResponse(w, proxyResp)
+}
+
+func (rt *Runtime) writeReplayResponse(
+	w http.ResponseWriter,
+	r *http.Request,
+	serverID uuid.UUID,
+	route MockRoute,
+	reqBody []byte,
+) error {
+	if rt.player == nil {
+		return fmt.Errorf("mock player is not configured")
+	}
+	proxyResp, err := rt.player.Replay(r.Context(), serverID, route.ID, r, reqBody)
+	if err != nil {
+		return err
+	}
+	if proxyResp == nil {
+		return fmt.Errorf("no recorded response matched")
+	}
+	defer proxyResp.Body.Close()
+	return copyHTTPResponse(w, proxyResp)
+}
+
+func copyHTTPResponse(w http.ResponseWriter, resp *http.Response) error {
+	for key, values := range resp.Header {
+		for _, value := range values {
+			w.Header().Add(key, value)
+		}
+	}
+	w.WriteHeader(resp.StatusCode)
+	_, err := io.Copy(w, resp.Body)
+	return err
 }
 
 func (rt *Runtime) recordAccessLog(
@@ -304,6 +390,12 @@ func writeMockResponse(w http.ResponseWriter, r *http.Request, route MockRoute, 
 
 	if route.ResponseMode == ResponseModeRedirect {
 		writeMockRedirectResponse(w, r, route, body, mockCfg)
+		return
+	}
+
+	// Schema 模式：使用 mockgen 根据 JSON Schema 自动生成响应
+	if route.ResponseMode == ResponseModeSchema {
+		writeSchemaResponse(w, r, route)
 		return
 	}
 
@@ -407,4 +499,52 @@ func writeRuntimeError(w http.ResponseWriter, status int, message string) {
 	if err := json.NewEncoder(w).Encode(map[string]string{"error": message}); err != nil {
 		return
 	}
+}
+
+// writeSchemaResponse 使用 mockgen 根据 ResponseSchema 自动生成响应数据。
+// 优先使用 ResponseSchema；如果没有 schema 但有 AIGeneratedPool，则从池中取数据。
+func writeSchemaResponse(w http.ResponseWriter, r *http.Request, route MockRoute) {
+	var responseBody []byte
+
+	// 优先使用 ResponseSchema 自动生成
+	if len(route.ResponseSchema) > 0 {
+		var schema map[string]any
+		if err := json.Unmarshal(route.ResponseSchema, &schema); err == nil {
+			// 从顶层 schema 中提取 body（兼容 ResponseSchema 的包装格式）
+			bodySchema := schema
+			if body, ok := schema["body"].(map[string]any); ok {
+				bodySchema = body
+			}
+			gen := mockgen.Default()
+			value := gen.Generate(bodySchema)
+			responseBody, _ = json.Marshal(value)
+		}
+	}
+
+	// 如果 schema 生成失败，尝试从 AI 缓存池中取数据
+	if responseBody == nil && len(route.AIGeneratedPool) > 0 {
+		var pool []json.RawMessage
+		if err := json.Unmarshal(route.AIGeneratedPool, &pool); err == nil && len(pool) > 0 {
+			// 随机选取一条
+			idx := int(time.Now().UnixNano()%int64(len(pool)))
+			responseBody = pool[idx]
+		}
+	}
+
+	// 兜底：返回空对象
+	if responseBody == nil {
+		responseBody = []byte("{}")
+	}
+
+	writeHeaders(w, route.ResponseHeaders)
+	applyMockCORS(w, r)
+	if w.Header().Get("Content-Type") == "" {
+		w.Header().Set("Content-Type", "application/json")
+	}
+	status := route.ResponseStatus
+	if status == 0 {
+		status = 200
+	}
+	w.WriteHeader(status)
+	_, _ = w.Write(responseBody)
 }

@@ -390,14 +390,6 @@ func loginBodyForEndpoint(ep spec.Endpoint, pctx planContext) json.RawMessage {
 	return raw
 }
 
-func loginCredentials(ep spec.Endpoint) (string, string) {
-	user, pass, _ := ResolveLoginCredentials(
-		strings.Contains(strings.ToLower(ep.Path), "/admin/"),
-		nil, "", "",
-	)
-	return user, pass
-}
-
 func expectedStatus(ep spec.Endpoint) int {
 	// First, try to extract from the OpenAPI response definition.
 	if code := statusFromResponseSchema(ep.ResponseSchema); code > 0 {

@@ -24,7 +24,7 @@
         <span>在{{ focusedPaneLabel }}开启新对话</span>
       </el-button>
 
-      <div class="ds-session-list" v-loading="sessionsLoading">
+      <div class="ds-session-list" ref="sessionListEl" v-loading="sessionsLoading" @scroll="onSessionListScroll">
         <p v-if="!currentProjectId" class="ds-session-empty">请先在顶栏选择项目</p>
         <p v-else-if="!state.sessions.length" class="ds-session-empty">暂无历史会话</p>
         <SessionListItem
@@ -39,6 +39,9 @@
           @rename="onRenameSession"
           @delete="onDeleteSession"
         />
+        <div v-if="assistantState.loadingMoreSessions" class="ds-session-loading">
+          <span>加载中...</span>
+        </div>
       </div>
     </aside>
     </template>
@@ -124,6 +127,7 @@ import {
   setFocusedPane,
   workspacePaneLabel,
   workspacePaneTag,
+  loadMoreSessions,
 } from '../stores/aiAssistant'
 import { projectState } from '../utils/currentProject'
 
@@ -304,6 +308,13 @@ export default {
       }
       await removeSession(session.id)
     },
+    onSessionListScroll(e) {
+      const el = e.target
+      if (!el || assistantState.loadingMoreSessions || !assistantState.hasMoreSessions) return
+      if (el.scrollTop + el.clientHeight >= el.scrollHeight - 20) {
+        loadMoreSessions()
+      }
+    },
   },
 }
 </script>
@@ -383,7 +394,7 @@ export default {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
-  padding: 0 8px 8px;
+  padding: 4px 8px 8px;
 }
 
 .ds-session-empty {
@@ -391,6 +402,14 @@ export default {
   font-size: 13px;
   color: var(--app-text-muted);
   line-height: 1.5;
+}
+
+.ds-session-loading {
+  display: flex;
+  justify-content: center;
+  padding: 6px 0;
+  font-size: 12px;
+  color: var(--el-text-color-placeholder, #a8abb2);
 }
 
 .ds-workspace {

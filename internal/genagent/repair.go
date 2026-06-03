@@ -632,16 +632,6 @@ func truncateOutput(m map[string]any) map[string]any {
 	return out
 }
 
-func countRealDefects(repairs []RepairSummary) int {
-	n := 0
-	for _, r := range repairs {
-		if r.Category == "real_defect" {
-			n++
-		}
-	}
-	return n
-}
-
 func summarizeRun(output *runner.RunScenarioOutput) (passed bool, failures []string) {
 	if output == nil || output.Run == nil {
 		return false, []string{"run output missing"}

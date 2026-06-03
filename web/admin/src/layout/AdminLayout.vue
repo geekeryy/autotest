@@ -323,7 +323,7 @@ export default {
       return getResolvedPalette(this.appearance)
     },
     sidebarWidth() {
-      return this.isSidebarCollapsed ? '64px' : '220px'
+      return this.isSidebarCollapsed ? '56px' : '180px'
     },
     visibleMenus() {
       return buildVisibleMenus(menuRoutes)
@@ -485,6 +485,8 @@ export default {
   height: 100%;
   max-height: 100%;
   background: var(--app-sidebar-bg);
+  border-right: 1px solid var(--app-sidebar-border);
+  box-shadow: var(--app-sidebar-shadow);
   transition: width 0.2s ease;
   overflow-x: hidden;
   overflow-y: hidden;
@@ -495,13 +497,14 @@ export default {
   height: 60px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: center;
   gap: 8px;
-  padding: 0 22px;
+  padding: 0 16px;
   color: var(--app-sidebar-active);
   font-size: var(--app-font-size-title);
   font-weight: 700;
   letter-spacing: 0.5px;
+  position: relative;
 }
 
 .brand-identity {
@@ -512,6 +515,8 @@ export default {
   text-decoration: none;
   color: inherit;
   cursor: pointer;
+  flex: 1;
+  justify-content: center;
 }
 
 .brand-logo-mark {
@@ -525,7 +530,10 @@ export default {
 }
 
 .collapse-button {
-  flex: 0 0 auto;
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
   --el-button-hover-bg-color: var(--app-sidebar-menu-hover-bg);
   --el-button-hover-text-color: color-mix(
     in srgb,
@@ -534,10 +542,21 @@ export default {
   );
   color: var(--app-sidebar-text);
   background-color: transparent;
+  opacity: 0;
   transition:
     color 0.18s ease,
     background-color 0.18s ease,
-    transform 0.15s ease;
+    transform 0.15s ease,
+    opacity 0.18s ease;
+}
+
+.brand:hover .collapse-button {
+  opacity: 1;
+}
+
+/* 折叠状态下按钮始终可见，方便用户展开菜单 */
+.sidebar--collapsed .collapse-button {
+  opacity: 1;
 }
 
 .collapse-button:hover,
@@ -639,7 +658,7 @@ export default {
 .sidebar-footer {
   flex-shrink: 0;
   padding: 12px 14px 14px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: 1px solid var(--app-sidebar-border);
 }
 
 .sidebar-user {

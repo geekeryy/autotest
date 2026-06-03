@@ -225,6 +225,8 @@ export const assistantState = reactive({
   open: false,
   projectId: '',
   sessions: [],
+  hasMoreSessions: false,
+  loadingMoreSessions: false,
   providers: [],
   providerTypes: [],
   pageContext: null,
@@ -560,10 +562,36 @@ export function toggleAssistant() {
 export async function refreshSessions() {
   if (!assistantState.projectId) return
   try {
-    const items = await listAISessions(assistantState.projectId)
-    assistantState.sessions = Array.isArray(items) ? items : []
+    const res = await listAISessions(assistantState.projectId, { limit: 20, offset: 0 })
+    if (Array.isArray(res)) {
+      // 兼容旧接口直接返回数组
+      assistantState.sessions = res
+      assistantState.hasMoreSessions = false
+    } else {
+      assistantState.sessions = Array.isArray(res?.sessions) ? res.sessions : []
+      assistantState.hasMoreSessions = !!res?.hasMore
+    }
   } catch {
     assistantState.sessions = []
+    assistantState.hasMoreSessions = false
+  }
+}
+
+export async function loadMoreSessions() {
+  if (!assistantState.projectId || assistantState.loadingMoreSessions || !assistantState.hasMoreSessions) return
+  assistantState.loadingMoreSessions = true
+  try {
+    const res = await listAISessions(assistantState.projectId, { limit: 20, offset: assistantState.sessions.length })
+    if (Array.isArray(res)) {
+      assistantState.sessions = [...assistantState.sessions, ...res]
+      assistantState.hasMoreSessions = false
+    } else {
+      const more = Array.isArray(res?.sessions) ? res.sessions : []
+      assistantState.sessions = [...assistantState.sessions, ...more]
+      assistantState.hasMoreSessions = !!res?.hasMore
+    }
+  } finally {
+    assistantState.loadingMoreSessions = false
   }
 }
 

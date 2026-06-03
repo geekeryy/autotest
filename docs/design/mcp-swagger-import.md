@@ -10,6 +10,7 @@
   - `import_swagger_from_url`：从 HTTP(S) URL 下载后导入。
 - 底层调用既有 `POST /api/v1/projects/{projectId}/services/{serviceId}/specs/import`，需使用带 **`specs:import`** 作用域的 API Key（`Authorization: Bearer at-...`）。
 - 导入语义、幂等与统计字段与 [api-management-and-runner.md](api-management-and-runner.md) 中 OpenAPI 导入一致；API Key 成功导入会触发 `spec_import` 站内通知。
+- 工具可选参数 `syncMode`：`merge`（默认）或 `overwrite`，对应 HTTP query `?sync=merge|overwrite`。
 
 ## 环境变量
 

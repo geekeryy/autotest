@@ -8,7 +8,7 @@
 
 ## OpenAPI/Swagger 导入
 
-- **MCP 导入**：独立进程 `cmd/mcp` 通过 MCP 工具 `import_swagger`、`import_swagger_from_url` 调用同一 `POST .../specs/import` 接口（API Key + `specs:import`）。配置与 Cursor 示例见 [mcp-swagger-import.md](mcp-swagger-import.md)。
+- **MCP 导入**：独立进程 `cmd/mcp` 通过 MCP 工具 `import_swagger`、`import_swagger_from_url`（可选 `syncMode`）调用同一 `POST .../specs/import` 接口（API Key + `specs:import`）。平台 AI 助理工具 `import_openapi` 同样支持 `syncMode`。配置与 Cursor 示例见 [mcp-swagger-import.md](mcp-swagger-import.md)。
 - 支持 **OpenAPI 3.0.x / 3.1.x** 原生导入，以及 **Swagger 2.0**（经 kin-openapi 转换为 OpenAPI 3 后解析）。导入器统一产出 OpenAPI 3 语义的 `requestSchema` / `responseSchema`。
 - 对 vendor 文档中常见的非严格校验问题（schema 上误用 `examples`、default 与 enum 标签不一致、额外 sibling 字段如 `BDCZLXXLIST`）采用宽松校验，保证 imperfect spec 仍可导入端点与约束。
 - PathItem 级 `parameters` 会合并进各 operation 的 `requestSchema.parameters`；同名同 `in` 时 operation 级覆盖 path 级。
@@ -16,6 +16,8 @@
 - 当前导入响应已使用统计摘要；当前 spec 列表模型仍可能序列化 `normalizedSnapshot`，前端不应依赖列表里的大字段作为展示主数据。
 - 重复导入同一服务下内容相同的 OpenAPI/Swagger 应保持幂等，不因内容哈希唯一约束报错。
 - 幂等导入不产生重复接口定义或重复自动生成接口请求模板，并应继续刷新接口定义与模板。
+- **导入同步模式**：`POST .../specs/import?sync=merge|overwrite`，缺省或非法值为 **merge**（仅 upsert 文档内端点）。**overwrite** 在 upsert 后软删除不在本次文档中的端点，并仅软删除关联的 `source=auto` 请求模板；`manual` / `derived` 模板保留。响应 `ImportSummary` 含 `syncMode` 与可选 `deletedEndpoints`。
+- **Spec 历史保留**：每个服务仅保留最近 **5** 个活跃 spec 版本（导入成功后 prune；列表接口 `LIMIT 5` 双保险）。更老版本 `deleted_at` 非空，AI 相邻版本对比仍可用。
 - 自动生成模板名称优先使用 OpenAPI/Swagger `summary`，缺省回退 `operationId`，再回退 `METHOD PATH`，不拼接生成规则名称。
 - 当前自动生成实际只产出 happy path 模板；其他生成规则属于预留扩展点。
 - 导入 OpenAPI/Swagger 时必须将请求/响应字段约束保留进 `requestSchema` / `responseSchema`。
@@ -27,12 +29,15 @@
 - API 管理页面合并 OpenAPI/Swagger 导入与接口列表。
 - 独立 Spec 导入页已并入 API 管理入口；仓库中若保留旧组件文件，不代表仍有独立路由入口。
 - 页面内统一选择服务，上方承载导入和历史记录，下方展示接口请求模板列表。
+- 导入区提供 **合并 / 覆盖** 同步模式单选；选择覆盖时二次确认，覆盖会软删文档外端点及 auto 模板。
+- 导入历史表格上方提示 **仅展示最近 5 次导入**（与后端 prune + list limit 一致）。
 - 前端路由/按钮权限使用 `cases:read`、`specs:import`、`cases:write`；当前后端 cases/spec 扁平路由未全部使用这些全局 permission 强制拦截，不能把前端权限视为完整服务端授权。
 
 ## 运行控制台
 
 - 运行控制台参考 Apifox 工作台风格，提供左侧接口树、顶部接口 Tab、请求方法与发送工具栏、环境选择、请求参数分区、响应结果分区等核心交互。
 - 支持从运行控制台选择环境并独立运行接口请求模板。
+- **断言推断**：运行控制台支持从 OpenAPI schema 和历史运行数据自动推断断言（`internal/aiassert`）。推断入口为 `POST /cases/{caseID}/infer-assertions`，结果可预览后追加或替换到用例断言中。详见 [ai-capabilities.md](ai-capabilities.md)「AI 断言推断」章节。
 - 运行前可命名本次运行、手动修改请求参数、自动生成默认参数，并可将本次请求和响应作为参考。
 - 运行界面提供「保存用例」将当前请求参数固化为测试用例快照，按接口模板 ID 隔离，Tab 展示，并可被场景编排引用。
 - HTTP 请求与响应需按 URL、Params、Headers、Body、断言等部位分区编辑和展示，避免把完整请求或结果堆在单个纯文本框中；当前没有独立命名为「变量」的请求 Tab，变量通常在请求字段、环境变量或模板表达式中体现。
@@ -72,5 +77,5 @@
 
 ## 运行控制台环境编辑
 
-- 运行控制台支持在运行前编辑当前选择的环境配置。
-- 环境编辑入口位于环境下拉列表每一行环境名称右侧，鼠标悬停该条环境项时显示。
+- 运行控制台与场景编排页的环境选择器复用 `EnvironmentSelect` 组件；下拉项悬停显示编辑入口，触发 `@edit` 打开环境编辑对话框。
+- 运行控制台与场景编排页共用 `EnvironmentSelect` 组件，保证环境下拉「名称左、编辑右」布局与 hover 样式一致。
