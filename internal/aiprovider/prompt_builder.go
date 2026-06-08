@@ -242,7 +242,7 @@ const scenarioWorkflowPrompt = `【场景生成工作流（重要）】
 5. 调整步骤用 ` + "`add_scenario_step` / `update_scenario_step` / `delete_scenario_step` / `reorder_scenario_steps`" + `。
 
 【场景步骤类型与 config 规范】
-- ` + "`api`" + ` 步骤：必填 ` + "`testCaseId`" + `，config 通常为 ` + "`{}`" + `。
+- ` + "`api`" + ` 步骤：必填 ` + "`testCaseId`" + `，config 通常为 ` + "`{}`" + `；可选 ` + "`timeoutMillis`" + `（单步 HTTP 超时，含重试总预算）与 ` + "`retry`" + `（如 ` + "`{\"maxRetries\":2,\"backoffMillis\":200,\"retryOnStatus\":[502,503,504]}`" + `）。重试仅对传输错误与 ` + "`retryOnStatus`" + ` 命中的状态码生效；POST/PATCH 等非幂等方法默认不重试，需显式设 ` + "`retryNonIdempotent: true`" + ` 才会重试，以免对被测系统重复写入。
 - ` + "`script`" + ` 步骤：config 形如 ` + "`{\"script\": \"pm.test(...)\", \"timeoutMillis\": 5000}`" + `；脚本是 Postman 风格 JS（goja 沙箱），可用 ` + "`pm.variables` / `pm.environment` / `pm.test` / `console`" + `。
 - ` + "`for`" + ` 控制流：config 形如 ` + "`{\"mode\": \"count\", \"count\": 3, \"itemVar\": \"item\", \"indexVar\": \"i\", \"bodyStepOrders\": [2,3]}`" + ` 或 ` + "`{\"mode\": \"items\", \"itemsExpression\": \"{{$steps[1].response.body.list}}\", ...}`" + `；子步骤通过 ` + "`bodyStepOrders`" + ` 引用同场景内其它步骤的 ` + "`stepOrder`" + `，平台会自动转换为内部 step_seq。
 - ` + "`condition`" + ` 控制流：config 形如 ` + "`{\"branches\": [{\"left\": \"{{$steps[1].status}}\", \"operator\": \"==\", \"right\": \"200\", \"stepOrders\": [2]}], \"elseStepOrders\": [3]}`" + `；同样用 ` + "`stepOrders`" + ` 引用子步骤。

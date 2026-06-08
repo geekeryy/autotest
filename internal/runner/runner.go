@@ -51,6 +51,140 @@ func New(client *http.Client, engine *assertion.Engine, results ResultStore) *Ru
 	return &Runner{Client: client, Engine: engine, Results: results}
 }
 
+// defaultRetryBackoff is the base delay used when a step opts into retries
+// without specifying its own backoff. Successive attempts grow exponentially.
+const defaultRetryBackoff = 200 * time.Millisecond
+
+// execOptions carry per-step execution tuning. The zero value preserves the
+// historical behaviour: no extra timeout (the http.Client default applies) and
+// no retries.
+type execOptions struct {
+	timeout time.Duration
+	retry   retryPolicy
+}
+
+// ExecOption configures a single case execution. Options only affect the
+// scenario step path; the standalone ExecuteCase entrypoint ignores them.
+type ExecOption func(*execOptions)
+
+// WithStepTimeout bounds the whole attempt (including any retries) with a
+// context deadline. A non-positive duration is ignored.
+func WithStepTimeout(d time.Duration) ExecOption {
+	return func(o *execOptions) {
+		if d > 0 {
+			o.timeout = d
+		}
+	}
+}
+
+// WithStepRetry enables retrying the outbound HTTP call. Retries fire on
+// transport errors always, and on the listed status codes when provided.
+// Non-idempotent methods (POST/PATCH) are retried only when allowNonIdempotent
+// is true, so the default policy never risks double-submitting a mutation.
+func WithStepRetry(maxRetries int, backoff time.Duration, retryOnStatus []int, allowNonIdempotent bool) ExecOption {
+	return func(o *execOptions) {
+		if maxRetries <= 0 {
+			return
+		}
+		if backoff <= 0 {
+			backoff = defaultRetryBackoff
+		}
+		statuses := make(map[int]bool, len(retryOnStatus))
+		for _, c := range retryOnStatus {
+			statuses[c] = true
+		}
+		o.retry = retryPolicy{
+			maxRetries:         maxRetries,
+			backoff:            backoff,
+			retryOnStatus:      statuses,
+			allowNonIdempotent: allowNonIdempotent,
+		}
+	}
+}
+
+// retryPolicy is the resolved, immutable retry configuration for one step.
+type retryPolicy struct {
+	maxRetries         int
+	backoff            time.Duration
+	retryOnStatus      map[int]bool
+	allowNonIdempotent bool
+}
+
+func (p retryPolicy) enabled() bool { return p.maxRetries > 0 }
+
+// allowsMethod reports whether the policy permits retrying the given method.
+// Idempotent methods are always eligible; mutating ones require an explicit
+// opt-in so a retried POST cannot create duplicate records in the system
+// under test.
+func (p retryPolicy) allowsMethod(method string) bool {
+	if p.allowNonIdempotent {
+		return true
+	}
+	switch strings.ToUpper(strings.TrimSpace(method)) {
+	case http.MethodGet, http.MethodHead, http.MethodPut, http.MethodDelete, http.MethodOptions:
+		return true
+	default:
+		return false
+	}
+}
+
+func (p retryPolicy) shouldRetryStatus(code int) bool { return p.retryOnStatus[code] }
+
+// backoffFor returns the delay before the given attempt index (1-based for the
+// first retry), growing exponentially from the base backoff.
+func (p retryPolicy) backoffFor(attempt int) time.Duration {
+	d := p.backoff
+	for i := 1; i < attempt; i++ {
+		d *= 2
+	}
+	return d
+}
+
+// doWithRetry issues req, retrying transport failures and configured retryable
+// status codes per policy. The request body is replayed via GetBody between
+// attempts. When policy is disabled or the method is not eligible, it performs
+// a single Do.
+func (r *Runner) doWithRetry(ctx context.Context, req *http.Request, policy retryPolicy) (*http.Response, error) {
+	attempts := 1
+	if policy.enabled() && policy.allowsMethod(req.Method) {
+		attempts = policy.maxRetries + 1
+	}
+
+	var resp *http.Response
+	var err error
+	for attempt := 0; attempt < attempts; attempt++ {
+		if attempt > 0 {
+			if req.GetBody != nil {
+				body, gerr := req.GetBody()
+				if gerr != nil {
+					return nil, gerr
+				}
+				req.Body = body
+			}
+			select {
+			case <-time.After(policy.backoffFor(attempt)):
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+
+		resp, err = r.Client.Do(req)
+		last := attempt == attempts-1
+		if err != nil {
+			if last {
+				return nil, err
+			}
+			continue // transport error: retry
+		}
+		if !last && policy.shouldRetryStatus(resp.StatusCode) {
+			resp.Body.Close()
+			continue
+		}
+		return resp, nil
+	}
+	return resp, err
+}
+
 // ExecuteCase runs a historical test_cases row. In product terms, SourceAuto
 // and SourceManual rows are request templates, while SourceDerived rows are
 // saved test case snapshots.
@@ -63,12 +197,23 @@ func (r *Runner) ExecuteCase(ctx context.Context, runID uuid.UUID, tc testcase.T
 }
 
 // ExecuteCaseWithStepID is ExecuteCase with an attached scenario step result.
-func (r *Runner) ExecuteCaseWithStepID(ctx context.Context, runID uuid.UUID, stepID uuid.UUID, tc testcase.TestCase, env project.Environment, vars map[string]string, parameterSourceSnapshots json.RawMessage, mockCfg *templating.MockExpanderConfig) (*report.Result, error) {
-	return r.executeCase(ctx, runID, &stepID, tc, env, vars, parameterSourceSnapshots, mockCfg)
+// Optional ExecOptions apply per-step timeout/retry tuning.
+func (r *Runner) ExecuteCaseWithStepID(ctx context.Context, runID uuid.UUID, stepID uuid.UUID, tc testcase.TestCase, env project.Environment, vars map[string]string, parameterSourceSnapshots json.RawMessage, mockCfg *templating.MockExpanderConfig, opts ...ExecOption) (*report.Result, error) {
+	return r.executeCase(ctx, runID, &stepID, tc, env, vars, parameterSourceSnapshots, mockCfg, opts...)
 }
 
-func (r *Runner) executeCase(ctx context.Context, runID uuid.UUID, stepID *uuid.UUID, tc testcase.TestCase, env project.Environment, vars map[string]string, parameterSourceSnapshots json.RawMessage, mockCfg *templating.MockExpanderConfig) (*report.Result, error) {
+func (r *Runner) executeCase(ctx context.Context, runID uuid.UUID, stepID *uuid.UUID, tc testcase.TestCase, env project.Environment, vars map[string]string, parameterSourceSnapshots json.RawMessage, mockCfg *templating.MockExpanderConfig, opts ...ExecOption) (*report.Result, error) {
 	start := time.Now()
+
+	var cfg execOptions
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	if cfg.timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, cfg.timeout)
+		defer cancel()
+	}
 	reqDef, err := decodeRequest(tc.Request)
 	if err != nil {
 		return r.finish(ctx, report.Result{
@@ -102,7 +247,7 @@ func (r *Runner) executeCase(ctx context.Context, runID uuid.UUID, stepID *uuid.
 		})
 	}
 
-	resp, err := r.Client.Do(httpReq)
+	resp, err := r.doWithRetry(ctx, httpReq, cfg.retry)
 	if err != nil {
 		return r.finish(ctx, report.Result{
 			RunID:                    runID,

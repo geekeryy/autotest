@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"autotest/internal/paramsource"
 	"autotest/internal/project"
@@ -141,6 +142,39 @@ func (s *Service) executeScenarioStep(
 type apiStepConfig struct {
 	Assertions json.RawMessage   `json:"assertions"`
 	Extracts   []stepExtractRule `json:"extracts"`
+	// TimeoutMillis bounds the whole HTTP attempt (including retries) for this
+	// step. Zero falls back to the runner's default http.Client timeout.
+	TimeoutMillis int `json:"timeoutMillis"`
+	// Retry, when present with a positive maxRetries, retries transient HTTP
+	// failures for this step.
+	Retry *stepRetryConfig `json:"retry"`
+}
+
+// stepRetryConfig is the per-step retry policy. Retries fire on transport
+// errors always, and on retryOnStatus codes when listed. Non-idempotent
+// methods are retried only when retryNonIdempotent is true.
+type stepRetryConfig struct {
+	MaxRetries         int   `json:"maxRetries"`
+	BackoffMillis      int   `json:"backoffMillis"`
+	RetryOnStatus      []int `json:"retryOnStatus"`
+	RetryNonIdempotent bool  `json:"retryNonIdempotent"`
+}
+
+// execOptions builds the runner ExecOptions implied by an API step's config.
+func (c apiStepConfig) execOptions() []ExecOption {
+	var opts []ExecOption
+	if c.TimeoutMillis > 0 {
+		opts = append(opts, WithStepTimeout(time.Duration(c.TimeoutMillis)*time.Millisecond))
+	}
+	if c.Retry != nil && c.Retry.MaxRetries > 0 {
+		opts = append(opts, WithStepRetry(
+			c.Retry.MaxRetries,
+			time.Duration(c.Retry.BackoffMillis)*time.Millisecond,
+			c.Retry.RetryOnStatus,
+			c.Retry.RetryNonIdempotent,
+		))
+	}
+	return opts
 }
 
 func (s *Service) executeAPIScenarioStep(
@@ -226,6 +260,7 @@ func (s *Service) executeAPIScenarioStep(
 		variants[0].Variables,
 		paramsource.MarshalSnapshots(variants[0].ParameterSourceSnapshots),
 		mockCfg,
+		stepCfg.execOptions()...,
 	)
 	if err != nil {
 		return result, nil, fmt.Errorf("step %d execute: %w", step.StepOrder, err)
