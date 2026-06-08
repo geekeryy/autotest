@@ -154,6 +154,8 @@ func scoreConfidence(plan PlannerOutput) float64 {
 		return 0.3
 	case len(plan.Ambiguities) > 0:
 		return 0.6
+	case len(plan.Domains) > 4:
+		return 0.7
 	default:
 		return 0.9
 	}
@@ -187,6 +189,12 @@ func inferDomainsFromPage(pageContext json.RawMessage) []string {
 	addIf(strings.Contains(path, "script"), "scripts")
 	addIf(strings.Contains(path, "run") || strings.Contains(path, "report"), "runs")
 	addIf(strings.Contains(path, "spec") || strings.Contains(path, "swagger") || strings.Contains(path, "openapi"), "spec")
+	addIf(asString(m["runId"]) != "", "runs")
+	addIf(asString(m["mockId"]) != "", "mock")
+	addIf(asString(m["dataSourceId"]) != "" || asString(m["paramSourceId"]) != "", "paramsource")
+	addIf(asString(m["specId"]) != "" || asString(m["apiSpecId"]) != "", "spec")
+	addIf(asString(m["scriptId"]) != "" || asString(m["templateId"]) != "", "scripts")
+	addIf(asString(m["mockSetId"]) != "", "mockset")
 	return sortedKeys(found)
 }
 
