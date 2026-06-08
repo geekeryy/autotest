@@ -22,7 +22,7 @@ import (
 // ReadOnly returns the read-only tools shared between smart analysis and
 // the conversational assistant.
 func ReadOnly(deps Deps) []aitools.Tool {
-	return []aitools.Tool{
+	tools := []aitools.Tool{
 		// meta / discovery
 		listServicesTool(deps).WithMeta("meta", "列出当前项目下的全部服务及其ID"),
 		listEndpointsTool(deps).WithMeta("meta", "列出某服务下所有接口的摘要"),
@@ -60,6 +60,18 @@ func ReadOnly(deps Deps) []aitools.Tool {
 		listRunsTool(deps).WithMeta("runs", "分页列出项目的场景运行记录"),
 		getRunResultTool(deps).WithMeta("runs", "查询单次运行详情与步骤结果"),
 	}
+	if deps.AI != nil && deps.Specs != nil {
+		nlDeps := NLToolDeps{AI: deps.AI, Specs: deps.Specs}
+		tools = append(tools,
+			planScenarioFromPromptTool(nlDeps).WithMeta("scenarios", "将自然语言描述解析为场景方案，返回步骤计划与待确认接口匹配项"),
+		)
+		if deps.Scenarios != nil {
+			tools = append(tools,
+				appendStepFromDescriptionTool(nlDeps, deps.Scenarios).WithMeta("scenarios", "向已有场景逐步追加一个自然语言描述的步骤，返回建议参数与待确认项"),
+			)
+		}
+	}
+	return tools
 }
 
 // Mutating returns write tools for the conversational assistant. Delete

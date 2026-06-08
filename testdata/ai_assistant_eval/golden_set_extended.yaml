@@ -1,0 +1,244 @@
+# AI 助理按需工具路由 Golden Set（扩展集）
+# 覆盖剩余 7 个域及边界/跨域场景
+
+cases:
+  # ─── spec 域：导入 OpenAPI 规范 ───────────────────────────────────────────
+  - name: spec-import-workflow
+    user: "帮我把这份 OpenAPI YAML 导入到当前服务，然后把新接口的基础用例都生成出来"
+    pageContext:
+      path: "/spec/import"
+      serviceId: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+    planner:
+      intent: "导入 OpenAPI 规范并批量生成用例"
+      domains: ["spec", "cases"]
+      workflow: ["导入 OpenAPI 文档", "枚举新增接口", "生成请求模板用例"]
+      needsWrite: true
+      ambiguities: []
+    expectToolsFirstHop:
+      - import_openapi
+      - list_specs
+      - list_cases
+      - create_case_from_endpoint
+      - find_tools
+      - describe_tools
+    forbidTools:
+      - create_mock_server
+      - create_test_data_table
+      - list_runs
+    expectDomains: ["spec", "cases"]
+    expectFinish: pending_confirm
+
+  # ─── mock 域：Mock Server 配置 ────────────────────────────────────────────
+  - name: mock-server-config
+    user: "给登录接口创建一个 Mock Server，设好返回 200 的路由"
+    pageContext:
+      path: "/mock/servers"
+      serviceId: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+    planner:
+      intent: "创建 Mock Server 并添加路由"
+      domains: ["mock"]
+      workflow: ["查看已有 Mock Server", "创建 Mock Server", "创建路由规则"]
+      needsWrite: true
+      ambiguities: []
+    expectToolsFirstHop:
+      - list_mock_servers
+      - create_mock_server
+      - create_mock_route
+      - find_tools
+      - describe_tools
+    forbidTools:
+      - list_mock_value_sets
+      - create_test_data_table
+      - import_openapi
+    expectDomains: ["mock"]
+    expectFinish: pending_confirm
+
+  # ─── mockset 域：Mock 值集管理 ────────────────────────────────────────────
+  - name: mockset-value-set-management
+    user: "帮我创建一个手机号码值集合，用于 Mock 返回随机手机号"
+    pageContext:
+      path: "/mock-set/value-sets"
+    planner:
+      intent: "创建 Mock 值集合"
+      domains: ["mockset"]
+      workflow: ["查看现有值集合", "创建命名值集合"]
+      needsWrite: true
+      ambiguities: []
+    expectToolsFirstHop:
+      - list_mock_value_sets
+      - create_mock_value_set
+      - find_tools
+      - describe_tools
+    forbidTools:
+      - create_mock_server
+      - create_mock_route
+      - list_runs
+    expectDomains: ["mockset"]
+    expectFinish: pending_confirm
+
+  # ─── testdata 域：测试数据管理 ────────────────────────────────────────────
+  - name: testdata-table-management
+    user: "帮我创建一张用户测试数据表，包含 username 和 password 两列，填几行示例数据"
+    pageContext:
+      path: "/test-data/tables"
+    planner:
+      intent: "创建测试数据表并填充行数据"
+      domains: ["testdata"]
+      workflow: ["查看现有数据表", "创建数据表", "写入示例行"]
+      needsWrite: true
+      ambiguities: []
+    expectToolsFirstHop:
+      - list_test_data_tables
+      - create_test_data_table
+      - replace_test_data_rows
+      - find_tools
+      - describe_tools
+    forbidTools:
+      - create_data_source
+      - list_mock_servers
+      - import_openapi
+    expectDomains: ["testdata"]
+    expectFinish: pending_confirm
+
+  # ─── paramsource 域：SQL 数据源配置 ──────────────────────────────────────
+  - name: paramsource-sql-datasource
+    user: "帮我配置一个 PostgreSQL 数据源，再给订单服务新建一个查询订单 ID 的 SQL 参数源"
+    pageContext:
+      path: "/data-source/sql"
+      serviceId: "cccccccc-cccc-cccc-cccc-cccccccccccc"
+    planner:
+      intent: "创建数据源并配置 SQL 参数源"
+      domains: ["paramsource"]
+      workflow: ["创建数据库数据源", "查看 SQL 参数源列表", "新建 SQL 参数源"]
+      needsWrite: true
+      ambiguities: []
+    expectToolsFirstHop:
+      - list_data_sources
+      - create_data_source
+      - list_sql_parameter_sources
+      - create_sql_parameter_source
+      - find_tools
+      - describe_tools
+    forbidTools:
+      - create_test_data_table
+      - list_mock_servers
+      - import_openapi
+    expectDomains: ["paramsource"]
+    expectFinish: pending_confirm
+
+  # ─── scripts 域：自定义脚本模板 ───────────────────────────────────────────
+  - name: scripts-custom-template
+    user: "帮我查看现有的脚本模板，然后写一个断言响应体包含 success 字段的脚本模板"
+    pageContext:
+      path: "/scripts/templates"
+    planner:
+      intent: "查看并创建自定义断言脚本模板"
+      domains: ["scripts"]
+      workflow: ["列出脚本模板", "创建新脚本模板"]
+      needsWrite: true
+      ambiguities: []
+    expectToolsFirstHop:
+      - list_script_templates
+      - create_script_template
+      - find_tools
+      - describe_tools
+    forbidTools:
+      - create_mock_server
+      - create_test_data_table
+      - import_openapi
+    expectDomains: ["scripts"]
+    expectFinish: pending_confirm
+
+  # ─── factory 域：测试数据生成 ─────────────────────────────────────────────
+  - name: factory-test-data-generation
+    user: "根据用户注册接口的 Schema 帮我生成 20 条边界值测试数据"
+    pageContext:
+      path: "/api-management/endpoint/dddddddd-dddd-dddd-dddd-dddddddddddd"
+      serviceId: "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"
+    planner:
+      intent: "基于接口 Schema 生成边界值测试数据"
+      domains: ["factory", "meta"]
+      workflow: ["查询接口 Schema", "生成测试数据"]
+      needsWrite: false
+      ambiguities: []
+    expectToolsFirstHop:
+      - generate_test_data
+      - get_endpoint
+      - find_tools
+      - describe_tools
+    forbidTools:
+      - create_mock_server
+      - import_openapi
+      - list_runs
+    expectDomains: ["factory", "meta"]
+    expectFinish: success
+
+  # ─── 歧义请求：低置信度兜底验证 ──────────────────────────────────────────
+  - name: ambiguous-request-fallback
+    user: "帮我搞一下测试"
+    pageContext: {}
+    planner:
+      intent: "用户意图不明确，可能涉及场景/用例/运行"
+      domains: ["scenarios", "cases"]
+      workflow: ["等待澄清"]
+      needsWrite: false
+      ambiguities: ["需要澄清：是生成场景、运行场景还是查看结果？", "不清楚是哪个服务"]
+    expectToolsFirstHop:
+      - list_services
+      - get_case
+      - get_scenario
+      - find_tools
+      - describe_tools
+    forbidTools: []
+    expectDomains: ["scenarios", "cases", "runs", "meta"]
+    expectFinish: pending_confirm
+
+  # ─── 宽域（>4 domains，无歧义）：测试宽域降分 ────────────────────────────
+  - name: wide-domains-no-ambiguity
+    user: "全面检查一下这个服务，Mock、数据源、脚本、测试数据都帮我看看"
+    pageContext:
+      path: "/service/ffffffff-ffff-ffff-ffff-ffffffffffff"
+      serviceId: "ffffffff-ffff-ffff-ffff-ffffffffffff"
+    planner:
+      intent: "综合检查服务的多个资源配置"
+      domains: ["mock", "paramsource", "scripts", "testdata", "runs"]
+      workflow: ["列出 Mock Server", "列出数据源", "列出脚本模板", "列出测试数据表", "列出运行记录"]
+      needsWrite: false
+      ambiguities: []
+    expectToolsFirstHop:
+      - list_mock_servers
+      - list_data_sources
+      - list_script_templates
+      - list_test_data_tables
+      - list_runs
+      - find_tools
+      - describe_tools
+    forbidTools: []
+    expectDomains: ["mock", "paramsource", "scripts", "testdata", "runs"]
+    expectFinish: success
+
+  # ─── 跨域：spec → cases → scenarios 完整工作流 ───────────────────────────
+  - name: cross-domain-spec-import-to-scenario
+    user: "导入 Swagger 文档，生成全量用例，最后帮我组成一个端到端测试场景"
+    pageContext:
+      path: "/spec/import"
+      serviceId: "11111111-2222-3333-4444-555555555555"
+    planner:
+      intent: "从 Swagger 文档出发，完成 spec→cases→scenario 完整流程"
+      domains: ["spec", "cases", "scenarios"]
+      workflow: ["导入 OpenAPI 文档", "批量生成覆盖用例", "生成端到端测试场景"]
+      needsWrite: true
+      ambiguities: []
+    expectToolsFirstHop:
+      - import_openapi
+      - list_specs
+      - generate_coverage_cases
+      - create_scenario_with_steps
+      - find_tools
+      - describe_tools
+    forbidTools:
+      - create_mock_server
+      - create_data_source
+      - list_runs
+    expectDomains: ["spec", "cases", "scenarios"]
+    expectFinish: pending_confirm
