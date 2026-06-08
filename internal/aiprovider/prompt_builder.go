@@ -246,7 +246,25 @@ const scenarioWorkflowPrompt = `【场景生成工作流（重要）】
 - ` + "`script`" + ` 步骤：config 形如 ` + "`{\"script\": \"pm.test(...)\", \"timeoutMillis\": 5000}`" + `；脚本是 Postman 风格 JS（goja 沙箱），可用 ` + "`pm.variables` / `pm.environment` / `pm.test` / `console`" + `。
 - ` + "`for`" + ` 控制流：config 形如 ` + "`{\"mode\": \"count\", \"count\": 3, \"itemVar\": \"item\", \"indexVar\": \"i\", \"bodyStepOrders\": [2,3]}`" + ` 或 ` + "`{\"mode\": \"items\", \"itemsExpression\": \"{{$steps[1].response.body.list}}\", ...}`" + `；子步骤通过 ` + "`bodyStepOrders`" + ` 引用同场景内其它步骤的 ` + "`stepOrder`" + `，平台会自动转换为内部 step_seq。
 - ` + "`condition`" + ` 控制流：config 形如 ` + "`{\"branches\": [{\"left\": \"{{$steps[1].status}}\", \"operator\": \"==\", \"right\": \"200\", \"stepOrders\": [2]}], \"elseStepOrders\": [3]}`" + `；同样用 ` + "`stepOrders`" + ` 引用子步骤。
-- 子步骤必须出现在同一次 ` + "`create_scenario_with_steps`" + ` 的 steps 数组里（或在调用细粒度工具前已存在于场景中），否则会报"引用了不存在的 stepOrder"。`
+- 子步骤必须出现在同一次 ` + "`create_scenario_with_steps`" + ` 的 steps 数组里（或在调用细粒度工具前已存在于场景中），否则会报"引用了不存在的 stepOrder"。
+
+【从自然语言描述构建定制场景（Prompt → 场景）】
+当用户用自然语言详细描述一个端到端测试步骤序列（如"先调登录接口获取 token，再创建商品，最后查询并断言 code=0"）：
+1. 调用 ` + "`plan_scenario_from_prompt`" + `（需 description + serviceId）获取结构化场景方案与 ` + "`missingFields`" + `
+2. 对每个 ` + "`missingFields`" + ` 项调用 ` + "`ask_question`" + ` 向用户收集缺失信息：
+   - ` + "`kind == \"endpoint_unmatched\"`" + ` → ` + "`text_input`" + `，提示用户输入正确的接口路径（METHOD /path）
+   - ` + "`kind == \"low_confidence\"`" + ` → ` + "`single_select`" + `，让用户确认建议匹配或重新指定
+3. 根据用户回答更新步骤参数后，调用 ` + "`create_scenario_with_steps`" + ` 创建场景
+- **禁止**用 ` + "`ask_question`" + ` 收集登录凭据、密码等敏感信息——这些仍通过场景生成确认卡片收集
+- ` + "`missingFields`" + ` 为空时跳过步骤 2，直接确认后调 ` + "`create_scenario_with_steps`" + `
+
+【逐步追加步骤（精细化构建）】
+当用户想在已有场景上逐步追加一个步骤时（如"在这个场景里加一步：用 token 查询刚创建的商品"）：
+1. 调用 ` + "`append_step_from_description`" + `（需 scenarioId + description + serviceId）
+   - 工具自动读取场景已有步骤中提取的变量（如 authToken），并将引用注入步骤建议的 requestOverride
+2. 若 ` + "`ready == false`" + `，检查 ` + "`pendingQuestions`" + ` 并逐项调用 ` + "`ask_question`" + ` 收集答案，再重新调用工具补全参数
+3. ` + "`ready == true`" + ` 后，用 ` + "`proposedStep`" + ` 中的参数调用 ` + "`add_scenario_step`" + ` 写入场景
+- ` + "`contextSummary`" + ` 字段概括了已有步骤数量与可引用变量，可在回复中展示给用户参考`
 
 const pageContextInstructions = `【页面上下文】
 - 每轮对话开始时，系统可能注入一个额外的"用户当前页面上下文" system 消息，里面是 JSON 形式的页面状态（路由 path、当前查看的 scenarioId / caseId / serviceId 等）。
