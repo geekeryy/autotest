@@ -174,6 +174,13 @@ func main() {
 		Specs:     specRepo,
 		Generator: generator.NewDefault(),
 	})
+	// Assertion inference engine — constructed here so genAgent's Repairer
+	// can use it; also registered as an HTTP handler inside the auth group below.
+	aiAssertEngine := aiassert.NewInferEngine(
+		&aiAssertEndpointGetter{repo: specRepo},
+		&aiAssertCaseGetter{repo: caseRepo},
+		&aiAssertHistoryCollector{repo: reportRepo},
+	)
 	genAgentRepo := genagent.NewPGRepository(repo)
 	genAgent := &genagent.Agent{
 		Jobs:      genAgentRepo,
@@ -185,8 +192,9 @@ func main() {
 		Scenarios:    scenarioSvc,
 		ScenarioRepo: scenarioRepo,
 		Repairer: &genagent.Repairer{
-			Scenarios: scenarioSvc,
-			AI:        genagent.NewAIClassifier(aiProviderSvc),
+			Scenarios:      scenarioSvc,
+			AI:             genagent.NewAIClassifier(aiProviderSvc),
+			AssertInferrer: &assertionInferrerAdapter{engine: aiAssertEngine},
 		},
 	}
 	if aiconfig.ScenarioAutorunEnabled() {
@@ -250,12 +258,7 @@ func main() {
 		specHandler.Register(r)
 		scenario.NewHandler(scenarioSvc).Register(r)
 
-		// 智能断言推断引擎：从 OpenAPI schema 和历史响应自动生成断言
-		aiAssertEngine := aiassert.NewInferEngine(
-			&aiAssertEndpointGetter{repo: specRepo},
-			&aiAssertCaseGetter{repo: caseRepo},
-			&aiAssertHistoryCollector{repo: reportRepo},
-		)
+		// 智能断言推断引擎 HTTP 处理器（engine 已在外层初始化，与 genAgent 共享）
 		aiassert.NewHandler(aiassert.NewInferService(aiAssertEngine, &aiAssertCasePatcher{svc: caseSvc})).Register(r)
 		paramsource.NewHandler(paramSourceSvc, authSvc).Register(r)
 		scriptlibrary.NewHandler(scriptLibrarySvc).Register(r)
@@ -549,6 +552,35 @@ type aiAssertCasePatcher struct {
 func (a *aiAssertCasePatcher) PatchAssertions(ctx context.Context, caseID uuid.UUID, assertions json.RawMessage) error {
 	_, err := a.svc.Patch(ctx, caseID, testcase.PatchInput{Assertions: assertions})
 	return err
+}
+
+// assertionInferrerAdapter bridges aiassert.InferEngine to the
+// genagent.AssertionInferrer interface. It runs schema + history inference
+// (no LLM) and filters to assertions with confidence ≥ 0.7.
+type assertionInferrerAdapter struct {
+	engine *aiassert.InferEngine
+}
+
+const assertionInferMinConfidence = 0.7
+
+func (a *assertionInferrerAdapter) InferForCase(ctx context.Context, caseID uuid.UUID) (json.RawMessage, error) {
+	out, err := a.engine.InferAssertions(ctx, aiassert.InferInput{
+		CaseID:  caseID,
+		Sources: []string{"schema", "history"},
+	})
+	if err != nil || out == nil || len(out.Assertions) == 0 {
+		return nil, err
+	}
+	var keep []aiassert.InferredAssertion
+	for _, a := range out.Assertions {
+		if a.Confidence >= assertionInferMinConfidence {
+			keep = append(keep, a)
+		}
+	}
+	if len(keep) == 0 {
+		return nil, nil
+	}
+	return aiassert.ToAssertionJSON(keep)
 }
 
 type recordProxyAdapter struct {

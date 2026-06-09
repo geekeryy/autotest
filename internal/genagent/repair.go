@@ -173,9 +173,21 @@ func (c *aiproviderClassifier) ClassifyFailure(ctx context.Context, projectID uu
 
 // Repairer applies automatic fixes for test_data and generation_bug failures.
 type Repairer struct {
-	Scenarios ScenarioRepairService
-	AI        AIClassifier
-	Fixer     FixGenerator // optional; when nil, LLM-assisted fixes are skipped
+	Scenarios      ScenarioRepairService
+	AI             AIClassifier
+	Fixer          FixGenerator    // optional; when nil, LLM-assisted fixes are skipped
+	AssertInferrer AssertionInferrer // optional; when nil, falls back to status-code stamping
+}
+
+// AssertionInferrer derives assertion rules from a test case's endpoint schema
+// and historical run results without making LLM calls. It is called by
+// repairGeneration when a step has no assertions so the repair produces a
+// richer assertion set than just a single observed status code.
+type AssertionInferrer interface {
+	// InferForCase returns a JSON assertion array (compatible with the assertion
+	// engine) for the given test case. Returns nil, nil when nothing can be
+	// inferred — the caller falls back to the legacy status-code stub.
+	InferForCase(ctx context.Context, caseID uuid.UUID) (json.RawMessage, error)
 }
 
 type ScenarioRepairService interface {
@@ -429,9 +441,22 @@ func repairGeneration(ctx context.Context, r *Repairer, projectID uuid.UUID, scI
 	}
 	assertions, _ := cfgMap["assertions"].([]any)
 	if len(assertions) == 0 {
-		actual := extractActualStatus(stepResult)
-		if actual > 0 && actual != 200 {
-			cfgMap["assertions"] = []map[string]any{{"type": "status_code", "expected": actual}}
+		filled := false
+		if r.AssertInferrer != nil && step.TestCaseID != uuid.Nil {
+			if inferred, err := r.AssertInferrer.InferForCase(ctx, step.TestCaseID); err == nil && len(inferred) > 0 {
+				var arr []any
+				if json.Unmarshal(inferred, &arr) == nil && len(arr) > 0 {
+					cfgMap["assertions"] = arr
+					filled = true
+				}
+			}
+		}
+		if !filled {
+			// Fallback: stamp the observed status code when no inference is available.
+			actual := extractActualStatus(stepResult)
+			if actual > 0 && actual != 200 {
+				cfgMap["assertions"] = []map[string]any{{"type": "status_code", "expected": actual}}
+			}
 		}
 	} else if r.Fixer != nil && class.SuggestedFix != "" {
 		// Existing assertions but still failing — try LLM-assisted fix.
