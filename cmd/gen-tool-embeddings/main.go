@@ -46,7 +46,7 @@ func main() {
 		}
 	}
 
-	tools := builtin.All(builtin.Deps{})
+	tools := builtin.CatalogTools()
 	ec := &client.OpenAICompatibleClient{BaseURL: strings.TrimSpace(*baseURL), APIKey: strings.TrimSpace(*apiKey)}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
