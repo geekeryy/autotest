@@ -40,6 +40,11 @@ func (h *Handler) RegisterImport(r chi.Router) {
 	r.Post("/projects/{projectID}/services/{serviceID}/specs/import", h.importSpec)
 }
 
+// RegisterAPIKeyRead 挂载 API Key 可读路由（spec 列表与端点列表），需 cases:read 或 specs:import 作用域组守卫。
+func (h *Handler) RegisterAPIKeyRead(r chi.Router) {
+	h.Register(r)
+}
+
 func (h *Handler) listSpecs(w http.ResponseWriter, r *http.Request) {
 	projectID, err := uuid.Parse(chi.URLParam(r, "projectID"))
 	if err != nil {

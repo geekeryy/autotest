@@ -152,7 +152,13 @@ func newScenarioExecution(s *Service, runID uuid.UUID, env project.Environment, 
 func (e *scenarioExecution) run(ctx context.Context) report.RunStatus {
 	overall := report.RunPassed
 	for _, step := range e.steps {
-		if !step.Enabled || e.controlledSeq[step.StepSeq] {
+		if e.controlledSeq[step.StepSeq] {
+			continue
+		}
+		if !step.Enabled {
+			if isControlStepType(step.StepType) {
+				e.appendSkippedControlSubtree(step, "control step disabled")
+			}
 			continue
 		}
 		if e.executeStep(ctx, step, 0, map[int]bool{}) != report.RunPassed {
@@ -238,8 +244,6 @@ func (e *scenarioExecution) executeForStep(ctx context.Context, step scenario.St
 		"bodyStepSeqs":  cfg.BodyStepSeqs,
 		"maxIterations": loopLimit(cfg.MaxIterations),
 	}
-	e.appendControlResult(ctx, step, report.ResultPassed, output, "")
-	e.stepOutputs[step.StepSeq] = output
 
 	overall := report.RunPassed
 	for idx, item := range items {
@@ -250,6 +254,13 @@ func (e *scenarioExecution) executeForStep(ctx context.Context, step scenario.St
 			overall = report.RunFailed
 		}
 	}
+
+	status := report.ResultPassed
+	if overall != report.RunPassed {
+		status = report.ResultFailed
+	}
+	e.appendControlResult(ctx, step, status, output, "")
+	e.stepOutputs[step.StepSeq] = output
 	return overall
 }
 
@@ -318,10 +329,15 @@ func (e *scenarioExecution) executeConditionStep(ctx context.Context, step scena
 		"elseStepSeqs":           elseSeqs,
 		"resolvedBranchesConfig": branches,
 	}
-	e.appendControlResult(ctx, step, report.ResultPassed, output, "")
-	e.stepOutputs[step.StepSeq] = output
 
-	return e.executeChildSteps(ctx, selected, depth+1, stack)
+	childStatus := e.executeChildSteps(ctx, selected, depth+1, stack)
+	status := report.ResultPassed
+	if childStatus != report.RunPassed {
+		status = report.ResultFailed
+	}
+	e.appendControlResult(ctx, step, status, output, "")
+	e.stepOutputs[step.StepSeq] = output
+	return childStatus
 }
 
 func (e *scenarioExecution) executeChildSteps(ctx context.Context, seqs []int, depth int, stack map[int]bool) report.RunStatus {
@@ -400,6 +416,49 @@ func (e *scenarioExecution) appendSkippedSteps(seqs []int, reason string) {
 			},
 		})
 	}
+}
+
+func isControlStepType(stepType scenario.StepType) bool {
+	return stepType == scenario.StepTypeFor || stepType == scenario.StepTypeCondition
+}
+
+func controlChildSeqs(step scenario.Step) []int {
+	switch step.StepType {
+	case scenario.StepTypeFor:
+		var cfg forStepConfig
+		if decodeStepConfig(step.Config, &cfg) == nil {
+			return uniquePositiveSeqs(cfg.BodyStepSeqs)
+		}
+	case scenario.StepTypeCondition:
+		var cfg conditionStepConfig
+		if decodeStepConfig(step.Config, &cfg) == nil {
+			return allConditionChildSeqs(cfg)
+		}
+	}
+	return nil
+}
+
+func (e *scenarioExecution) appendSkippedControlSubtree(root scenario.Step, reason string) {
+	visited := map[int]bool{}
+	seqs := e.collectReachableControlSeqs(root, visited)
+	e.appendSkippedSteps(seqs, reason)
+}
+
+func (e *scenarioExecution) collectReachableControlSeqs(step scenario.Step, visited map[int]bool) []int {
+	var out []int
+	for _, seq := range controlChildSeqs(step) {
+		if visited[seq] {
+			continue
+		}
+		visited[seq] = true
+		out = append(out, seq)
+		child, ok := e.stepsBySeq[seq]
+		if !ok || !isControlStepType(child.StepType) {
+			continue
+		}
+		out = append(out, e.collectReachableControlSeqs(child, visited)...)
+	}
+	return out
 }
 
 func (e *scenarioExecution) applyLoopVariables(cfg forStepConfig, idx int, item any) func() {

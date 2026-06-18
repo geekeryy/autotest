@@ -102,6 +102,22 @@ func (s *Service) Create(ctx context.Context, createdBy uuid.UUID, input CreateI
 	return &CreateResult{APIKey: saved.toAPI(), Token: token}, nil
 }
 
+// Get 返回指定 API Key；仅创建者可见，否则 ErrNotFound。
+func (s *Service) Get(ctx context.Context, owner, id uuid.UUID) (*APIKey, error) {
+	if id == uuid.Nil {
+		return nil, ErrNotFound
+	}
+	rec, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if rec.CreatedBy != owner {
+		return nil, ErrNotFound
+	}
+	api := rec.toAPI()
+	return &api, nil
+}
+
 // List 返回当前用户创建的、未软删的 API Key（不含明文，仅含 mask 视图）。
 func (s *Service) List(ctx context.Context, owner uuid.UUID) ([]APIKey, error) {
 	rows, err := s.repo.List(ctx, owner)

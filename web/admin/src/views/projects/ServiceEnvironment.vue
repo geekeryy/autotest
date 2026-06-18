@@ -47,6 +47,7 @@
           <div class="tree-node-row">
             <div class="tree-node-main">
               <span class="tree-node-title">{{ data.name }}</span>
+              <el-tag v-if="data.kind === 'service' && data.mcpEnabled" size="small" type="success" class="tree-mcp-tag">MCP</el-tag>
               <span v-if="data.kind === 'environment'" class="tree-node-meta" :title="data.baseUrl">{{ data.baseUrl }}</span>
             </div>
             <div class="tree-node-actions" @click.stop>
@@ -65,11 +66,93 @@
       </el-tree>
     </div>
 
-    <el-dialog v-model="serviceDialog" :title="editingService ? '编辑服务' : '新增服务'" width="420px">
-      <el-form :model="serviceForm" label-width="90px">
+    <el-dialog
+      v-model="serviceDialog"
+      :title="editingService ? '编辑服务' : '新增服务'"
+      :width="serviceForm.mcpEnabled ? '720px' : '420px'"
+      class="service-dialog"
+    >
+      <el-form :model="serviceForm" label-width="100px">
         <el-form-item label="名称"><el-input v-model="serviceForm.name" /></el-form-item>
         <el-form-item label="描述"><el-input v-model="serviceForm.description" type="textarea" /></el-form-item>
+        <el-form-item label="MCP 自动化">
+          <div class="mcp-switch-row">
+            <el-switch v-model="serviceForm.mcpEnabled" />
+            <span class="mcp-switch-hint">开启后展示 Cursor 等客户端的接入配置</span>
+          </div>
+        </el-form-item>
       </el-form>
+
+      <div v-if="serviceForm.mcpEnabled" v-loading="mcpGuideLoading" class="mcp-guide-panel">
+        <template v-if="mcpGuide">
+          <el-alert
+            :type="mcpGuide.serverMcpHttpEnabled ? 'success' : 'warning'"
+            show-icon
+            :closable="false"
+            :title="mcpGuide.serverEnvHint"
+            class="mcp-guide-alert"
+          />
+          <p v-if="mcpGuide.apiKeyMask && !mcpGuide.apiKeyToken" class="mcp-guide-lead">
+            已绑定 API Key <code>{{ mcpGuide.apiKeyMask }}</code>。明文仅创建/轮换时展示一次；需要新密钥请点击「重新生成 API Key」。
+          </p>
+          <p class="mcp-guide-scopes">
+            <span class="mcp-guide-label">建议 scope：</span>
+            <el-tag v-for="s in mcpGuide.requiredScopes" :key="s" size="small" class="mcp-scope-tag">{{ s }}</el-tag>
+          </p>
+          <el-form-item v-if="mcpGuide.environments.length" label="默认环境" label-width="100px" class="mcp-env-picker">
+            <el-select
+              v-model="mcpDefaultEnvId"
+              placeholder="选择 run_case / run_scenario 的默认环境"
+              style="width: 100%"
+              @change="onMcpDefaultEnvChange"
+            >
+              <el-option v-for="e in mcpGuide.environments" :key="e.id" :label="e.name" :value="e.id" />
+            </el-select>
+          </el-form-item>
+          <div class="mcp-install-section">
+            <div class="mcp-install-title">一键安装到 Cursor</div>
+            <div class="mcp-install-actions">
+              <el-button
+                type="primary"
+                :disabled="!effectiveCursorHttpInstallLink"
+                @click="installCursorMcp('http')"
+              >
+                安装 HTTP MCP
+              </el-button>
+              <el-button :disabled="!effectiveCursorStdioInstallLink" @click="installCursorMcp('stdio')">
+                安装 stdio MCP
+              </el-button>
+              <el-button :loading="mcpGuideLoading" @click="regenerateMcpApiKey">
+                重新生成 API Key
+              </el-button>
+            </div>
+            <p class="mcp-install-hint">
+              打开本页时会自动创建 MCP 专用 API Key 并写入安装配置（服务器名：<code>{{ mcpGuide.cursorServerName || 'autotest' }}</code>）。
+              若浏览器未唤起 Cursor，请复制下方 JSON。stdio 需先 <code>make build-mcp</code>。
+            </p>
+          </div>
+          <div class="mcp-snippet-block">
+            <div class="mcp-snippet-head">
+              <span>Cursor — HTTP（与 API 同进程，需 MCP_HTTP_ENABLED）</span>
+              <el-button size="small" @click="copyMcpSnippet('http')">复制</el-button>
+            </div>
+            <pre class="mcp-snippet-code">{{ mcpCursorHttpText }}</pre>
+          </div>
+          <div class="mcp-snippet-block">
+            <div class="mcp-snippet-head">
+              <span>Cursor — stdio（独立 autotest-mcp 进程）</span>
+              <el-button size="small" @click="copyMcpSnippet('stdio')">复制</el-button>
+            </div>
+            <pre class="mcp-snippet-code">{{ mcpCursorStdioText }}</pre>
+          </div>
+          <p class="mcp-guide-meta">
+            MCP 端点：<code>{{ mcpGuide.mcpHttpURL }}</code> · REST：<code>{{ mcpGuide.apiBaseUrl }}</code>
+          </p>
+        </template>
+        <el-empty v-else-if="!mcpGuideLoading && editingService" description="加载接入说明失败，请保存后重试" />
+        <p v-else-if="!editingService" class="mcp-guide-hint">保存服务后可查看完整接入配置（含环境列表）。</p>
+      </div>
+
       <template #footer>
         <el-button @click="serviceDialog = false">取消</el-button>
         <el-button type="primary" @click="submitService">保存</el-button>
@@ -177,12 +260,14 @@ import {
   createServiceEnvironment,
   deleteService,
   deleteServiceEnvironment,
+  fetchServiceMcpIntegration,
   listServiceEnvironments,
   listServices,
   updateService,
   updateServiceEnvironment
 } from '../../api'
 import { loadGlobalProjects, projectState } from '../../utils/currentProject'
+import { applyApiKeyToCursorInstallLink, openCursorInstallLink } from '../../utils/cursorMcpInstall'
 import { persistServiceId, readStoredServiceId } from '../../utils/serviceSelection'
 
 export default {
@@ -206,7 +291,11 @@ export default {
       deletingServiceId: '',
       deletingEnvironmentId: '',
       serviceForm: this.emptyServiceForm(),
-      envForm: this.emptyEnvironmentForm()
+      envForm: this.emptyEnvironmentForm(),
+      mcpGuide: null,
+      mcpGuideLoading: false,
+      mcpDefaultEnvId: '',
+      mcpApiKeyDraft: ''
     }
   },
   async created() {
@@ -219,19 +308,50 @@ export default {
     },
     emptyServiceDescription() {
       return this.projectId ? '暂无服务，请先新增服务' : '请先在顶部选择项目后再新增服务'
+    },
+    mcpCursorHttpText() {
+      return this.formatMcpSnippet(this.mcpGuide?.cursorHttp)
+    },
+    mcpCursorStdioText() {
+      return this.formatMcpSnippet(this.mcpGuide?.cursorStdio)
+    },
+    effectiveCursorHttpInstallLink() {
+      return applyApiKeyToCursorInstallLink(this.mcpGuide?.cursorInstallHttpLink || '', this.mcpApiKeyDraft)
+    },
+    effectiveCursorStdioInstallLink() {
+      return applyApiKeyToCursorInstallLink(this.mcpGuide?.cursorInstallStdioLink || '', this.mcpApiKeyDraft)
     }
   },
   watch: {
     projectId() {
       this.loadServices()
+    },
+    'serviceForm.mcpEnabled'(enabled) {
+      if (enabled && this.editingService?.id) {
+        this.loadMcpGuide(this.editingService.id)
+      } else if (!enabled) {
+        this.mcpGuide = null
+        this.mcpDefaultEnvId = ''
+      }
     }
   },
   methods: {
     emptyServiceForm() {
-      return { name: '', description: '' }
+      return { name: '', description: '', mcpEnabled: false }
     },
     emptyEnvironmentForm() {
       return { name: '', baseUrl: '', variables: '{}', auth: '{}' }
+    },
+    formatMcpSnippet(value) {
+      if (!value) return ''
+      if (typeof value === 'object') {
+        return JSON.stringify(value, null, 2)
+      }
+      try {
+        return JSON.stringify(JSON.parse(value), null, 2)
+      } catch {
+        return String(value)
+      }
     },
     formatJSON(value) {
       if (!value) return '{}'
@@ -308,7 +428,12 @@ export default {
     },
     applySelectedService(row) {
       if (!row) return
-      this.selectedService = { id: row.id, name: row.name, description: row.description || '' }
+      this.selectedService = {
+        id: row.id,
+        name: row.name,
+        description: row.description || '',
+        mcpEnabled: !!row.mcpEnabled
+      }
       persistServiceId(this.projectId, row.id)
     },
     async loadServices() {
@@ -326,7 +451,12 @@ export default {
         this.services[0] ||
         null
       if (preferred) {
-        this.selectedService = { id: preferred.id, name: preferred.name, description: preferred.description || '' }
+        this.selectedService = {
+          id: preferred.id,
+          name: preferred.name,
+          description: preferred.description || '',
+          mcpEnabled: !!preferred.mcpEnabled
+        }
         persistServiceId(this.projectId, preferred.id)
       } else {
         this.selectedService = null
@@ -343,15 +473,76 @@ export default {
       }
       this.editingService = null
       this.serviceForm = this.emptyServiceForm()
+      this.mcpGuide = null
+      this.mcpDefaultEnvId = ''
+      this.mcpApiKeyDraft = ''
       this.serviceDialog = true
     },
     openEditService(row) {
       this.editingService = { id: row.id, name: row.name, description: row.description || '' }
       this.serviceForm = {
         name: row.name,
-        description: row.description || ''
+        description: row.description || '',
+        mcpEnabled: !!row.mcpEnabled
       }
+      this.mcpGuide = null
+      this.mcpDefaultEnvId = ''
+      this.mcpApiKeyDraft = ''
       this.serviceDialog = true
+      if (row.mcpEnabled) {
+        this.loadMcpGuide(row.id)
+      }
+    },
+    installCursorMcp(kind) {
+      const link = kind === 'http' ? this.effectiveCursorHttpInstallLink : this.effectiveCursorStdioInstallLink
+      if (!link) {
+        if (kind === 'http') {
+          this.$message.warning('HTTP 安装不可用：请确认 API 已设置 MCP_HTTP_ENABLED=true')
+        }
+        return
+      }
+      openCursorInstallLink(link)
+    },
+    async loadMcpGuide(serviceId, options = {}) {
+      if (!this.projectId || !serviceId) return
+      this.mcpGuideLoading = true
+      try {
+        const guide = await fetchServiceMcpIntegration(this.projectId, serviceId, {
+          environmentId: options.environmentId,
+          ensureApiKey: options.ensureApiKey !== false,
+          regenerate: !!options.regenerate
+        })
+        this.mcpGuide = guide
+        this.mcpDefaultEnvId = guide.defaultEnvironmentId || guide.environments?.[0]?.id || ''
+        this.mcpApiKeyDraft = guide.apiKeyToken || ''
+        if (guide.apiKeyToken) {
+          this.$message.success('已生成 MCP 专用 API Key 并填入安装配置')
+        }
+      } catch {
+        this.mcpGuide = null
+        this.mcpApiKeyDraft = ''
+      } finally {
+        this.mcpGuideLoading = false
+      }
+    },
+    onMcpDefaultEnvChange(envId) {
+      if (!this.editingService?.id || !envId) return
+      this.loadMcpGuide(this.editingService.id, { environmentId: envId, ensureApiKey: false })
+    },
+    async regenerateMcpApiKey() {
+      if (!this.editingService?.id) return
+      await this.$confirm('重新生成将使旧 API Key 立即失效，是否继续？', '提示', { type: 'warning' })
+      await this.loadMcpGuide(this.editingService.id, { regenerate: true })
+    },
+    async copyMcpSnippet(kind) {
+      const text = kind === 'http' ? this.mcpCursorHttpText : this.mcpCursorStdioText
+      if (!text) return
+      try {
+        await navigator.clipboard.writeText(text)
+        this.$message.success('已复制到剪贴板')
+      } catch {
+        this.$message.error('复制失败，请手动选择文本复制')
+      }
     },
     async submitService() {
       if (this.editingService) {
@@ -360,10 +551,16 @@ export default {
         await createService(this.projectId, this.serviceForm)
       }
       this.$message.success('服务已保存')
+      const keepMcp = this.serviceForm.mcpEnabled
+      const savedId = this.editingService?.id
       this.serviceDialog = false
       this.editingService = null
       this.serviceForm = this.emptyServiceForm()
+      this.mcpGuide = null
       await this.loadServices()
+      if (keepMcp && savedId) {
+        this.$message.info('MCP 已启用：再次编辑该服务可查看接入配置')
+      }
     },
     async removeService(row) {
       await this.$confirm(`确认删除服务 ${row.name}？服务关联的环境、接口库、场景编排和运行记录将被软删除。`, '提示')
@@ -698,5 +895,126 @@ export default {
 :global(.json-help-code--scroll) {
   max-height: 220px;
   overflow-y: auto;
+}
+
+.mcp-switch-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.mcp-switch-hint {
+  font-size: var(--app-font-size-small);
+  color: var(--el-text-color-secondary);
+}
+
+.mcp-guide-panel {
+  margin-top: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--el-border-color-lighter);
+}
+
+.mcp-guide-alert {
+  margin-bottom: 12px;
+}
+
+.mcp-guide-lead {
+  margin: 0 0 10px;
+  font-size: var(--app-font-size-small);
+  line-height: 1.5;
+  color: var(--el-text-color-regular);
+}
+
+.mcp-guide-scopes {
+  margin: 0 0 12px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.mcp-guide-label {
+  font-size: var(--app-font-size-small);
+  color: var(--el-text-color-secondary);
+}
+
+.mcp-scope-tag {
+  margin: 0;
+}
+
+.mcp-env-picker {
+  margin-bottom: 12px;
+}
+
+.mcp-install-section {
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: var(--el-color-primary-light-9);
+  border: 1px solid var(--el-color-primary-light-7);
+}
+
+.mcp-install-title {
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+
+.mcp-api-key-row {
+  margin-bottom: 8px;
+}
+
+.mcp-install-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.mcp-install-hint {
+  margin: 0;
+  font-size: var(--app-font-size-small);
+  color: var(--el-text-color-secondary);
+  line-height: 1.5;
+}
+
+.mcp-snippet-block {
+  margin-bottom: 14px;
+}
+
+.mcp-snippet-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: var(--app-font-size-small);
+  font-weight: 600;
+}
+
+.mcp-snippet-code {
+  margin: 0;
+  padding: 10px 12px;
+  background: var(--el-fill-color-light);
+  border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.mcp-guide-meta,
+.mcp-guide-hint {
+  margin: 0;
+  font-size: var(--app-font-size-small);
+  color: var(--el-text-color-secondary);
+}
+
+.tree-mcp-tag {
+  margin-left: 6px;
+  vertical-align: middle;
 }
 </style>

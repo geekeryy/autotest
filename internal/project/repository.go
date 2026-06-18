@@ -26,6 +26,22 @@ func NewRepository(repo store.Repository) *Repository {
 	return &Repository{Repository: repo}
 }
 
+func scanService(scanner interface {
+	Scan(dest ...any) error
+}) (Service, error) {
+	var svc Service
+	var mcpKeyID *uuid.UUID
+	err := scanner.Scan(
+		&svc.ID, &svc.ProjectID, &svc.Name, &svc.Description,
+		&svc.McpEnabled, &mcpKeyID, &svc.CreatedAt, &svc.UpdatedAt,
+	)
+	if err != nil {
+		return Service{}, err
+	}
+	svc.McpAPIKeyID = mcpKeyID
+	return svc, nil
+}
+
 func (r *Repository) CreateProject(ctx context.Context, input CreateProjectInput, createdBy uuid.UUID) (*Project, error) {
 	if r.DB == nil {
 		return nil, ErrDatabaseUnavailable
@@ -306,15 +322,15 @@ func (r *Repository) CreateService(ctx context.Context, projectID uuid.UUID, inp
 	}
 
 	row := r.DB.QueryRow(ctx, `
-		insert into services (project_id, name, description)
-		select id, $2, $3
+		insert into services (project_id, name, description, mcp_enabled)
+		select id, $2, $3, $4
 		from projects
 		where id = $1 and deleted_at is null
-		returning id, project_id, name, description, created_at, updated_at
-	`, projectID, input.Name, input.Description)
+		returning id, project_id, name, description, mcp_enabled, mcp_api_key_id, created_at, updated_at
+	`, projectID, input.Name, input.Description, input.McpEnabled)
 
-	var svc Service
-	if err := row.Scan(&svc.ID, &svc.ProjectID, &svc.Name, &svc.Description, &svc.CreatedAt, &svc.UpdatedAt); err != nil {
+	svc, err := scanService(row)
+	if err != nil {
 		return nil, fmt.Errorf("create service: %w", err)
 	}
 	return &svc, nil
@@ -327,22 +343,44 @@ func (r *Repository) UpdateService(ctx context.Context, projectID, serviceID uui
 
 	row := r.DB.QueryRow(ctx, `
 		update services s
-		set name = $3, description = $4, updated_at = now()
+		set name = $3, description = $4, mcp_enabled = $5, updated_at = now()
 		from projects p
 		where s.project_id = $1
 		  and s.id = $2
 		  and p.id = s.project_id
 		  and p.deleted_at is null
 		  and s.deleted_at is null
-		returning s.id, s.project_id, s.name, s.description, s.created_at, s.updated_at
-	`, projectID, serviceID, input.Name, input.Description)
+		returning s.id, s.project_id, s.name, s.description, s.mcp_enabled, s.mcp_api_key_id, s.created_at, s.updated_at
+	`, projectID, serviceID, input.Name, input.Description, input.McpEnabled)
 
-	var svc Service
-	if err := row.Scan(&svc.ID, &svc.ProjectID, &svc.Name, &svc.Description, &svc.CreatedAt, &svc.UpdatedAt); err != nil {
+	svc, err := scanService(row)
+	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrServiceNotFound
 		}
 		return nil, fmt.Errorf("update service: %w", err)
+	}
+	return &svc, nil
+}
+
+func (r *Repository) SetServiceMcpAPIKeyID(ctx context.Context, projectID, serviceID, keyID uuid.UUID) (*Service, error) {
+	if r.DB == nil {
+		return nil, ErrDatabaseUnavailable
+	}
+	row := r.DB.QueryRow(ctx, `
+		update services s
+		set mcp_api_key_id = $3, updated_at = now()
+		from projects p
+		where s.project_id = $1 and s.id = $2
+		  and p.id = s.project_id and p.deleted_at is null and s.deleted_at is null
+		returning s.id, s.project_id, s.name, s.description, s.mcp_enabled, s.mcp_api_key_id, s.created_at, s.updated_at
+	`, projectID, serviceID, keyID)
+	svc, err := scanService(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrServiceNotFound
+		}
+		return nil, fmt.Errorf("set service mcp api key: %w", err)
 	}
 	return &svc, nil
 }
@@ -429,7 +467,7 @@ func (r *Repository) ListServices(ctx context.Context, projectID uuid.UUID) ([]S
 	}
 
 	rows, err := r.DB.Query(ctx, `
-		select s.id, s.project_id, s.name, s.description, s.created_at, s.updated_at
+		select s.id, s.project_id, s.name, s.description, s.mcp_enabled, s.mcp_api_key_id, s.created_at, s.updated_at
 		from services s
 		join projects p on p.id = s.project_id and p.deleted_at is null
 		where s.project_id = $1 and s.deleted_at is null
@@ -442,13 +480,35 @@ func (r *Repository) ListServices(ctx context.Context, projectID uuid.UUID) ([]S
 
 	var services []Service
 	for rows.Next() {
-		var svc Service
-		if err := rows.Scan(&svc.ID, &svc.ProjectID, &svc.Name, &svc.Description, &svc.CreatedAt, &svc.UpdatedAt); err != nil {
+		svc, err := scanService(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scan service: %w", err)
 		}
 		services = append(services, svc)
 	}
 	return services, rows.Err()
+}
+
+func (r *Repository) GetService(ctx context.Context, projectID, serviceID uuid.UUID) (*Service, error) {
+	if r.DB == nil {
+		return nil, ErrDatabaseUnavailable
+	}
+
+	row := r.DB.QueryRow(ctx, `
+		select s.id, s.project_id, s.name, s.description, s.mcp_enabled, s.mcp_api_key_id, s.created_at, s.updated_at
+		from services s
+		join projects p on p.id = s.project_id and p.deleted_at is null
+		where s.project_id = $1 and s.id = $2 and s.deleted_at is null
+	`, projectID, serviceID)
+
+	svc, err := scanService(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrServiceNotFound
+		}
+		return nil, fmt.Errorf("get service: %w", err)
+	}
+	return &svc, nil
 }
 
 func (r *Repository) CreateEnvironment(ctx context.Context, projectID uuid.UUID, input CreateEnvironmentInput) (*Environment, error) {

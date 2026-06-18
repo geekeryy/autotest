@@ -101,6 +101,75 @@ func TestAllowAPIKeyScope(t *testing.T) {
 	}
 }
 
+func TestAllowAPIKeyAnyScope(t *testing.T) {
+	t.Parallel()
+
+	svc := &Service{}
+	mw := svc.AllowAPIKeyAnyScope("cases:read", "scenarios:read")
+
+	cases := []struct {
+		name       string
+		principal  *Principal
+		wantStatus int
+		wantNext   bool
+	}{
+		{
+			name:       "missing principal returns 401",
+			principal:  nil,
+			wantStatus: http.StatusUnauthorized,
+			wantNext:   false,
+		},
+		{
+			name:       "jwt principal always allowed",
+			principal:  &Principal{UserID: uuid.New(), Source: SourceJWT},
+			wantStatus: http.StatusOK,
+			wantNext:   true,
+		},
+		{
+			name: "apikey with first matching scope allowed",
+			principal: &Principal{
+				UserID: uuid.New(),
+				Source: SourceAPIKey,
+				Scopes: scopeSet("cases:read"),
+			},
+			wantStatus: http.StatusOK,
+			wantNext:   true,
+		},
+		{
+			name: "apikey with second matching scope allowed",
+			principal: &Principal{
+				UserID: uuid.New(),
+				Source: SourceAPIKey,
+				Scopes: scopeSet("scenarios:read"),
+			},
+			wantStatus: http.StatusOK,
+			wantNext:   true,
+		},
+		{
+			name: "apikey without any required scope rejected",
+			principal: &Principal{
+				UserID: uuid.New(),
+				Source: SourceAPIKey,
+				Scopes: scopeSet("runs:execute"),
+			},
+			wantStatus: http.StatusForbidden,
+			wantNext:   false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			status, called := runWithPrincipal(t, mw, tc.principal)
+			if status != tc.wantStatus {
+				t.Fatalf("status=%d want %d", status, tc.wantStatus)
+			}
+			if called != tc.wantNext {
+				t.Fatalf("nextCalled=%v want %v", called, tc.wantNext)
+			}
+		})
+	}
+}
+
 func TestRejectAPIKey(t *testing.T) {
 	t.Parallel()
 

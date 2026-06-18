@@ -31,6 +31,23 @@ func (h *Handler) Register(r chi.Router) {
 	r.Delete("/scenarios/{scenarioID}/steps/{stepID}", h.deleteStep)
 }
 
+// RegisterAPIKeyRead 挂载 API Key 场景只读路由（需 scenarios:read 作用域组守卫）。
+func (h *Handler) RegisterAPIKeyRead(r chi.Router) {
+	r.Get("/scenarios", h.list)
+	r.Get("/scenarios/{scenarioID}", h.get)
+	r.Get("/scenarios/{scenarioID}/steps", h.listSteps)
+}
+
+// RegisterAPIKeyWrite 挂载 API Key 场景写入路由（需 scenarios:write 作用域组守卫）。
+func (h *Handler) RegisterAPIKeyWrite(r chi.Router) {
+	r.Post("/scenarios", h.create)
+	r.Put("/scenarios/{scenarioID}", h.update)
+	r.Delete("/scenarios/{scenarioID}", h.delete)
+	r.Put("/scenarios/{scenarioID}/steps/reorder", h.reorderSteps)
+	r.Put("/scenarios/{scenarioID}/steps/{stepOrder}", h.upsertStep)
+	r.Delete("/scenarios/{scenarioID}/steps/{stepID}", h.deleteStep)
+}
+
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	filter := ListFilter{}
 	if projectID := r.URL.Query().Get("projectId"); projectID != "" {

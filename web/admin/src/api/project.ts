@@ -2,7 +2,7 @@
  * 项目、服务、环境相关 API
  */
 import request, { asList } from './request'
-import type { Project, Service, Environment } from '@/types/api'
+import type { Project, Service, Environment, McpIntegrationGuide } from '@/types/api'
 
 // 项目
 export const listProjects = (): Promise<Project[]> =>
@@ -39,6 +39,19 @@ export const updateService = (projectId: string, serviceId: string, data: Record
 
 export const deleteService = (projectId: string, serviceId: string) =>
   request.delete(`/projects/${projectId}/services/${serviceId}`)
+
+export const fetchServiceMcpIntegration = (
+  projectId: string,
+  serviceId: string,
+  options?: { environmentId?: string; ensureApiKey?: boolean; regenerate?: boolean }
+): Promise<McpIntegrationGuide> =>
+  request.get(`/projects/${projectId}/services/${serviceId}/mcp-integration`, {
+    params: {
+      ...(options?.environmentId ? { environmentId: options.environmentId } : {}),
+      ...(options?.ensureApiKey === false ? { ensureApiKey: '0' } : { ensureApiKey: '1' }),
+      ...(options?.regenerate ? { regenerate: '1' } : {})
+    }
+  })
 
 // 环境（服务级）
 export const listServiceEnvironments = (projectId: string, serviceId: string): Promise<Environment[]> =>

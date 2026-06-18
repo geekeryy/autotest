@@ -57,18 +57,30 @@ make all-in-one-up
 
 完整变量清单、加载顺序、Docker Compose 与部署方式见 [docs/design/architecture.md](docs/design/architecture.md)。需求与文档索引见 [docs/requirements.md](docs/requirements.md)。
 
-## MCP（Swagger 导入）
+## MCP（测试自动化）
 
-可通过 MCP 将 OpenAPI/Swagger 导入平台（供 Cursor 等客户端调用）：
+可通过 MCP 完成 Swagger 导入、用例/场景编排、执行与结果查询（供 Cursor 等客户端调用）。在管理后台创建 API Key 并勾选所需 scope（如 `specs:import`、`cases:read`、`scenarios:write`、`runs:execute`）。
+
+**与 API 同进程（推荐）**：在 `.env` 中设置 `MCP_HTTP_ENABLED=true` 后 `make run-api`，端点默认为 `http://localhost:8080/mcp`；客户端在请求头携带 `Authorization: Bearer at-...`。
+
+```bash
+# .env
+MCP_HTTP_ENABLED=true
+AUTOTEST_PROJECT_ID=<project-uuid>
+AUTOTEST_SERVICE_ID=<service-uuid>
+AUTOTEST_ENVIRONMENT_ID=<environment-uuid>
+make run-api
+```
+
+**独立 stdio 进程**（可选）：
 
 ```bash
 export AUTOTEST_API_KEY=at-your-key
 export AUTOTEST_PROJECT_ID=<project-uuid>
-export AUTOTEST_SERVICE_ID=<service-uuid>
 make run-mcp
 ```
 
-配置示例见 [.cursor/mcp.json.example](.cursor/mcp.json.example)，设计说明见 [docs/design/mcp-swagger-import.md](docs/design/mcp-swagger-import.md)。
+配置示例见 [.cursor/mcp.json.example](.cursor/mcp.json.example)，设计说明见 [docs/design/mcp-automation.md](docs/design/mcp-automation.md)。
 
 ## TODO
 

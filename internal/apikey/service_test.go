@@ -232,6 +232,7 @@ func TestNormalizeScopes(t *testing.T) {
 		{name: "single allowed", input: []string{"specs:import"}, want: []string{ScopeSpecsImport}},
 		{name: "duplicates dedup", input: []string{"specs:import", "specs:import"}, want: []string{ScopeSpecsImport}},
 		{name: "whitespace trimmed", input: []string{"  specs:import  "}, want: []string{ScopeSpecsImport}},
+		{name: "multiple allowed scopes", input: []string{"runs:execute", "cases:read", "specs:import"}, want: []string{ScopeRunsExecute, ScopeCasesRead, ScopeSpecsImport}},
 		{name: "forbidden scope rejected", input: []string{"cases:run"}, wantErr: ErrScopeForbidden},
 	}
 	for _, tc := range cases {

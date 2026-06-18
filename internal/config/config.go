@@ -42,6 +42,16 @@ const (
 	EnvProduction  Environment = "production"
 )
 
+// MCPHTTP configures the Streamable HTTP MCP endpoint served by cmd/api (方案 A).
+type MCPHTTP struct {
+	Enabled       bool
+	Path          string
+	APIBaseURL    string
+	ProjectID     string
+	ServiceID     string
+	EnvironmentID string
+}
+
 // Config is the process-wide application configuration loaded once at startup.
 type Config struct {
 	Env                Environment
@@ -51,6 +61,7 @@ type Config struct {
 	CORSAllowedOrigins []string
 	LogLevel           string
 	LogFormat          string
+	MCPHTTP            MCPHTTP
 }
 
 // Load reads configuration from the environment (and .env in non-production).
@@ -63,14 +74,16 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
+	addr := envOr("ADDR", ":8080")
 	cfg := Config{
 		Env:                env,
-		Addr:               envOr("ADDR", ":8080"),
+		Addr:               addr,
 		DatabaseURL:        BuildDatabaseURL(db),
 		JWTSecret:          envOr("JWT_SECRET", defaultDevJWTSecret),
 		CORSAllowedOrigins: loadCORSAllowedOrigins(env),
 		LogLevel:           defaultLogLevel(env),
 		LogFormat:          defaultLogFormat(env),
+		MCPHTTP:            loadMCPHTTP(),
 	}
 
 	if v := strings.TrimSpace(os.Getenv("LOG_LEVEL")); v != "" {
@@ -258,7 +271,32 @@ func (c Config) AuthSettings() AuthSettings {
 	}
 }
 
+func loadMCPHTTP() MCPHTTP {
+	path := envOr("MCP_HTTP_PATH", "/mcp")
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+	return MCPHTTP{
+		Enabled:       parseBoolEnv("MCP_HTTP_ENABLED"),
+		Path:          path,
+		APIBaseURL:    strings.TrimRight(strings.TrimSpace(os.Getenv("MCP_HTTP_API_BASE_URL")), "/"),
+		ProjectID:     strings.TrimSpace(os.Getenv("AUTOTEST_PROJECT_ID")),
+		ServiceID:     strings.TrimSpace(os.Getenv("AUTOTEST_SERVICE_ID")),
+		EnvironmentID: strings.TrimSpace(os.Getenv("AUTOTEST_ENVIRONMENT_ID")),
+	}
+}
+
+func parseBoolEnv(key string) bool {
+	v := strings.TrimSpace(strings.ToLower(os.Getenv(key)))
+	switch v {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
 func (c Config) String() string {
-	return fmt.Sprintf("env=%s addr=%s log_level=%s log_format=%s cors_env_origins=%d",
-		c.Env, c.Addr, c.LogLevel, c.LogFormat, len(c.CORSAllowedOrigins))
+	return fmt.Sprintf("env=%s addr=%s log_level=%s log_format=%s cors_env_origins=%d mcp_http=%v",
+		c.Env, c.Addr, c.LogLevel, c.LogFormat, len(c.CORSAllowedOrigins), c.MCPHTTP.Enabled)
 }

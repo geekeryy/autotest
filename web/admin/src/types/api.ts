@@ -31,9 +31,33 @@ export interface Service {
   projectId: string
   name: string
   description?: string
+  mcpEnabled?: boolean
   baseURL?: string
   createdAt: string
   updatedAt: string
+}
+
+/** 服务 MCP 接入说明（GET .../services/{id}/mcp-integration） */
+export interface McpIntegrationGuide {
+  serviceMcpEnabled: boolean
+  serverMcpHttpEnabled: boolean
+  mcpHttpPath: string
+  mcpHttpURL: string
+  apiBaseUrl: string
+  projectId: string
+  serviceId: string
+  defaultEnvironmentId?: string
+  environments: { id: string; name: string }[]
+  requiredScopes: string[]
+  cursorHttp: Record<string, unknown> | string
+  cursorStdio: Record<string, unknown> | string
+  cursorInstallHttpLink?: string
+  cursorInstallStdioLink?: string
+  cursorServerName?: string
+  apiKeyToken?: string
+  apiKeyMask?: string
+  apiKeyId?: string
+  serverEnvHint: string
 }
 
 /** 环境认证 Profile */

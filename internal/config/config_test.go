@@ -46,6 +46,17 @@ func TestValidateProductionAcceptsStrongSecrets(t *testing.T) {
 	}
 }
 
+func TestParseBoolEnv(t *testing.T) {
+	t.Setenv("MCP_HTTP_ENABLED", "true")
+	if !parseBoolEnv("MCP_HTTP_ENABLED") {
+		t.Fatal("expected true")
+	}
+	t.Setenv("MCP_HTTP_ENABLED", "off")
+	if parseBoolEnv("MCP_HTTP_ENABLED") {
+		t.Fatal("expected false")
+	}
+}
+
 func TestEnableDevCORS(t *testing.T) {
 	t.Parallel()
 

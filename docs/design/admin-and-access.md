@@ -91,8 +91,9 @@
 - 明文仅展示一次，库内仅存 SHA-256 哈希与前后缀掩码。
 - 令牌通过 `Authorization: Bearer at-...` 调用平台 API。
 - 校验通过后以该 Key 所属用户权限快照执行请求。
-- 当前阶段仅允许 API Key 调用 OpenAPI/Swagger 导入接口（scope=`specs:import`）。
-- 其余接口对 API Key 来源拒绝调用，当前错误语义为「当前接口不支持 API Key 调用」。
+- API Key 支持可分配作用域：`specs:import`、`cases:read`、`cases:write`、`scenarios:read`、`scenarios:write`、`runs:read`、`runs:execute`；创建时多选，创建后不可改 scope。
+- 默认新建 Key 仅含 `specs:import`；MCP 与 CI 按 scope 调用对应 HTTP 白名单（见 [mcp-automation.md](mcp-automation.md)）。
+- 未在白名单内的接口对 API Key 返回 403（主路由组 `RejectAPIKey` 为「当前接口不支持 API Key 调用」）。
 - 支持禁用、过期、最近使用时间审计和 rotate。
 
 ## 审计日志

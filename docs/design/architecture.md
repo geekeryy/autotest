@@ -177,6 +177,12 @@ CORS 由 `auth.CORSMiddleware` 统一处理（`cmd/api/main.go`）：
 | `CORS_ALLOWED_ORIGINS` | 生产部署必填 | 空 | 逗号分隔的前端 Origin，作为浏览器跨域 API 的 CORS 白名单（与登录方式「可信前端域名」无关） |
 | `LOG_LEVEL` | 否 | 按环境 | debug / info / warn / error |
 | `LOG_FORMAT` | 否 | 按环境 | text / json |
+| `MCP_HTTP_ENABLED` | 否 | 关 | `true`/`on` 时 API 进程暴露 Streamable HTTP MCP（默认路径 `/mcp`），详见 [mcp-automation.md](mcp-automation.md) |
+| `MCP_HTTP_PATH` | 否 | `/mcp` | MCP HTTP 端点路径 |
+| `MCP_HTTP_API_BASE_URL` | 否 | 按 `ADDR` 推导 | MCP 工具回环调用 REST 的 base URL |
+| `AUTOTEST_PROJECT_ID` | 否 | 空 | MCP 工具默认项目（与 `cmd/mcp` 共用） |
+| `AUTOTEST_SERVICE_ID` | 否 | 空 | MCP 工具默认服务 |
+| `AUTOTEST_ENVIRONMENT_ID` | 否 | 空 | MCP `run_case` / `run_scenario` 默认环境 |
 | `AI_SCENARIO_AUTORUN` | 否 | off | **已推荐在后台「AI 能力管理 → AI 助理配置」维护**；设为 `on`/`1`/`true` 时作为未入库默认值启用场景真实环境验证 |
 | `AI_MAX_TOOL_HOPS` | 否 | 6 | 未入库时默认工具调用轮次上限 |
 | `AI_SCENARIO_GEN_MAX_ROUNDS` | 否 | 3 | 未入库时 genagent 默认最大轮次 |

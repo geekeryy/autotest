@@ -91,3 +91,26 @@ func TestLoadConfigFromEnvRequiresKey(t *testing.T) {
 		t.Fatal("expected error")
 	}
 }
+
+func TestAPIClientListCases(t *testing.T) {
+	t.Parallel()
+
+	projectID := uuid.New()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/cases" {
+			t.Fatalf("path: %s", r.URL.Path)
+		}
+		if r.URL.Query().Get("projectId") != projectID.String() {
+			t.Fatalf("projectId query missing")
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	defer srv.Close()
+
+	client := NewAPIClient(Config{APIBaseURL: srv.URL + "/api/v1", APIKey: "at-test"})
+	_, err := client.ListCases(context.Background(), projectID, uuid.Nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+}

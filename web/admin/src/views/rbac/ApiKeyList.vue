@@ -6,8 +6,8 @@
     </div>
 
     <p class="page-hint">
-      API Key 归属<strong>当前登录用户</strong>：列表与编辑、重置、删除仅针对您本人创建的 Key，调用时平台以该用户权限校验（scope =
-      <code>specs:import</code>）。使用方式：<code>Authorization: Bearer at-...</code>；当前阶段仅允许 OpenAPI/Swagger 导入接口，其余接口拒绝。
+      API Key 归属<strong>当前登录用户</strong>：列表与编辑、重置、删除仅针对您本人创建的 Key；调用时以该用户项目成员权限执行，并按下方
+      <strong>作用域（scope）</strong> 限制可调用的 API 与 MCP 工具。使用方式：<code>Authorization: Bearer at-...</code>。未在白名单内的接口对 API Key 返回 403。
     </p>
 
     <el-card shadow="never" class="example-card">
@@ -128,6 +128,19 @@
         <el-form-item v-if="editing" label="启用">
           <el-switch v-model="form.enabled" />
         </el-form-item>
+        <el-form-item v-if="!editing" label="作用域">
+          <el-checkbox-group v-model="form.scopes">
+            <el-checkbox v-for="opt in scopeOptions" :key="opt.value" :value="opt.value">
+              <span>{{ opt.label }}</span>
+              <span class="scope-code">{{ opt.value }}</span>
+            </el-checkbox>
+          </el-checkbox-group>
+          <p class="scope-hint">至少选择一项；仅含 <code>specs:import</code> 时只能导入文档；编排与执行需勾选对应用例/场景/运行作用域。</p>
+        </el-form-item>
+        <el-form-item v-else label="作用域">
+          <el-tag v-for="scope in editing.scopes || []" :key="scope" size="small" type="info">{{ scope }}</el-tag>
+          <p class="scope-hint muted">作用域创建后不可修改，如需调整请新建 Key。</p>
+        </el-form-item>
         <el-form-item label="过期时间">
           <el-date-picker
             v-model="form.expiresAt"
@@ -197,7 +210,16 @@ export default {
       exampleServices: [],
       exampleProjectId: '',
       exampleServiceId: '',
-      exampleFormat: 'json'
+      exampleFormat: 'json',
+      scopeOptions: [
+        { value: 'specs:import', label: 'OpenAPI/Swagger 导入' },
+        { value: 'cases:read', label: '用例与端点只读' },
+        { value: 'cases:write', label: '用例写入' },
+        { value: 'scenarios:read', label: '场景只读' },
+        { value: 'scenarios:write', label: '场景写入' },
+        { value: 'runs:read', label: '运行记录只读' },
+        { value: 'runs:execute', label: '执行用例/场景' }
+      ]
     }
   },
   created() {
@@ -222,7 +244,7 @@ export default {
   methods: {
     formatDateTime,
     emptyForm() {
-      return { name: '', enabled: true, expiresAt: null }
+      return { name: '', enabled: true, expiresAt: null, scopes: ['specs:import'] }
     },
     async load() {
       this.loading = true
@@ -273,8 +295,13 @@ export default {
           this.dialogVisible = false
           await this.load()
         } else {
+          if (!this.form.scopes || !this.form.scopes.length) {
+            ElMessage.warning('请至少选择一个作用域')
+            return
+          }
           const created = await createApiKey({
             name: this.form.name.trim(),
+            scopes: this.form.scopes.slice(),
             expiresAt: this.form.expiresAt || null
           })
           this.dialogVisible = false
@@ -477,6 +504,33 @@ export default {
 
 .muted {
   color: var(--el-text-color-placeholder);
+}
+
+.scope-hint {
+  margin: 8px 0 0;
+  font-size: var(--app-font-size-small);
+  color: var(--app-secondary-text);
+  line-height: 1.5;
+}
+
+.scope-hint code {
+  background: var(--el-fill-color-light);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 12px;
+}
+
+.scope-code {
+  margin-left: 6px;
+  font-family: var(--el-font-family-monospace, ui-monospace, monospace);
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+:deep(.el-checkbox) {
+  display: flex;
+  margin-right: 0;
+  margin-bottom: 6px;
 }
 
 .el-tag {

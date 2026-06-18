@@ -106,6 +106,16 @@ func (s *ServiceLayer) ListServices(ctx context.Context, projectID uuid.UUID) ([
 	return s.repo.ListServices(ctx, projectID)
 }
 
+func (s *ServiceLayer) GetService(ctx context.Context, projectID, serviceID uuid.UUID) (*Service, error) {
+	if projectID == uuid.Nil {
+		return nil, errors.New("projectId is required")
+	}
+	if serviceID == uuid.Nil {
+		return nil, errors.New("serviceId is required")
+	}
+	return s.repo.GetService(ctx, projectID, serviceID)
+}
+
 func (s *ServiceLayer) CreateEnvironment(ctx context.Context, projectID uuid.UUID, input CreateEnvironmentInput) (*Environment, error) {
 	if input.Name == "" {
 		return nil, errors.New("environment name is required")

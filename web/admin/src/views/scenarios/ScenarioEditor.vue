@@ -4087,6 +4087,25 @@ export default {
       return cfg
     },
 
+    conditionBranchKey(branch) {
+      const left = (branch?.left || '').trim()
+      const operator = branch?.operator || 'equals'
+      const right = (branch?.right || '').trim()
+      return `${left}\0${operator}\0${right}`
+    },
+
+    // 按 predicate 合并服务端已有 stepSeqs，避免删除/重排分支后按下标错绑子步骤。
+    mergeConditionBranchStepSeqs(formBranch, persistedBranches) {
+      const formSeqs = this.normalizeStepSeqSelection(formBranch?.stepSeqs)
+      const key = this.conditionBranchKey(formBranch)
+      for (const br of persistedBranches || []) {
+        if (this.conditionBranchKey(br) === key) {
+          return this.normalizeStepSeqSelection([...(br.stepSeqs || []), ...formSeqs])
+        }
+      }
+      return formSeqs
+    },
+
     buildConditionStepConfig() {
       let persistedNorm = null
       if (this.editingStep?.id) {
@@ -4095,18 +4114,12 @@ export default {
           persistedNorm = this.normalizeConditionConfig(this.parseMaybeJSON(row.config))
         }
       }
-      const branches = (this.stepForm.conditionBranches || []).map((b, i) => {
-        const formSeqs = this.normalizeStepSeqSelection(b.stepSeqs)
-        const diskSeqs = persistedNorm?.branches?.[i]
-          ? this.normalizeStepSeqSelection(persistedNorm.branches[i].stepSeqs)
-          : []
-        return {
-          left: (b.left || '').trim(),
-          operator: b.operator || 'equals',
-          right: (b.right || '').trim(),
-          stepSeqs: this.normalizeStepSeqSelection([...diskSeqs, ...formSeqs])
-        }
-      })
+      const branches = (this.stepForm.conditionBranches || []).map((b) => ({
+        left: (b.left || '').trim(),
+        operator: b.operator || 'equals',
+        right: (b.right || '').trim(),
+        stepSeqs: this.mergeConditionBranchStepSeqs(b, persistedNorm?.branches)
+      }))
       if (!branches.length) {
         throw new Error('至少保留一个条件分支')
       }
@@ -4449,6 +4462,9 @@ export default {
       })
       const pidx = this.steps.findIndex((s) => s.id === updatedParent.id)
       if (pidx !== -1) this.steps.splice(pidx, 1, updatedParent)
+      if (this.editingStep?.id === updatedParent.id) {
+        this.applyStepConfigEditor(updatedParent.config)
+      }
     },
 
     async runStepRequest() {

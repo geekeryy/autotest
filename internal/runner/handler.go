@@ -36,6 +36,19 @@ func (h *Handler) Register(r chi.Router) {
 	r.Get("/runs/{runID}/export", h.exportScenarioRun)
 }
 
+// RegisterAPIKeyRead 挂载 API Key 运行记录只读路由（需 runs:read 作用域组守卫）。
+func (h *Handler) RegisterAPIKeyRead(r chi.Router) {
+	r.Get("/projects/{projectID}/runs", h.listProjectRuns)
+	r.Get("/scenarios/{scenarioID}/runs", h.listScenarioRuns)
+	r.Get("/runs/{runID}/result", h.getRunResult)
+}
+
+// RegisterAPIKeyExecute 挂载 API Key 执行路由（需 runs:execute 作用域组守卫）。
+func (h *Handler) RegisterAPIKeyExecute(r chi.Router) {
+	r.Post("/cases/{caseID}/run", h.runCase)
+	r.Post("/scenarios/{scenarioID}/run", h.runScenario)
+}
+
 func (h *Handler) getRunResult(w http.ResponseWriter, r *http.Request) {
 	runID, err := uuid.Parse(chi.URLParam(r, "runID"))
 	if err != nil {

@@ -6,7 +6,7 @@
 
 | Service | Command | Port | Notes |
 |---------|---------|------|-------|
-| Go API | `make run-api` | 8080 | Reads `.env` automatically in development mode |
+| Go API | `make run-api` | 8080 | Reads `.env` automatically in development mode; set `MCP_HTTP_ENABLED=true` to expose MCP at `/mcp` |
 | Vue frontend (dev) | `make web-dev` | 5173 | Vite proxies `/api` → `localhost:8080` |
 | PostgreSQL | system service | 5432 | Must be running before API starts |
 

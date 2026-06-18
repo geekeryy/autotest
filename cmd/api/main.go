@@ -31,6 +31,7 @@ import (
 	"autotest/internal/httpx"
 	"autotest/internal/logx"
 	"autotest/internal/mockrecord"
+	"autotest/internal/mcp"
 	"autotest/internal/mockserver"
 	"autotest/internal/mockset"
 	"autotest/internal/notification"
@@ -213,7 +214,7 @@ func main() {
 	r.Use(middleware.RealIP)
 	r.Use(logx.RequestLogger)
 	r.Use(middleware.Recoverer)
-	r.Use(timeoutExceptStream(60 * time.Second))
+	r.Use(timeoutExceptStream(60*time.Second, cfg.MCPHTTP.Path))
 	if cfg.EnableCORS() {
 		r.Use(auth.CORSMiddleware(cfg.CORSAllowedOrigins, cfg.EnableDevCORS()))
 		if !cfg.EnableDevCORS() && len(cfg.CORSAllowedOrigins) == 0 {
@@ -227,8 +228,13 @@ func main() {
 
 	api := chi.NewRouter()
 	authHandler := auth.NewHandler(authSvc)
-	projectHandler := project.NewHandler(projectSvc)
+	projectHandler := project.NewHandler(projectSvc).
+		WithMCPRuntime(cfg.MCPHTTP, cfg.Addr).
+		WithAPIKeys(apiKeySvc)
 	specHandler := spec.NewHandler(specSvc, notificationSvc)
+	caseHandler := testcase.NewHandler(caseSvc)
+	scenarioHandler := scenario.NewHandler(scenarioSvc)
+	runnerHandler := runner.NewHandler(runSvc, scenarioRepo, projectSvc)
 	authHandler.RegisterPublic(api)
 
 	authSvc.WithPendingUserNotifier(func(ctx context.Context, user *auth.User) error {
@@ -254,9 +260,9 @@ func main() {
 		authHandler.RegisterProtected(r)
 		authprovider.NewHandler(authProviderSvc, authSvc.RequirePermission(auth.PermissionUsersManage)).Register(r)
 		projectHandler.Register(r)
-		testcase.NewHandler(caseSvc).Register(r)
+		caseHandler.Register(r)
 		specHandler.Register(r)
-		scenario.NewHandler(scenarioSvc).Register(r)
+		scenarioHandler.Register(r)
 
 		// 智能断言推断引擎 HTTP 处理器（engine 已在外层初始化，与 genAgent 共享）
 		aiassert.NewHandler(aiassert.NewInferService(aiAssertEngine, &aiAssertCasePatcher{svc: caseSvc})).Register(r)
@@ -329,7 +335,7 @@ func main() {
 		aisession.NewHandler(aiSessionSvc, projectHandler).Register(r)
 
 		testdata.NewHandler(testDataSvc, projectHandler).Register(r)
-		runner.NewHandler(runSvc, scenarioRepo, projectSvc).Register(r)
+		runnerHandler.Register(r)
 		apikey.NewHandler(apiKeySvc, authSvc.RequirePermission).Register(r)
 		notification.NewHandler(notificationSvc).Register(r)
 		auditlog.NewHandler(auditLogSvc).Register(r.Group(func(r chi.Router) {
@@ -352,17 +358,78 @@ func main() {
 		evalagent.NewHandler(evalAgentEvaluator, evalAgentRepo).Register(r)
 	})
 
-	// API Key 白名单组：当前仅 OpenAPI/Swagger 导入接口允许 API Key 调用，
-	// 通过 AllowAPIKeyScope("specs:import") 校验 scope；JWT 来源不受影响。
-	api.Group(func(r chi.Router) {
+	apiKeyBase := func(r chi.Router) {
 		r.Use(authSvc.Authenticate)
 		r.Use(authSvc.RequireActiveUser())
 		r.Use(authSvc.RequirePasswordChanged())
+	}
+
+	// API Key：OpenAPI/Swagger 导入（specs:import）
+	api.Group(func(r chi.Router) {
+		apiKeyBase(r)
 		r.Use(authSvc.AllowAPIKeyScope(apikey.ScopeSpecsImport))
 		specHandler.RegisterImport(r)
 	})
 
+	// API Key：用例 / spec 端点只读 + 项目元数据（cases:read 或 specs:import 可读 spec）
+	api.Group(func(r chi.Router) {
+		apiKeyBase(r)
+		r.Use(authSvc.AllowAPIKeyAnyScope(apikey.ScopeCasesRead, apikey.ScopeSpecsImport))
+		caseHandler.RegisterAPIKeyRead(r)
+		specHandler.RegisterAPIKeyRead(r)
+		projectHandler.RegisterAPIKeyRead(r)
+	})
+
+	// API Key：用例写入（cases:write）
+	api.Group(func(r chi.Router) {
+		apiKeyBase(r)
+		r.Use(authSvc.AllowAPIKeyScope(apikey.ScopeCasesWrite))
+		caseHandler.RegisterAPIKeyWrite(r)
+	})
+
+	// API Key：场景只读（scenarios:read）
+	api.Group(func(r chi.Router) {
+		apiKeyBase(r)
+		r.Use(authSvc.AllowAPIKeyScope(apikey.ScopeScenariosRead))
+		scenarioHandler.RegisterAPIKeyRead(r)
+	})
+
+	// API Key：场景写入（scenarios:write）
+	api.Group(func(r chi.Router) {
+		apiKeyBase(r)
+		r.Use(authSvc.AllowAPIKeyScope(apikey.ScopeScenariosWrite))
+		scenarioHandler.RegisterAPIKeyWrite(r)
+	})
+
+	// API Key：运行记录只读（runs:read）
+	api.Group(func(r chi.Router) {
+		apiKeyBase(r)
+		r.Use(authSvc.AllowAPIKeyScope(apikey.ScopeRunsRead))
+		runnerHandler.RegisterAPIKeyRead(r)
+	})
+
+	// API Key：执行用例 / 场景（runs:execute）
+	api.Group(func(r chi.Router) {
+		apiKeyBase(r)
+		r.Use(authSvc.AllowAPIKeyScope(apikey.ScopeRunsExecute))
+		runnerHandler.RegisterAPIKeyExecute(r)
+	})
+
 	r.Mount("/api/v1", api)
+	if cfg.MCPHTTP.Enabled {
+		mcpBase := cfg.MCPHTTP.APIBaseURL
+		if mcpBase == "" {
+			mcpBase = mcp.LoopbackAPIBaseURL(cfg.Addr)
+		}
+		mcpDefaults := mcp.Config{
+			APIBaseURL:    mcpBase,
+			ProjectID:     cfg.MCPHTTP.ProjectID,
+			ServiceID:     cfg.MCPHTTP.ServiceID,
+			EnvironmentID: cfg.MCPHTTP.EnvironmentID,
+		}
+		r.Handle(cfg.MCPHTTP.Path, mcp.NewHTTPHandler(mcpDefaults))
+		logx.Info("mcp http enabled", "path", cfg.MCPHTTP.Path, "api_base", mcpBase)
+	}
 	registerAdminUI(r)
 
 	// Background jobs: skill discovery (daily) and self-evaluation (weekly)
@@ -646,11 +713,11 @@ func (a *routeModeAdapter) EnableReplayMode(ctx context.Context, projectID, serv
 // global 60s timeout would cut every AI assistant stream short, since
 // http.TimeoutHandler buffers the response writer (defeating the
 // purpose of streaming) and force-closes the connection on deadline.
-func timeoutExceptStream(d time.Duration) func(http.Handler) http.Handler {
+func timeoutExceptStream(d time.Duration, mcpHTTPPath string) func(http.Handler) http.Handler {
 	timeout := middleware.Timeout(d)
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if isStreamPath(r.URL.Path) {
+			if isStreamPath(r.URL.Path, mcpHTTPPath) {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -659,9 +726,11 @@ func timeoutExceptStream(d time.Duration) func(http.Handler) http.Handler {
 	}
 }
 
-// isStreamPath identifies SSE endpoints. Keep this list narrow: the
-// timeout middleware is a real safety net for the rest of the API.
-func isStreamPath(path string) bool {
+// isStreamPath identifies long-lived endpoints (SSE, MCP tool runs). Keep narrow.
+func isStreamPath(path, mcpHTTPPath string) bool {
+	if mcpHTTPPath != "" && path == mcpHTTPPath {
+		return true
+	}
 	if strings.HasSuffix(path, "/chat/stream") {
 		return true
 	}

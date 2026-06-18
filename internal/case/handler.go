@@ -30,6 +30,18 @@ func (h *Handler) Register(r chi.Router) {
 	r.Get("/cases/{caseID}/generate-params", h.generateParams)
 }
 
+// RegisterAPIKeyRead 挂载 API Key 用例只读路由（需 cases:read 作用域组守卫）。
+func (h *Handler) RegisterAPIKeyRead(r chi.Router) {
+	r.Get("/cases", h.list)
+	r.Get("/cases/{caseID}", h.get)
+}
+
+// RegisterAPIKeyWrite 挂载 API Key 用例写入路由（需 cases:write 作用域组守卫）。
+func (h *Handler) RegisterAPIKeyWrite(r chi.Router) {
+	r.Post("/cases", h.createManual)
+	r.Patch("/cases/{caseID}", h.patch)
+}
+
 func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 	caseID, err := uuid.Parse(chi.URLParam(r, "caseID"))
 	if err != nil {

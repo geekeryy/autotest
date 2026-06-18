@@ -7,9 +7,9 @@ import (
 )
 
 const serverName = "autotest"
-const serverVersion = "1.0.0"
+const serverVersion = "1.1.0"
 
-// NewServer builds an MCP server with autotest Swagger/OpenAPI import tools.
+// NewServer builds an MCP server with autotest automation tools (spec import, cases, scenarios, runs).
 func NewServer(cfg Config) *sdkmcp.Server {
 	server := sdkmcp.NewServer(&sdkmcp.Implementation{
 		Name:    serverName,

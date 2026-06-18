@@ -20,7 +20,7 @@
 
 ## 项目、服务与环境
 
-- 项目可包含多个服务，每个服务维护名称与描述。
+- 项目可包含多个服务，每个服务维护名称与描述；可选开启 **MCP 自动化**（`mcpEnabled`），在「服务与环境」编辑页展示 Cursor 接入配置，详见 [mcp-automation.md](mcp-automation.md)。
 - 服务不设置服务级 Base Path；请求由环境 baseURL 与导入的接口路径组合。
 - 每个服务独立维护环境配置列表。
 - 服务环境包含环境名称、baseURL、变量 JSON 与认证 JSON。

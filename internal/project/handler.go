@@ -7,6 +7,8 @@ import (
 	"net/http"
 
 	"autotest/internal/auth"
+	"autotest/internal/apikey"
+	"autotest/internal/config"
 	"autotest/internal/httpx"
 
 	"github.com/go-chi/chi/v5"
@@ -25,23 +27,54 @@ func ProjectRoleFromContext(ctx context.Context) (ProjectRole, bool) {
 }
 
 type Handler struct {
-	service *ServiceLayer
+	service    *ServiceLayer
+	apiKeys    *apikey.Service
+	mcpHTTP    config.MCPHTTP
+	listenAddr string
 }
 
 func NewHandler(service *ServiceLayer) *Handler {
 	return &Handler{service: service}
 }
 
+// WithMCPRuntime supplies process MCP HTTP settings for per-service integration guides.
+func (h *Handler) WithMCPRuntime(httpCfg config.MCPHTTP, listenAddr string) *Handler {
+	h.mcpHTTP = httpCfg
+	h.listenAddr = listenAddr
+	return h
+}
+
+// WithAPIKeys enables auto-provisioning MCP-dedicated API Keys in integration guides.
+func (h *Handler) WithAPIKeys(svc *apikey.Service) *Handler {
+	h.apiKeys = svc
+	return h
+}
+
 func (h *Handler) Register(r chi.Router) {
 	r.Get("/projects", h.listProjects)
 	r.Post("/projects", h.createProject)
+	h.registerProjectRoutes(r)
+}
 
+// RegisterAPIKeyRead 挂载 API Key 项目元数据只读路由（服务列表、环境列表），需 cases:read 作用域组守卫。
+// 使用扁平路径，避免与 Register 中 /projects/{projectID} 子路由重复 Mount 导致 chi panic。
+func (h *Handler) RegisterAPIKeyRead(r chi.Router) {
+	r.Group(func(r chi.Router) {
+		r.Use(h.RequireProjectRole(ProjectRoleViewer))
+		r.Get("/projects/{projectID}/services", h.listServices)
+		r.Get("/projects/{projectID}/services/{serviceID}/environments", h.listServiceEnvironments)
+		r.Get("/projects/{projectID}/environments", h.listEnvironments)
+	})
+}
+
+func (h *Handler) registerProjectRoutes(r chi.Router) {
 	r.Route("/projects/{projectID}", func(r chi.Router) {
 		r.Use(h.RequireProjectRole(ProjectRoleViewer))
 
 		// viewer+ read routes
 		r.Get("/services", h.listServices)
 		r.Get("/services/{serviceID}/environments", h.listServiceEnvironments)
+		r.Get("/services/{serviceID}/mcp-integration", h.getServiceMcpIntegration)
 		r.Get("/environments", h.listEnvironments)
 		r.Get("/members", h.listMembers)
 

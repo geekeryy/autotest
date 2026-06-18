@@ -1,5 +1,7 @@
 # MCP Swagger 导入
 
+> **完整 MCP 能力**（用例/场景/运行/模板说明）见 **[mcp-automation.md](mcp-automation.md)**。本文保留 Swagger 导入专项说明。
+
 本文档说明如何通过 [Model Context Protocol](https://modelcontextprotocol.io)（MCP）将 OpenAPI/Swagger 文档导入 autotest，供 Cursor、Claude Desktop 等 AI 客户端调用。
 
 ## 能力范围
@@ -16,7 +18,7 @@
 
 | 变量 | 必填 | 说明 |
 |------|------|------|
-| `AUTOTEST_API_KEY` | 是 | API Key 明文（`at-` 前缀），在管理后台「用户管理 → API Key」创建 |
+| `AUTOTEST_API_KEY` | 是 | API Key 明文（`at-` 前缀），在管理后台「系统管理 → API Key」创建并勾选 `specs:import` |
 | `AUTOTEST_API_BASE_URL` | 否 | API 根路径，默认 `http://localhost:8080/api/v1` |
 | `AUTOTEST_PROJECT_ID` | 否 | 默认项目 UUID；工具参数可覆盖 |
 | `AUTOTEST_SERVICE_ID` | 否 | 默认服务 UUID；工具参数可覆盖 |

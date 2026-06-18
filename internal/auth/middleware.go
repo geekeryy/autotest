@@ -109,6 +109,11 @@ func (s *Service) RequirePermission(code string) func(http.Handler) http.Handler
 // AllowAPIKeyScope 默认放行 JWT；当 Principal 来自 API Key 时，
 // 必须具备指定 scope 才允许通过。用于挂在白名单接口（如 OpenAPI 导入）上。
 func (s *Service) AllowAPIKeyScope(scope string) func(http.Handler) http.Handler {
+	return s.AllowAPIKeyAnyScope(scope)
+}
+
+// AllowAPIKeyAnyScope 默认放行 JWT；API Key 来源须具备 scopes 中的任意一个。
+func (s *Service) AllowAPIKeyAnyScope(scopes ...string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			principal := PrincipalFromContext(r.Context())
@@ -117,14 +122,23 @@ func (s *Service) AllowAPIKeyScope(scope string) func(http.Handler) http.Handler
 				return
 			}
 			if principal.Source == SourceAPIKey {
-				if _, ok := principal.Scopes[scope]; !ok {
-					httpx.Error(w, http.StatusForbidden, fmt.Errorf("API Key 缺少 %s 作用域", scope))
+				if !apiKeyHasAnyScope(principal, scopes) {
+					httpx.Error(w, http.StatusForbidden, fmt.Errorf("API Key 缺少所需作用域（需要其一: %s）", strings.Join(scopes, ", ")))
 					return
 				}
 			}
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+func apiKeyHasAnyScope(principal *Principal, scopes []string) bool {
+	for _, scope := range scopes {
+		if _, ok := principal.Scopes[scope]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 // RejectAPIKey 默认放行 JWT；只要 Principal 来自 API Key 就直接 403。

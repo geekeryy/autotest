@@ -59,7 +59,9 @@ type Service struct {
 	ProjectID   uuid.UUID `json:"projectId"`
 	Name        string    `json:"name"`
 	Description string    `json:"description,omitempty"`
-	CreatedAt   time.Time `json:"createdAt"`
+	McpEnabled   bool       `json:"mcpEnabled"`
+	McpAPIKeyID  *uuid.UUID `json:"mcpApiKeyId,omitempty"`
+	CreatedAt    time.Time  `json:"createdAt"`
 	UpdatedAt   time.Time `json:"updatedAt"`
 }
 
@@ -83,11 +85,13 @@ type CreateProjectInput struct {
 type CreateServiceInput struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
+	McpEnabled  bool   `json:"mcpEnabled"`
 }
 
 type UpdateServiceInput struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
+	McpEnabled  bool   `json:"mcpEnabled"`
 }
 
 type CreateEnvironmentInput struct {

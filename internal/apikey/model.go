@@ -10,16 +10,55 @@ import (
 	"github.com/google/uuid"
 )
 
-// ScopeSpecsImport 是当前 MVP 阶段唯一允许的作用域：调用 OpenAPI/Swagger 导入接口。
-const ScopeSpecsImport = "specs:import"
+// API Key 作用域常量；与 allowedScopes 白名单保持一致。
+const (
+	ScopeSpecsImport    = "specs:import"
+	ScopeCasesRead      = "cases:read"
+	ScopeCasesWrite     = "cases:write"
+	ScopeScenariosRead  = "scenarios:read"
+	ScopeScenariosWrite = "scenarios:write"
+	ScopeRunsRead       = "runs:read"
+	ScopeRunsExecute    = "runs:execute"
+)
 
 // DefaultScopes 是新建 API Key 时的默认作用域集合。
 var DefaultScopes = []string{ScopeSpecsImport}
 
-// allowedScopes 限制可写入的作用域白名单；本期固定只允许 specs:import，
-// 后续扩展（如 cases:run）时在此追加即可。
+// allowedScopes 限制可写入的作用域白名单。
 var allowedScopes = map[string]struct{}{
-	ScopeSpecsImport: {},
+	ScopeSpecsImport:    {},
+	ScopeCasesRead:      {},
+	ScopeCasesWrite:     {},
+	ScopeScenariosRead:  {},
+	ScopeScenariosWrite: {},
+	ScopeRunsRead:       {},
+	ScopeRunsExecute:    {},
+}
+
+// MCPAutomationScopes 是服务 MCP 自动化一键接入时自动授予的作用域集合。
+func MCPAutomationScopes() []string {
+	return []string{
+		ScopeSpecsImport,
+		ScopeCasesRead,
+		ScopeCasesWrite,
+		ScopeScenariosRead,
+		ScopeScenariosWrite,
+		ScopeRunsRead,
+		ScopeRunsExecute,
+	}
+}
+
+// AllScopes 返回所有可分配作用域（稳定排序，供管理端展示）。
+func AllScopes() []string {
+	return []string{
+		ScopeSpecsImport,
+		ScopeCasesRead,
+		ScopeCasesWrite,
+		ScopeScenariosRead,
+		ScopeScenariosWrite,
+		ScopeRunsRead,
+		ScopeRunsExecute,
+	}
 }
 
 // 包内可识别的错误，handler 层据此映射 HTTP 状态码。

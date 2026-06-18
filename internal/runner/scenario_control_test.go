@@ -1,10 +1,15 @@
 package runner
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
+	"autotest/internal/project"
+	"autotest/internal/report"
 	"autotest/internal/scenario"
+
+	"github.com/google/uuid"
 )
 
 func TestEvaluateConditionRendersVariablesAndStepRefs(t *testing.T) {
@@ -219,5 +224,46 @@ func TestCollectControlledStepSeqs(t *testing.T) {
 	}
 	if controlled[1] || controlled[7] {
 		t.Fatalf("control steps themselves should not be marked controlled: %#v", controlled)
+	}
+}
+
+func TestCollectReachableControlSeqsIncludesNestedChildren(t *testing.T) {
+	t.Parallel()
+
+	innerForCfg, _ := json.Marshal(forStepConfig{BodyStepSeqs: []int{3}})
+	outerForCfg, _ := json.Marshal(forStepConfig{BodyStepSeqs: []int{2}})
+	steps := []scenario.Step{
+		{StepSeq: 1, StepType: scenario.StepTypeFor, Config: outerForCfg},
+		{StepSeq: 2, StepType: scenario.StepTypeFor, Config: innerForCfg},
+		{StepSeq: 3, StepType: scenario.StepTypeAPI},
+	}
+	exec := newScenarioExecution(nil, uuid.New(), project.Environment{}, nil, steps, nil)
+	seqs := exec.collectReachableControlSeqs(steps[0], map[int]bool{})
+	if len(seqs) != 2 || seqs[0] != 2 || seqs[1] != 3 {
+		t.Fatalf("unexpected reachable seqs: %#v", seqs)
+	}
+}
+
+func TestRunMarksDisabledControlSubtreeSkipped(t *testing.T) {
+	t.Parallel()
+
+	forCfg, _ := json.Marshal(forStepConfig{BodyStepSeqs: []int{2}})
+	steps := []scenario.Step{
+		{StepSeq: 1, StepOrder: 1, StepType: scenario.StepTypeFor, Enabled: false, Config: forCfg},
+		{StepSeq: 2, StepOrder: 2, StepType: scenario.StepTypeAPI, Enabled: true},
+	}
+	exec := newScenarioExecution(nil, uuid.New(), project.Environment{}, map[string]string{}, steps, nil)
+	if status := exec.run(context.Background()); status != report.RunPassed {
+		t.Fatalf("expected run passed, got %s", status)
+	}
+	found := false
+	for _, sr := range exec.stepResults {
+		if sr.Step.StepSeq == 2 && sr.Output != nil && sr.Output["skipped"] == true {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected skipped child step, results=%#v", exec.stepResults)
 	}
 }

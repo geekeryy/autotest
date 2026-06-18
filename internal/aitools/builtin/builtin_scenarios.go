@@ -20,29 +20,14 @@ import (
 	"strings"
 
 	"autotest/internal/aitools"
+	"autotest/internal/scenariobuild"
 	"autotest/internal/scenario"
 
 	"github.com/google/uuid"
 )
 
-// scenarioStepInput is the AI-facing shape of a single step. We keep it
-// closer to the persistence model so the model has fewer translation
-// rules to remember, with two affordances:
-//
-//   - testCaseId is a string (UUID) so the model can pass null easily.
-//   - Control-flow children are addressed by stepOrder (the integer the
-//     model already used in this same payload). Real `step_seq` values
-//     are only known after insertion, so we accept stepOrder references
-//     in config and rewrite them to step_seq during a second pass.
-type scenarioStepInput struct {
-	StepOrder       int             `json:"stepOrder"`
-	StepType        string          `json:"stepType"`
-	Name            string          `json:"name"`
-	Enabled         *bool           `json:"enabled,omitempty"`
-	TestCaseID      string          `json:"testCaseId,omitempty"`
-	Config          json.RawMessage `json:"config,omitempty"`
-	RequestOverride json.RawMessage `json:"requestOverride,omitempty"`
-}
+// scenarioStepInput 与 scenariobuild.StepInput 同构，供 AI 工具 JSON 反序列化。
+type scenarioStepInput = scenariobuild.StepInput
 
 func listScenariosTool(deps Deps) aitools.Tool {
 	return aitools.Tool{
@@ -176,7 +161,7 @@ func createScenarioWithStepsTool(deps Deps) aitools.Tool {
                         "type": "object",
                         "properties": {
                             "stepOrder": {"type": "integer", "minimum": 1, "description": "1-based 顺序，所有步骤的 stepOrder 必须互不相同；控制流子步骤通过这个字段被引用"},
-                            "stepType":  {"type": "string", "enum": ["api", "script", "for", "condition"]},
+                            "stepType":  {"type": "string", "enum": ["api", "database", "script", "for", "condition"]},
                             "name":      {"type": "string"},
                             "enabled":   {"type": "boolean", "description": "可选，默认 true"},
                             "testCaseId":{"type": "string", "description": "API 步骤必填；其它步骤忽略"},
@@ -215,81 +200,20 @@ func createScenarioWithStepsTool(deps Deps) aitools.Tool {
 			if strings.TrimSpace(p.Name) == "" {
 				return nil, errors.New("create_scenario_with_steps: name 不能为空")
 			}
-			if len(p.Steps) == 0 {
-				return nil, errors.New("create_scenario_with_steps: steps 不能为空，至少包含一个步骤")
-			}
-			if err := validateStepOrders(p.Steps); err != nil {
+			result, err := scenariobuild.CreateScenarioWithSteps(ctx, deps.Scenarios, scenariobuild.CreateInput{
+				ProjectID:   projectID,
+				ServiceID:   serviceID,
+				Name:        p.Name,
+				Description: p.Description,
+				Steps:       p.Steps,
+			})
+			if err != nil {
 				return nil, fmt.Errorf("create_scenario_with_steps: %w", err)
 			}
 
-			sc, err := deps.Scenarios.Create(ctx, scenario.CreateScenarioInput{
-				ProjectID:   projectID,
-				ServiceID:   serviceID,
-				Name:        strings.TrimSpace(p.Name),
-				Description: strings.TrimSpace(p.Description),
-			})
-			if err != nil {
-				return nil, fmt.Errorf("create_scenario_with_steps: 创建场景失败: %w", err)
-			}
-
-			created := make([]scenario.Step, 0, len(p.Steps))
-			orderToSeq := make(map[int]int, len(p.Steps))
-			for i, sIn := range p.Steps {
-				upsert, err := buildUpsertInput(sIn, nil)
-				if err != nil {
-					return nil, fmt.Errorf("create_scenario_with_steps: 第 %d 个步骤参数错误: %w", i+1, err)
-				}
-				step, err := deps.Scenarios.UpsertStep(ctx, sc.ID, upsert)
-				if err != nil {
-					return nil, fmt.Errorf("create_scenario_with_steps: 第 %d 个步骤写入失败（已创建 scenarioId=%s 与 %d 个步骤，可在 UI 中继续编辑）: %w", i+1, sc.ID, len(created), err)
-				}
-				created = append(created, *step)
-				orderToSeq[step.StepOrder] = step.StepSeq
-			}
-
-			// Second pass: control-flow steps that reference children by
-			// stepOrder must be rewritten to use the real step_seq values
-			// the database assigned in pass 1.
-			for i, sIn := range p.Steps {
-				if !needsSeqRewrite(sIn.StepType) {
-					continue
-				}
-				newConfig, rewritten, err := rewriteControlFlowConfig(sIn.StepType, sIn.Config, orderToSeq)
-				if err != nil {
-					return nil, fmt.Errorf("create_scenario_with_steps: 第 %d 个步骤 config 引用解析失败: %w", i+1, err)
-				}
-				if !rewritten {
-					continue
-				}
-				upsert, err := buildUpsertInput(scenarioStepInput{
-					StepOrder:       sIn.StepOrder,
-					StepType:        sIn.StepType,
-					Name:            sIn.Name,
-					Enabled:         sIn.Enabled,
-					TestCaseID:      sIn.TestCaseID,
-					Config:          newConfig,
-					RequestOverride: sIn.RequestOverride,
-				}, nil)
-				if err != nil {
-					return nil, fmt.Errorf("create_scenario_with_steps: 控制流步骤 stepOrder=%d 重写失败: %w", sIn.StepOrder, err)
-				}
-				updated, err := deps.Scenarios.UpsertStep(ctx, sc.ID, upsert)
-				if err != nil {
-					return nil, fmt.Errorf("create_scenario_with_steps: 控制流步骤 stepOrder=%d 写入引用失败: %w", sIn.StepOrder, err)
-				}
-				// Replace the in-memory record so the return payload is
-				// consistent with what the DB now holds.
-				for j := range created {
-					if created[j].StepOrder == updated.StepOrder {
-						created[j] = *updated
-						break
-					}
-				}
-			}
-
 			return map[string]any{
-				"scenario": sc,
-				"steps":    created,
+				"scenario": result.Scenario,
+				"steps":    result.Steps,
 			}, nil
 		},
 	}
@@ -313,7 +237,7 @@ func addScenarioStepTool(deps Deps) aitools.Tool {
             "properties": {
                 "scenarioId": {"type": "string"},
                 "stepOrder":  {"type": "integer", "minimum": 1},
-                "stepType":   {"type": "string", "enum": ["api", "script", "for", "condition"]},
+                "stepType":   {"type": "string", "enum": ["api", "database", "script", "for", "condition"]},
                 "name":       {"type": "string"},
                 "enabled":    {"type": "boolean"},
                 "testCaseId": {"type": "string", "description": "API 步骤必填"},
@@ -347,20 +271,20 @@ func addScenarioStepTool(deps Deps) aitools.Tool {
 			}
 
 			cfg := p.Config
-			if needsSeqRewrite(p.StepType) {
+			if scenariobuild.NeedsSeqRewrite(p.StepType) {
 				existing, err := deps.Scenarios.ListSteps(ctx, scenarioID)
 				if err != nil {
 					return nil, fmt.Errorf("add_scenario_step: 读取场景步骤失败: %w", err)
 				}
-				orderToSeq := buildOrderToSeq(existing)
-				rewritten, _, err := rewriteControlFlowConfig(p.StepType, cfg, orderToSeq)
+				orderToSeq := scenariobuild.BuildOrderToSeq(existing)
+				rewritten, _, err := scenariobuild.RewriteControlFlowConfig(p.StepType, cfg, orderToSeq)
 				if err != nil {
 					return nil, fmt.Errorf("add_scenario_step: 控制流 config 引用解析失败: %w", err)
 				}
 				cfg = rewritten
 			}
 
-			upsert, err := buildUpsertInput(scenarioStepInput{
+			upsert, err := scenariobuild.BuildUpsertInput(scenarioStepInput{
 				StepOrder:       p.StepOrder,
 				StepType:        p.StepType,
 				Name:            p.Name,
@@ -397,7 +321,7 @@ func updateScenarioStepTool(deps Deps) aitools.Tool {
             "properties": {
                 "scenarioId": {"type": "string"},
                 "stepOrder":  {"type": "integer", "minimum": 1},
-                "stepType":   {"type": "string", "enum": ["api", "script", "for", "condition"]},
+                "stepType":   {"type": "string", "enum": ["api", "database", "script", "for", "condition"]},
                 "name":       {"type": "string"},
                 "enabled":    {"type": "boolean"},
                 "testCaseId": {"type": "string"},
@@ -481,17 +405,17 @@ func updateScenarioStepTool(deps Deps) aitools.Tool {
 			if p.TestCaseID != nil {
 				merged.TestCaseID = strings.TrimSpace(*p.TestCaseID)
 			}
-			if p.Config != nil && !isJSONNull(p.Config) {
+			if p.Config != nil && !scenariobuild.IsJSONNull(p.Config) {
 				merged.Config = p.Config
 			}
-			if p.RequestOverride != nil && !isJSONNull(p.RequestOverride) {
+			if p.RequestOverride != nil && !scenariobuild.IsJSONNull(p.RequestOverride) {
 				merged.RequestOverride = p.RequestOverride
 			}
 
 			cfg := merged.Config
-			if needsSeqRewrite(merged.StepType) {
-				orderToSeq := buildOrderToSeq(existing)
-				rewritten, _, err := rewriteControlFlowConfig(merged.StepType, cfg, orderToSeq)
+			if scenariobuild.NeedsSeqRewrite(merged.StepType) {
+				orderToSeq := scenariobuild.BuildOrderToSeq(existing)
+				rewritten, _, err := scenariobuild.RewriteControlFlowConfig(merged.StepType, cfg, orderToSeq)
 				if err != nil {
 					return nil, fmt.Errorf("update_scenario_step: 控制流 config 引用解析失败: %w", err)
 				}
@@ -499,7 +423,7 @@ func updateScenarioStepTool(deps Deps) aitools.Tool {
 			}
 			merged.Config = cfg
 
-			upsert, err := buildUpsertInput(merged, nil)
+			upsert, err := scenariobuild.BuildUpsertInput(merged, nil)
 			if err != nil {
 				return nil, fmt.Errorf("update_scenario_step: 参数错误: %w", err)
 			}
@@ -636,199 +560,4 @@ func reorderScenarioStepsTool(deps Deps) aitools.Tool {
 	}
 }
 
-// ── helpers ────────────────────────────────────────────────────────────
-
-func validateStepOrders(steps []scenarioStepInput) error {
-	seen := map[int]bool{}
-	for i, s := range steps {
-		if s.StepOrder < 1 {
-			return fmt.Errorf("第 %d 个步骤的 stepOrder 必须 >= 1", i+1)
-		}
-		if seen[s.StepOrder] {
-			return fmt.Errorf("stepOrder=%d 在 steps 中重复", s.StepOrder)
-		}
-		seen[s.StepOrder] = true
-	}
-	return nil
-}
-
-func buildOrderToSeq(steps []scenario.Step) map[int]int {
-	out := make(map[int]int, len(steps))
-	for _, s := range steps {
-		out[s.StepOrder] = s.StepSeq
-	}
-	return out
-}
-
-// buildUpsertInput maps the AI-facing step shape onto scenario.UpsertStepInput.
-// orderToSeq is unused here — callers that need control-flow seq rewriting
-// must call rewriteControlFlowConfig first and pass the rewritten config in.
-func buildUpsertInput(in scenarioStepInput, _ map[int]int) (scenario.UpsertStepInput, error) {
-	stepType := scenario.StepType(strings.TrimSpace(in.StepType))
-	if stepType == "" {
-		stepType = scenario.StepTypeAPI
-	}
-	out := scenario.UpsertStepInput{
-		StepOrder: in.StepOrder,
-		StepType:  stepType,
-		Name:      strings.TrimSpace(in.Name),
-		Enabled:   in.Enabled,
-		Config:    in.Config,
-	}
-	if len(in.RequestOverride) > 0 && !isJSONNull(in.RequestOverride) {
-		out.RequestOverride = in.RequestOverride
-	}
-	if stepType == scenario.StepTypeAPI {
-		idStr := strings.TrimSpace(in.TestCaseID)
-		if idStr == "" {
-			return scenario.UpsertStepInput{}, fmt.Errorf("stepOrder=%d 的 API 步骤必须提供 testCaseId", in.StepOrder)
-		}
-		id, err := uuid.Parse(idStr)
-		if err != nil {
-			return scenario.UpsertStepInput{}, fmt.Errorf("stepOrder=%d 的 testCaseId 不是合法 UUID: %w", in.StepOrder, err)
-		}
-		out.TestCaseID = id
-	}
-	return out, nil
-}
-
-func needsSeqRewrite(stepType string) bool {
-	t := strings.TrimSpace(stepType)
-	return t == string(scenario.StepTypeFor) || t == string(scenario.StepTypeCondition)
-}
-
-// rewriteControlFlowConfig translates stepOrder references in a control
-// flow step's config into the corresponding step_seq values. We accept
-// two field-name conventions for AI ergonomics:
-//
-//	for:        bodyStepOrders → bodyStepSeqs
-//	condition:  branches[].stepOrders → branches[].stepSeqs
-//	            thenStepOrders → thenStepSeqs
-//	            elseStepOrders → elseStepSeqs
-//
-// If the model already supplied the *Seqs fields directly we leave them
-// alone. Returns (newConfig, rewritten, err) where rewritten=true means
-// at least one *Orders field was translated.
-func rewriteControlFlowConfig(stepType string, cfg json.RawMessage, orderToSeq map[int]int) (json.RawMessage, bool, error) {
-	if len(cfg) == 0 || isJSONNull(cfg) {
-		return cfg, false, nil
-	}
-	var blob map[string]any
-	if err := json.Unmarshal(cfg, &blob); err != nil {
-		return nil, false, fmt.Errorf("config 必须是 JSON 对象: %w", err)
-	}
-
-	rewritten := false
-
-	tryRewriteSlice := func(orderKey, seqKey string) error {
-		raw, ok := blob[orderKey]
-		if !ok {
-			return nil
-		}
-		arr, err := toIntSlice(raw)
-		if err != nil {
-			return fmt.Errorf("%s 必须是整数数组: %w", orderKey, err)
-		}
-		seqs, err := mapOrdersToSeqs(arr, orderToSeq)
-		if err != nil {
-			return fmt.Errorf("%s: %w", orderKey, err)
-		}
-		blob[seqKey] = seqs
-		delete(blob, orderKey)
-		rewritten = true
-		return nil
-	}
-
-	switch strings.TrimSpace(stepType) {
-	case string(scenario.StepTypeFor):
-		if err := tryRewriteSlice("bodyStepOrders", "bodyStepSeqs"); err != nil {
-			return nil, false, err
-		}
-	case string(scenario.StepTypeCondition):
-		if err := tryRewriteSlice("thenStepOrders", "thenStepSeqs"); err != nil {
-			return nil, false, err
-		}
-		if err := tryRewriteSlice("elseStepOrders", "elseStepSeqs"); err != nil {
-			return nil, false, err
-		}
-		if branchesRaw, ok := blob["branches"]; ok {
-			branchesSlice, ok := branchesRaw.([]any)
-			if !ok {
-				return nil, false, errors.New("branches 必须是数组")
-			}
-			for i, b := range branchesSlice {
-				bm, ok := b.(map[string]any)
-				if !ok {
-					return nil, false, fmt.Errorf("branches[%d] 必须是对象", i)
-				}
-				raw, ok := bm["stepOrders"]
-				if !ok {
-					continue
-				}
-				arr, err := toIntSlice(raw)
-				if err != nil {
-					return nil, false, fmt.Errorf("branches[%d].stepOrders 必须是整数数组: %w", i, err)
-				}
-				seqs, err := mapOrdersToSeqs(arr, orderToSeq)
-				if err != nil {
-					return nil, false, fmt.Errorf("branches[%d].stepOrders: %w", i, err)
-				}
-				bm["stepSeqs"] = seqs
-				delete(bm, "stepOrders")
-				branchesSlice[i] = bm
-				rewritten = true
-			}
-			blob["branches"] = branchesSlice
-		}
-	}
-
-	if !rewritten {
-		return cfg, false, nil
-	}
-	out, err := json.Marshal(blob)
-	if err != nil {
-		return nil, false, fmt.Errorf("重新序列化 config 失败: %w", err)
-	}
-	return out, true, nil
-}
-
-func toIntSlice(v any) ([]int, error) {
-	arr, ok := v.([]any)
-	if !ok {
-		return nil, errors.New("不是数组")
-	}
-	out := make([]int, 0, len(arr))
-	for i, item := range arr {
-		switch n := item.(type) {
-		case float64:
-			if n != float64(int(n)) {
-				return nil, fmt.Errorf("[%d] 必须是整数", i)
-			}
-			out = append(out, int(n))
-		case int:
-			out = append(out, n)
-		default:
-			return nil, fmt.Errorf("[%d] 必须是整数", i)
-		}
-	}
-	return out, nil
-}
-
-func mapOrdersToSeqs(orders []int, orderToSeq map[int]int) ([]int, error) {
-	out := make([]int, 0, len(orders))
-	for _, o := range orders {
-		seq, ok := orderToSeq[o]
-		if !ok {
-			return nil, fmt.Errorf("引用了不存在的 stepOrder=%d", o)
-		}
-		out = append(out, seq)
-	}
-	return out, nil
-}
-
 func boolPtr(b bool) *bool { return &b }
-
-func isJSONNull(b json.RawMessage) bool {
-	trimmed := strings.TrimSpace(string(b))
-	return trimmed == "null"
-}
